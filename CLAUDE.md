@@ -1,6 +1,6 @@
 # Serato web library
 
-Local browser for the Serato DJ Pro library. Python standard library only. There is no package install, test runner, or linter.
+Local browser for the Serato DJ Pro library. Python standard library only. There is no package install or linter. Tests use `unittest`.
 
 ## Run
 
@@ -10,6 +10,14 @@ python3 server.py
 
 Serves `http://127.0.0.1:8765`. The process exits if `~/Library/Application Support/Serato/Library/master.sqlite` is missing. Stop it with Ctrl-C.
 
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -t . -v
+```
+
+The suite builds a temporary database. It does not open the live Serato library.
+
 ## Layout
 
 - `server.py` is a `ThreadingHTTPServer` bound to `127.0.0.1:8765`. GET routes are `/api/library`, `/api/status`, `/api/track`, `/api/history`, `/api/duplicates`, and `/api/export.m3u`. POST routes are `/api/track`, `/api/crate`, `/api/import.m3u`, and `/api/reveal`. Any other path is a file under `static/`.
@@ -18,7 +26,8 @@ Serves `http://127.0.0.1:8765`. The process exits if `~/Library/Application Supp
 - `static/` is `index.html`, `app.js`, and `app.css`. Views are crates, history, missing, duplicates, and stems. Spaces are Serato Library, Serato Video, Apple Music, and Prepare.
 - `docs/serato-library-tools.md` is research notes, not runtime config.
 - `docs/architecture.md` is the code reference. Update it in the same change as the behavior it describes.
-- `.vscode/launch.json` starts `server.py` on F5. There is no project virtualenv.
+- `tests/` is a `unittest` suite. `tests/fixture.py` points `library.MASTER` at a temporary database.
+- `.vscode/launch.json` starts `server.py` on F5. "Python: Debug Tests" runs the suite. There is no project virtualenv.
 
 ## After a change
 

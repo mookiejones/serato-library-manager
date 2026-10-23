@@ -12,6 +12,16 @@ The program uses the Python standard library. It reads `~/Library/Application Su
 
 In VS Code, press F5. That launch runs `server.py`.
 
+## Tests
+
+From this directory, run:
+
+```bash
+python3 -m unittest discover -s tests -t . -v
+```
+
+The tests use the Python standard library. They build a temporary database. They do not open the live Serato library.
+
 ## Documentation
 
 The code reference is [docs/architecture.md](docs/architecture.md). Functions in `server.py`, `library.py`, and `tags.py` use Google-style docstrings.

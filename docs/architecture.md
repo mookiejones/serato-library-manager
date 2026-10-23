@@ -11,7 +11,13 @@ A local page for the Serato DJ Pro library. The process reads `master.sqlite`. I
 3. Open `http://127.0.0.1:8765`.
 4. Press Ctrl-C to stop the server.
 
-The process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. Python's standard library is the only dependency. There is no installer, test runner, or linter.
+The process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. Python's standard library is the only dependency. There is no installer or linter.
+
+## Tests
+
+1. From the repository root, run `python3 -m unittest discover -s tests -t . -v`.
+2. The suite builds a temporary database and points `library.MASTER` at that file.
+3. The suite does not open the live Serato library.
 
 ## Debug in VS Code
 
@@ -20,7 +26,7 @@ The process exits when `~/Library/Application Support/Serato/Library/master.sqli
 3. Press F5.
 4. The debugger runs `server.py` in the integrated terminal.
 
-`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. No virtual environment is set, so VS Code uses the system Python. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
+`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. "Python: Debug Tests" runs `unittest` discovery for `tests/`. No virtual environment is set, so VS Code uses the system Python. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
 
 ## Containers
 
