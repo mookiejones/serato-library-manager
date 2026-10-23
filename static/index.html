@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Serato library</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,500;9..144,620&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="rail" aria-label="Library">
+      <header class="brand">
+        <h1>Library</h1>
+        <p id="status">Checking Serato</p>
+      </header>
+      <label class="rail-field">
+        <span class="visually-hidden">Space</span>
+        <select id="space" aria-label="Space">
+          <option value="Serato Library">Library</option>
+          <option value="Serato Video">Video</option>
+          <option value="Apple Music">Apple Music</option>
+          <option value="Prepare">Prepare</option>
+        </select>
+      </label>
+      <div id="views" class="view-switch" role="tablist" aria-label="Views">
+        <button type="button" data-view="crates" role="tab">Crates</button>
+        <button type="button" data-view="history" role="tab">History</button>
+        <button type="button" data-view="missing" role="tab">Missing</button>
+        <button type="button" data-view="duplicates" role="tab">Duplicates</button>
+        <button type="button" data-view="stems" role="tab">Stems</button>
+      </div>
+      <div id="crate-tools">
+        <label class="rail-field">
+          <span class="visually-hidden">Find a crate</span>
+          <input id="crate-search" type="search" placeholder="Find a crate" autocomplete="off">
+        </label>
+        <div class="sort-crates" role="group" aria-label="Sort crates">
+          <button type="button" data-crate-sort="order">Order</button>
+          <button type="button" data-crate-sort="name">Name</button>
+          <button type="button" data-crate-sort="added">Added</button>
+        </div>
+      </div>
+      <div id="crate-list" class="crates" role="tree" aria-label="Crates"></div>
+      <div id="session-list" class="crates" role="listbox" aria-label="History sessions" hidden></div>
+      <p id="mode-note" class="mode-note" hidden></p>
+      <p id="crate-foot" class="crate-foot"></p>
+      <div id="crate-actions" class="crate-actions">
+        <button id="crate-new" type="button">New</button>
+        <button id="crate-rename" type="button">Rename</button>
+        <button id="crate-color" type="button">Color</button>
+        <button id="crate-delete" type="button">Delete</button>
+      </div>
+    </aside>
+
+    <main class="sheet">
+      <section class="browser">
+        <div class="browser-bar">
+          <label class="search">
+            <span class="visually-hidden">Search tracks</span>
+            <input id="search" type="search" placeholder="Search tracks" autocomplete="off">
+          </label>
+          <p id="count" class="count" aria-live="polite">Loading the library</p>
+          <button id="export-m3u" type="button">Export</button>
+          <button id="import-m3u" type="button">Import</button>
+          <input id="import-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl" hidden>
+          <button id="reload" type="button">Reload</button>
+        </div>
+        <p id="notice" class="notice" hidden></p>
+        <div class="columns" aria-hidden="true">
+          <button type="button" data-sort="name">Title</button>
+          <button type="button" data-sort="artist">Artist</button>
+          <button type="button" data-sort="bpm">BPM</button>
+          <button type="button" data-sort="key">Key</button>
+          <button type="button" data-sort="length_ms">Time</button>
+        </div>
+        <div id="list" class="list" tabindex="0" role="listbox" aria-label="Tracks"></div>
+      </section>
+
+      <section id="detail" class="detail" aria-live="polite">
+        <p class="detail-empty">Select a track to read its attributes.</p>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
