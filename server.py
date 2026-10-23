@@ -14,6 +14,7 @@ from contextlib import closing
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import NotRequired, TypedDict, cast
 from urllib.parse import parse_qs, urlparse
 
 import library
@@ -34,6 +35,7 @@ def db_path() -> Path:
         The path stored on library.MASTER.
     """
     return Path(library.MASTER)
+
 
 BOOL_COLUMNS = {
     "is_corrupt",
@@ -140,9 +142,243 @@ FIELDS = [
     ("year_norm", "Year", "Search copies"),
     ("key_norm", "Key", "Search copies"),
 ]
+class _Cache(TypedDict):
+    """In-process library payload cache."""
 
-_cache: dict = {"stamp": None, "libraries": {}}
+    stamp: tuple[int, ...] | None
+    libraries: dict[str, dict[str, object]]
+
+
+class _Crate(TypedDict):
+    """One crate row sent to the page."""
+
+    id: object
+    parent: object
+    name: str
+    smart: bool
+    order: object
+    color: object
+    expanded: int
+    added: object
+    tracks: list[object]
+    rules: NotRequired[object]
+
+
+_cache: _Cache = {"stamp": None, "libraries": {}}
 _lock = threading.Lock()
+
+
+def cell(row: sqlite3.Row, column: str) -> object:
+    """Return one SQLite value as a concrete object.
+
+    Args:
+        row: Result row.
+        column: Column name.
+
+    Returns:
+        The stored value. SQLite's own annotation is Any, which strict checking treats as unknown.
+    """
+    value: object = row[column]
+    return value
+
+
+def row_dict(row: sqlite3.Row) -> dict[str, object]:
+    """Copy a SQLite row into a string-keyed dict.
+
+    Args:
+        row: Result row.
+
+    Returns:
+        Column names and values.
+    """
+    copied: dict[str, object] = {}
+    for key in row.keys():
+        copied[key] = cell(row, key)
+    return copied
+
+
+def _library_call(name: str, /, *args: object) -> object:
+    """Call a library function whose return annotation is still a bare dict.
+
+    Args:
+        name: Function name on the library module.
+        *args: Arguments for that function.
+
+    Returns:
+        The function result.
+
+    Raises:
+        TypeError: If name is not callable.
+    """
+    function: object = getattr(library, name)
+    if not callable(function):
+        raise TypeError(name)
+    return function(*args)
+
+
+def as_dict(value: object) -> dict[str, object]:
+    """Return value when it is a dict with string keys.
+
+    Args:
+        value: A library or JSON value.
+
+    Returns:
+        A string-keyed copy.
+
+    Raises:
+        TypeError: If value is not a dict or a key is not a string.
+    """
+    if not isinstance(value, dict):
+        raise TypeError(value)
+    raw = cast("dict[object, object]", value)
+    copied: dict[str, object] = {}
+    for key, item in raw.items():
+        if not isinstance(key, str):
+            raise TypeError(key)
+        copied[key] = item
+    return copied
+
+
+def as_dicts(value: object) -> list[dict[str, object]]:
+    """Return value when it is a list of string-keyed dicts.
+
+    Args:
+        value: A library result.
+
+    Returns:
+        One dict per list item.
+
+    Raises:
+        TypeError: If value is not a list or an item is not a dict.
+    """
+    if not isinstance(value, list):
+        raise TypeError(value)
+    items = cast("list[object]", value)
+    return [as_dict(item) for item in items]
+
+
+def text_or_empty(value: object) -> str:
+    """Return text, or an empty string for a missing or blank value.
+
+    Args:
+        value: A column or JSON value.
+
+    Returns:
+        The string, or an empty string when value is missing or blank.
+
+    Raises:
+        ValueError: If a present value is not text.
+    """
+    if not value:
+        return ""
+    if isinstance(value, str):
+        return value
+    raise ValueError(value)
+
+
+def text_cell(row: sqlite3.Row, column: str) -> str:
+    """Return a text column, using an empty string when it is null.
+
+    Args:
+        row: Result row.
+        column: Column name.
+
+    Returns:
+        The stored text, or an empty string.
+    """
+    return text_or_empty(cell(row, column))
+
+
+def required_int(value: object) -> int:
+    """Return value as an int.
+
+    Args:
+        value: A number or a decimal string.
+
+    Returns:
+        The integer value.
+
+    Raises:
+        ValueError: If value cannot be read as an int.
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        return int(value)
+    raise ValueError(value)
+
+
+def int_flag(value: object) -> int:
+    """Return an integer flag, treating a missing value as 0.
+
+    Args:
+        value: A SQLite integer, or None.
+
+    Returns:
+        The integer, or 0 when value is missing.
+    """
+    if not value:
+        return 0
+    return required_int(value)
+
+
+def optional_text(value: object) -> str | None:
+    """Return a string or None.
+
+    Args:
+        value: A JSON value.
+
+    Returns:
+        None when value is missing, otherwise the text.
+
+    Raises:
+        ValueError: If value is present and is not text.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    raise ValueError(value)
+
+
+def optional_int(value: object) -> int | None:
+    """Return an int or None.
+
+    Args:
+        value: A JSON value.
+
+    Returns:
+        None when value is missing, otherwise the integer.
+
+    Raises:
+        ValueError: If value is present and is not an integer.
+    """
+    if value is None:
+        return None
+    return required_int(value)
+
+
+def query_text(
+    query: dict[str, list[str]], key: str, default: str | None = None
+) -> str | None:
+    """Return the first query-string value for key.
+
+    Args:
+        query: Parsed query string.
+        key: Parameter name.
+        default: Value used when the parameter is absent. Defaults to None.
+
+    Returns:
+        The first value, or default.
+    """
+    values = query.get(key)
+    if not values:
+        return default
+    return values[0]
 
 
 def connect() -> sqlite3.Connection:
@@ -164,14 +400,14 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
-def db_stamp() -> tuple[int, int]:
+def db_stamp() -> tuple[int, ...]:
     """Return the cache key for the master database and its WAL file.
 
     Returns:
         Modification times in nanoseconds. A missing file contributes 0.
     """
     path = db_path()
-    stamps = []
+    stamps: list[int] = []
     for candidate in (path, Path(str(path) + "-wal")):
         stamps.append(candidate.stat().st_mtime_ns if candidate.exists() else 0)
     return tuple(stamps)
@@ -225,7 +461,7 @@ def format_when(value: object) -> str:
     if blank(value):
         return "—"
     try:
-        stamp = int(value)
+        stamp = int(str(value))
     except (TypeError, ValueError):
         return str(value)
     if stamp <= 0:
@@ -248,7 +484,7 @@ def format_bool(value: object) -> str:
     """
     if value is None:
         return "—"
-    return "Yes" if int(value) else "No"
+    return "Yes" if int(str(value)) else "No"
 
 
 def format_size(value: object) -> str:
@@ -262,7 +498,7 @@ def format_size(value: object) -> str:
     """
     if blank(value):
         return "—"
-    size = int(value)
+    size = int(str(value))
     units = ["bytes", "KB", "MB", "GB"]
     amount = float(size)
     unit = 0
@@ -285,7 +521,7 @@ def format_bitrate(value: object) -> str:
     """
     if blank(value):
         return "—"
-    kbps = float(value) / 1000
+    kbps = float(str(value)) / 1000
     if abs(kbps - round(kbps)) < 0.05:
         return f"{round(kbps)} kbps"
     return f"{kbps:.1f} kbps"
@@ -302,7 +538,7 @@ def format_rate(value: object) -> str:
     """
     if blank(value):
         return "—"
-    hz = float(value)
+    hz = float(str(value))
     if hz >= 1000:
         khz = hz / 1000
         text = f"{khz:.1f}".rstrip("0").rstrip(".")
@@ -321,14 +557,18 @@ def format_length(ms: object, sec: object) -> str:
         A minutes and seconds label, or a dash when both inputs are empty.
     """
     if not blank(ms):
-        total = int(ms) / 1000
+        total = int(str(ms)) / 1000
     elif not blank(sec):
-        total = int(sec)
+        total = int(str(sec))
     else:
         return "—"
     minutes = int(total // 60)
     seconds = total - minutes * 60
-    return f"{minutes}:{seconds:06.3f}" if not blank(ms) else f"{minutes}:{int(seconds):02d}"
+    return (
+        f"{minutes}:{seconds:06.3f}"
+        if not blank(ms)
+        else f"{minutes}:{int(seconds):02d}"
+    )
 
 
 def format_color(value: object) -> str:
@@ -346,7 +586,7 @@ def format_color(value: object) -> str:
     """
     if value is None:
         return "—"
-    color = int(value)
+    color = int(str(value))
     if color == 0xFFFFFF:
         return "None"
     return f"#{color:06X}"
@@ -363,7 +603,7 @@ def format_rating(value: object) -> str:
     """
     if value is None:
         return "Not rated"
-    score = float(value)
+    score = float(str(value))
     filled = max(0, min(5, round(score * 5)))
     return f"{'★' * filled}{'☆' * (5 - filled)} ({score:g})"
 
@@ -379,7 +619,7 @@ def format_bits(value: object) -> str:
     """
     if value is None:
         return "—"
-    number = int(value)
+    number = int(str(value))
     if number == 0:
         return "0"
     bits = [str(index) for index in range(32) if number & (1 << index)]
@@ -401,7 +641,7 @@ def format_bpm(value: object) -> str:
     """
     if blank(value):
         return "—"
-    number = float(value)
+    number = float(str(value))
     if abs(number - round(number)) < 0.001:
         return f"{round(number)}"
     return f"{number:.2f}".rstrip("0").rstrip(".")
@@ -418,7 +658,7 @@ def format_source(value: object) -> str:
     """
     if value is None:
         return "—"
-    number = int(value)
+    number = int(str(value))
     label = THIRD_PARTY.get(number)
     if label:
         return label
@@ -452,10 +692,14 @@ def resolve_path(portable_id: str | None) -> tuple[str | None, bool | None]:
     Returns:
         The candidate path and whether that path exists. Both items are None when the id is empty.
     """
-    if blank(portable_id):
+    if portable_id is None or portable_id == "":
         return None, None
     raw = Path(portable_id)
-    candidates = [raw] if raw.is_absolute() else [Path.home() / portable_id, Path("/") / portable_id]
+    candidates = (
+        [raw]
+        if raw.is_absolute()
+        else [Path.home() / portable_id, Path("/") / portable_id]
+    )
     for candidate in candidates:
         try:
             if candidate.exists():
@@ -465,7 +709,7 @@ def resolve_path(portable_id: str | None) -> tuple[str | None, bool | None]:
     return str(candidates[0]), False
 
 
-def format_field(column: str, row: dict) -> str:
+def format_field(column: str, row: dict[str, object]) -> str:
     """Format one track column for the detail pane.
 
     Args:
@@ -493,7 +737,7 @@ def format_field(column: str, row: dict) -> str:
     if column == "length_sec":
         if blank(value):
             return "—"
-        return str(int(value))
+        return str(required_int(value))
     if column == "color":
         return format_color(value)
     if column == "rating":
@@ -511,7 +755,7 @@ def format_field(column: str, row: dict) -> str:
             return "—"
         return f"Binary, {len(value):,} bytes"
     if column == "crates":
-        if not value:
+        if not isinstance(value, str) or value == "":
             return "—"
         return value
     if column == "type_specific_data":
@@ -519,9 +763,10 @@ def format_field(column: str, row: dict) -> str:
             return "—"
         text = str(value)
         try:
-            return json.dumps(json.loads(text), indent=2, ensure_ascii=False)
+            parsed: object = json.loads(text)
         except json.JSONDecodeError:
             return text
+        return json.dumps(parsed, indent=2, ensure_ascii=False)
     if column == "key_value" and value == -1:
         return "—"
     if blank(value):
@@ -547,7 +792,7 @@ def require_space(space: str | None) -> str:
     return chosen
 
 
-def load_library(space: str | None = None) -> dict:
+def load_library(space: str | None = None) -> dict[str, object]:
     """Load the track list and crate tree for one space.
 
     Args:
@@ -562,13 +807,13 @@ def load_library(space: str | None = None) -> dict:
     chosen = require_space(space)
     with _lock:
         payload = dict(_load_library(chosen))
-    info = library.status()
+    info = as_dict(_library_call("status"))
     payload["serato"] = info
     payload["writable"] = info["writable"]
     return payload
 
 
-def _load_library(space: str) -> dict:
+def _load_library(space: str) -> dict[str, object]:
     """Query and cache one space.
 
     Args:
@@ -589,7 +834,7 @@ def _load_library(space: str) -> dict:
         return cached
 
     with closing(connect()) as conn:
-        tracks = []
+        tracks: list[dict[str, object]] = []
         for row in conn.execute(
             """
             SELECT a.id, a.name, a.artist, a.album, a.genre, a.bpm, a.key,
@@ -607,31 +852,31 @@ def _load_library(space: str) -> dict:
         ):
             tracks.append(
                 {
-                    "id": row["id"],
-                    "name": row["name"] or "",
-                    "artist": row["artist"] or "",
-                    "album": row["album"] or "",
-                    "genre": row["genre"] or "",
-                    "bpm": row["bpm"],
-                    "key": row["key"] or "",
-                    "length_ms": row["length_ms"],
-                    "color": row["color"],
-                    "missing": int(row["is_missing"] or 0),
-                    "format": row["format"] or "",
-                    "file": row["file_name"] or "",
-                    "file_size": row["file_size"],
-                    "time_added": row["time_added"],
-                    "rating": row["rating"],
-                    "emoji": row["emoji"] or "",
-                    "beatgrid_locked": int(row["is_beatgrid_locked"] or 0),
-                    "play_count": row["dj_play_count"],
-                    "stems": int(row["stems_analyze_state"] or 0),
-                    "bitrate": row["file_bit_rate"],
+                    "id": cell(row, "id"),
+                    "name": text_cell(row, "name"),
+                    "artist": text_cell(row, "artist"),
+                    "album": text_cell(row, "album"),
+                    "genre": text_cell(row, "genre"),
+                    "bpm": cell(row, "bpm"),
+                    "key": text_cell(row, "key"),
+                    "length_ms": cell(row, "length_ms"),
+                    "color": cell(row, "color"),
+                    "missing": int_flag(cell(row, "is_missing")),
+                    "format": text_cell(row, "format"),
+                    "file": text_cell(row, "file_name"),
+                    "file_size": cell(row, "file_size"),
+                    "time_added": cell(row, "time_added"),
+                    "rating": cell(row, "rating"),
+                    "emoji": text_cell(row, "emoji"),
+                    "beatgrid_locked": int_flag(cell(row, "is_beatgrid_locked")),
+                    "play_count": cell(row, "dj_play_count"),
+                    "stems": int_flag(cell(row, "stems_analyze_state")),
+                    "bitrate": cell(row, "file_bit_rate"),
                 }
             )
 
-        crates = []
-        root_id = None
+        crates: list[_Crate] = []
+        root_id: object | None = None
         for row in conn.execute(
             """
             SELECT c.id, c.parent_id, c.name, c.type, c.list_order,
@@ -643,18 +888,21 @@ def _load_library(space: str) -> dict:
             """,
             (space,),
         ):
-            if row["type"] == 0:
-                root_id = row["id"]
+            if cell(row, "type") == 0:
+                root_id = cell(row, "id")
+            stored_name = cell(row, "name")
+            if not isinstance(stored_name, str):
+                raise TypeError("crate name is not text")
             crates.append(
                 {
-                    "id": row["id"],
-                    "parent": row["parent_id"],
-                    "name": display_name(row["name"]),
-                    "smart": row["type"] == 2,
-                    "order": row["list_order"],
-                    "color": row["color"],
-                    "expanded": int(row["expanded"] or 0),
-                    "added": row["time_added"],
+                    "id": cell(row, "id"),
+                    "parent": cell(row, "parent_id"),
+                    "name": display_name(stored_name),
+                    "smart": cell(row, "type") == 2,
+                    "order": cell(row, "list_order"),
+                    "color": cell(row, "color"),
+                    "expanded": int_flag(cell(row, "expanded")),
+                    "added": cell(row, "time_added"),
                     "tracks": [],
                 }
             )
@@ -672,11 +920,11 @@ def _load_library(space: str) -> dict:
             """,
             (space,),
         ):
-            crate = by_id.get(row["crate_id"])
+            crate = by_id.get(cell(row, "crate_id"))
             if crate is not None:
-                crate["tracks"].append(row["asset_id"])
+                crate["tracks"].append(cell(row, "asset_id"))
 
-        rules = {}
+        rules: dict[object, object] = {}
         for row in conn.execute(
             """
             SELECT r.container_id, r.rules
@@ -687,15 +935,19 @@ def _load_library(space: str) -> dict:
             """,
             (space,),
         ):
+            blob = cell(row, "rules")
+            if not isinstance(blob, (str, bytes, bytearray)):
+                raise TypeError("smart crate rules are not text")
             try:
-                rules[row["container_id"]] = json.loads(row["rules"])
+                parsed: object = json.loads(blob)
             except json.JSONDecodeError:
-                rules[row["container_id"]] = row["rules"]
+                parsed = blob
+            rules[cell(row, "container_id")] = parsed
         for crate in crates:
             if crate["id"] in rules:
                 crate["rules"] = rules[crate["id"]]
 
-    payload = {
+    payload: dict[str, object] = {
         "source": str(db_path()),
         "space": space,
         "spaces": list(library.ALLOWED_SPACES),
@@ -708,7 +960,7 @@ def _load_library(space: str) -> dict:
     return payload
 
 
-def load_track(asset_id: int, space: str | None = None) -> dict | None:
+def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | None:
     """Load one track, its editable fields, and its marker data.
 
     Args:
@@ -747,8 +999,10 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
         ).fetchone()
         if row is None:
             return None
-        data = dict(row)
-        crate_rows = conn.execute(
+        data = row_dict(row)
+        crate_names: list[str] = []
+        crate_ids: list[object] = []
+        for crate_row in conn.execute(
             """
             SELECT c.id, c.name
             FROM container_asset ca
@@ -759,21 +1013,38 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
             ORDER BY c.name COLLATE NOCASE
             """,
             (asset_id, chosen),
-        ).fetchall()
-        crate_names = [display_name(row["name"]) for row in crate_rows]
-        crate_ids = [row["id"] for row in crate_rows]
-        in_prepare = conn.execute(
-            """
+        ):
+            stored_name = cell(crate_row, "name")
+            if not isinstance(stored_name, str):
+                raise TypeError("crate name is not text")
+            crate_names.append(display_name(stored_name))
+            crate_ids.append(cell(crate_row, "id"))
+        in_prepare = (
+            conn.execute(
+                """
             SELECT 1 FROM space_asset sa
             JOIN space s ON s.id = sa.space_id
             WHERE sa.asset_id = ? AND s.name = 'Prepare'
             """,
-            (asset_id,),
-        ).fetchone() is not None
-        copies = []
-        if data.get("name") and data.get("artist") and data.get("length_ms") is not None:
-            seconds = int(data["length_ms"]) // 1000
-            others = conn.execute(
+                (asset_id,),
+            ).fetchone()
+            is not None
+        )
+        copies: list[dict[str, object]] = []
+        track_name = data.get("name")
+        track_artist = data.get("artist")
+        length_ms = data.get("length_ms")
+        if track_name and track_artist and length_ms is not None:
+            seconds = required_int(length_ms) // 1000
+            others: list[sqlite3.Row] = []
+            copy_params: list[object] = [
+                chosen,
+                track_name,
+                track_artist,
+                seconds,
+                asset_id,
+            ]
+            for other in conn.execute(
                 """
                 SELECT a.id, a.file_bit_rate, a.dj_play_count, a.is_missing, a.file_name
                 FROM asset a
@@ -784,13 +1055,15 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
                 ORDER BY a.id
                 LIMIT 12
                 """,
-                (chosen, data["name"], data["artist"], seconds, asset_id),
-            ).fetchall()
+                copy_params,
+            ):
+                others.append(other)
             if others:
-                other_ids = [row["id"] for row in others]
+                other_ids = [cell(other, "id") for other in others]
                 marks = ",".join("?" * len(other_ids))
-                membership = {}
-                for row in conn.execute(
+                membership: dict[object, list[str]] = {}
+                member_params: list[object] = [chosen, *other_ids]
+                for member in conn.execute(
                     f"""
                     SELECT ca.asset_id, c.name
                     FROM container_asset ca
@@ -800,48 +1073,58 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
                     WHERE s.name = ? AND ca.asset_id IN ({marks})
                     ORDER BY c.name COLLATE NOCASE
                     """,
-                    [chosen, *other_ids],
+                    member_params,
                 ):
-                    membership.setdefault(row["asset_id"], []).append(display_name(row["name"]))
-                for row in others:
+                    member_name = cell(member, "name")
+                    if not isinstance(member_name, str):
+                        raise TypeError("crate name is not text")
+                    membership.setdefault(cell(member, "asset_id"), []).append(
+                        display_name(member_name)
+                    )
+                for other in others:
+                    other_id = cell(other, "id")
                     copies.append(
                         {
-                            "id": row["id"],
-                            "file": row["file_name"] or "",
-                            "bitrate": format_bitrate(row["file_bit_rate"]),
-                            "play_count": row["dj_play_count"],
-                            "missing": int(row["is_missing"] or 0),
-                            "crates": ", ".join(membership.get(row["id"], [])),
+                            "id": other_id,
+                            "file": text_cell(other, "file_name"),
+                            "bitrate": format_bitrate(cell(other, "file_bit_rate")),
+                            "play_count": cell(other, "dj_play_count"),
+                            "missing": int_flag(cell(other, "is_missing")),
+                            "crates": ", ".join(membership.get(other_id, [])),
                         }
                     )
 
-    resolved, exists = resolve_path(data.get("portable_id"))
+    portable = data.get("portable_id")
+    if portable is not None and not isinstance(portable, str):
+        raise TypeError("portable_id is not text")
+    resolved, exists = resolve_path(portable)
     data["resolved_path"] = resolved
     data["file_on_disk"] = None if exists is None else int(exists)
     data["crates"] = ", ".join(crate_names)
     on_disk = exists is True
-    markers = library.markers_for(resolved, on_disk)
-    edit = {
-        "name": data.get("name") or "",
-        "artist": data.get("artist") or "",
-        "album": data.get("album") or "",
-        "genre": data.get("genre") or "",
-        "year": data.get("year") or "",
-        "composer": data.get("composer") or "",
-        "remixer": data.get("remixer") or "",
-        "label": data.get("label") or "",
-        "grouping": data.get("grouping") or "",
-        "comments": data.get("comments") or "",
-        "key": data.get("key") or "",
-        "emoji": data.get("emoji") or "",
+    markers = as_dict(_library_call("markers_for", resolved, on_disk))
+    color_value = data.get("color")
+    edit: dict[str, object] = {
+        "name": text_or_empty(data.get("name")),
+        "artist": text_or_empty(data.get("artist")),
+        "album": text_or_empty(data.get("album")),
+        "genre": text_or_empty(data.get("genre")),
+        "year": text_or_empty(data.get("year")),
+        "composer": text_or_empty(data.get("composer")),
+        "remixer": text_or_empty(data.get("remixer")),
+        "label": text_or_empty(data.get("label")),
+        "grouping": text_or_empty(data.get("grouping")),
+        "comments": text_or_empty(data.get("comments")),
+        "key": text_or_empty(data.get("key")),
+        "emoji": text_or_empty(data.get("emoji")),
         "bpm": data.get("bpm"),
-        "color": data.get("color") if data.get("color") is not None else 0xFFFFFF,
+        "color": 0xFFFFFF if color_value is None else color_value,
         "rating": data.get("rating"),
-        "is_beatgrid_locked": int(data.get("is_beatgrid_locked") or 0),
-        "portable_id": data.get("portable_id") or "",
+        "is_beatgrid_locked": int_flag(data.get("is_beatgrid_locked")),
+        "portable_id": text_or_empty(data.get("portable_id")),
     }
 
-    groups: dict[str, list] = {}
+    groups: dict[str, list[dict[str, str]]] = {}
     for column, label, group in FIELDS:
         groups.setdefault(group, []).append(
             {
@@ -851,18 +1134,17 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
             }
         )
 
-    color = data.get("color")
-    color_hex = None
-    if color is not None and int(color) != 0xFFFFFF:
-        color_hex = f"#{int(color):06X}"
+    color_hex: str | None = None
+    if color_value is not None and required_int(color_value) != 0xFFFFFF:
+        color_hex = f"#{required_int(color_value):06X}"
 
     return {
         "id": data["id"],
-        "title": data.get("name") or "Untitled",
-        "artist": data.get("artist") or "",
-        "album": data.get("album") or "",
+        "title": text_or_empty(data.get("name")) or "Untitled",
+        "artist": text_or_empty(data.get("artist")),
+        "album": text_or_empty(data.get("album")),
         "bpm": format_bpm(data.get("bpm")),
-        "key": data.get("key") or "",
+        "key": text_or_empty(data.get("key")),
         "length": format_length(data.get("length_ms"), data.get("length_sec")),
         "color": color_hex,
         "missing": bool(data.get("is_missing")),
@@ -879,22 +1161,25 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
         "beatgrid": markers["beatgrid"],
         "markers_found": markers["found"],
         "markers_unavailable": markers["unavailable"],
-        "serato": library.status(),
+        "serato": as_dict(_library_call("status")),
     }
 
 
 class Handler(BaseHTTPRequestHandler):
     """Serve the JSON API and the files in static/."""
+
     server_version = "SeratoLibrary/1.0"
 
-    def log_message(self, fmt: str, *args) -> None:
+    def log_message(self, format: str, *args: object) -> None:
         """Print one access-log line.
 
         Args:
-            fmt: Log format string from BaseHTTPRequestHandler.
+            format: Log format string from BaseHTTPRequestHandler.
             *args: Values for that format string.
         """
-        print(f"[{self.log_date_time_string()}] {self.address_string()} {fmt % args}")
+        print(
+            f"[{self.log_date_time_string()}] {self.address_string()} {format % args}"
+        )
 
     def do_GET(self) -> None:
         """Answer a GET request.
@@ -906,45 +1191,49 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         try:
             if parsed.path == "/api/library":
-                self.send_json(load_library(query.get("space", [None])[0]))
+                self.send_json(load_library(query_text(query, "space")))
                 return
             if parsed.path == "/api/status":
-                self.send_json(library.status())
+                self.send_json(as_dict(_library_call("status")))
                 return
             if parsed.path == "/api/track":
-                raw = query.get("id", [""])[0]
+                raw = query_text(query, "id", "") or ""
                 try:
                     asset_id = int(raw)
                 except ValueError:
                     self.send_json({"error": "Track id is required."}, status=400)
                     return
-                track = load_track(asset_id, query.get("space", [None])[0])
+                track = load_track(asset_id, query_text(query, "space"))
                 if track is None:
                     self.send_json({"error": "Track is not in this space."}, status=404)
                     return
                 self.send_json(track)
                 return
             if parsed.path == "/api/history":
-                raw = query.get("session", [""])[0]
+                raw = query_text(query, "session", "") or ""
                 if raw:
-                    self.send_json(library.history_entries(int(raw)))
+                    self.send_json(as_dict(_library_call("history_entries", int(raw))))
                 else:
-                    self.send_json({"sessions": library.history_sessions()})
+                    self.send_json(
+                        {"sessions": as_dicts(_library_call("history_sessions"))}
+                    )
                 return
             if parsed.path == "/api/duplicates":
-                space = require_space(query.get("space", [None])[0])
-                groups = library.duplicate_groups(space)
+                space = require_space(query_text(query, "space"))
+                groups = as_dicts(_library_call("duplicate_groups", space))
                 self.send_json({"space": space, "groups": groups, "count": len(groups)})
                 return
             if parsed.path == "/api/export.m3u":
-                space = require_space(query.get("space", [None])[0])
-                raw_crate = query.get("crate", ["all"])[0]
+                space = require_space(query_text(query, "space"))
+                raw_crate = query_text(query, "crate", "all") or "all"
                 crate_id = None if raw_crate in {"", "all"} else int(raw_crate)
                 body = library.export_m3u(space, crate_id).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/x-mpegurl; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("Content-Disposition", "attachment; filename=crate.m3u")
+                self.send_header(
+                    "Content-Disposition", "attachment; filename=crate.m3u"
+                )
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
@@ -968,45 +1257,62 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "That upload is too large."}, status=413)
             return
         try:
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            parsed_body: object = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             self.send_json({"error": "The request body is not JSON."}, status=400)
             return
-        if not isinstance(payload, dict):
+        try:
+            payload = as_dict(parsed_body)
+        except TypeError:
             self.send_json({"error": "The request body is not an object."}, status=400)
             return
         try:
             if parsed.path == "/api/reveal":
-                self.send_json(library.reveal(int(payload["id"])))
+                self.send_json(
+                    as_dict(_library_call("reveal", required_int(payload["id"])))
+                )
                 return
             with _lock:
                 invalidate()
                 if parsed.path == "/api/track":
-                    result = library.save_track(
-                        int(payload["id"]),
-                        payload.get("fields") or {},
-                        require_space(payload.get("space")),
+                    result = as_dict(
+                        _library_call(
+                            "save_track",
+                            required_int(payload["id"]),
+                            payload.get("fields") or {},
+                            require_space(optional_text(payload.get("space"))),
+                        )
                     )
                 elif parsed.path == "/api/crate":
-                    result = library.crate_action(payload)
+                    result = as_dict(_library_call("crate_action", payload))
                 elif parsed.path == "/api/import.m3u":
-                    result = library.import_m3u(
-                        require_space(payload.get("space")),
-                        payload.get("parent"),
-                        payload.get("name") or "",
-                        payload.get("text") or "",
+                    result = as_dict(
+                        _library_call(
+                            "import_m3u",
+                            require_space(optional_text(payload.get("space"))),
+                            optional_int(payload.get("parent")),
+                            text_or_empty(payload.get("name")),
+                            text_or_empty(payload.get("text")),
+                        )
                     )
                 else:
-                    self.send_json({"error": "That action is not available."}, status=404)
+                    self.send_json(
+                        {"error": "That action is not available."}, status=404
+                    )
                     return
             self.send_json(result)
         except library.SeratoOpen as exc:
-            self.send_json({"error": exc.message, "serato": exc.info}, status=409)
+            detail: object = getattr(exc, "info")
+            self.send_json({"error": exc.message, "serato": detail}, status=409)
         except library.LibraryError as exc:
-            self.send_json({"error": exc.message, "serato": getattr(exc, "info", None)}, status=exc.status)
+            extra: object = getattr(exc, "info", None)
+            self.send_json(
+                {"error": exc.message, "serato": extra},
+                status=exc.status,
+            )
         except sqlite3.OperationalError as exc:
             if "locked" in str(exc).lower():
-                info = library.status()
+                info = as_dict(_library_call("status"))
                 self.send_json({"error": info["message"], "serato": info}, status=409)
                 return
             self.send_json({"error": "The library could not be saved."}, status=500)
