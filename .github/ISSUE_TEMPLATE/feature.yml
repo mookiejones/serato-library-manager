@@ -1,0 +1,21 @@
+name: Feature
+description: A change to the library browser
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach `master.sqlite`, `root.sqlite`, or an audio file.
+  - type: checkboxes
+    id: library-files
+    attributes:
+      label: Library files
+      options:
+        - label: I did not attach a Serato database or an audio file.
+          required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: What should change
+    validations:
+      required: true

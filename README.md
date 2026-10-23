@@ -25,11 +25,15 @@ The window loads the same page. Closing it stops the server. On Windows, use `.v
 To build an unsigned app on the current operating system:
 
 ```bash
-.venv/bin/pip install pyinstaller
-.venv/bin/pyinstaller serato-library.spec
+.venv/bin/pip install -r requirements-build.txt
+.venv/bin/python -m PyInstaller serato-library.spec
 ```
 
-On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Library/`. Build on each system you want to ship.
+On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Library/`. On Windows, use `.venv\Scripts\python` for both commands. Build on each system you want to ship.
+
+## GitHub
+
+GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The server stays on `127.0.0.1`. It is not a website and it is not published to GitHub Pages. The guide is [docs/github.md](docs/github.md). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
 
 ## Tests
 

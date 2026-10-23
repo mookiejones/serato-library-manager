@@ -31,7 +31,9 @@ The suite builds a temporary database. It does not open the live Serato library.
 ## Layout
 
 - `server.py` is a `ThreadingHTTPServer` bound to `127.0.0.1:8765`. GET routes are `/api/library`, `/api/status`, `/api/track`, `/api/history`, `/api/duplicates`, and `/api/export.m3u`. POST routes are `/api/track`, `/api/crate`, `/api/import.m3u`, and `/api/reveal`. Any other path is a file under `static/`. A frozen build reads `static/` from the PyInstaller bundle.
-- `desktop.py` starts that server and opens it in a pywebview window. `requirements.txt` pins that package. `serato-library.spec` builds a windowed app named Serato Library for the OS you build on.
+- `desktop.py` starts that server and opens it in a pywebview window. `requirements.txt` pins that package. `requirements-build.txt` also pins PyInstaller. `static_assets.py` lists the local files `static/index.html` references, and `serato-library.spec` exits when one is missing. The spec builds a windowed app named Serato Library for the OS you build on. `SERATO_LIBRARY_SMOKE` writes `ok\n` and returns before the window opens.
+- `.github/workflows/` runs CI (the suite and a pip-audit of the requirements files), CodeQL, dependency review on pull requests, and a release workflow that builds unsigned macOS and Windows zips. `docs/github.md` is the guide.
+- `scripts/release_bundle.py` checks a PyInstaller tree, zips it, and launches the unzipped app with `SERATO_LIBRARY_SMOKE`. The publish job checks the zip and does not launch it.
 - `library.py` reads and writes `master.sqlite`. The live path is Application Support on macOS and `%LOCALAPPDATA%\Serato\Library` on Windows. `root.sqlite` beside the master file is updated when it is attached. Writes are refused while a live Serato process holds the lock. The first write in a process copies both databases into `Library/Backups`. Reveal uses Finder on macOS and File Explorer on Windows.
 - `tags.py` only reads Serato GEOB frames (`Markers2`, `BeatGrid`) from audio files. Rewriting an ID3 tag can drop those frames.
 - `static/` is `index.html`, `app.js`, and `app.css`. Views are crates, history, missing, duplicates, and stems. Spaces are Serato Library, Serato Video, Apple Music, and Prepare.
@@ -44,7 +46,8 @@ The suite builds a temporary database. It does not open the live Serato library.
 
 1. Update `docs/architecture.md` when behavior, the API, the layout, or the run path changes.
 2. Update this file when the run command or the layout summary changes.
-3. Commit the change. Do not push unless asked.
+3. Update `docs/github.md` when a workflow, a release check, or a GitHub setting changes.
+4. Commit the change. Do not push unless asked.
 
 ## Library safety
 

@@ -1,0 +1,40 @@
+name: Bug
+description: Something in the library browser broke
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach `master.sqlite`, `root.sqlite`, or an audio file. The library stays on your machine.
+  - type: checkboxes
+    id: library-files
+    attributes:
+      label: Library files
+      options:
+        - label: I did not attach a Serato database or an audio file.
+          required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you ran it
+      options:
+        - python3 server.py
+        - desktop.py
+        - A GitHub release build
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15 or Windows 11

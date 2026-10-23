@@ -5,22 +5,15 @@ The static files are the directory server.py serves. The spec fails when
 index.html points at a local file that is not in that directory.
 """
 
-import re
 import sys
 from pathlib import Path
 
 root = Path(SPECPATH)
-page = root / "static" / "index.html"
-if not page.is_file():
-    raise SystemExit(f"Missing build input: {page}")
-refs = re.findall(r'(?:src|href)="([^"]+)"', page.read_text(encoding="utf-8"))
-missing = []
-for ref in refs:
-    if ref.startswith(("http://", "https://", "//", "#", "data:")):
-        continue
-    local = ref.split("?", 1)[0].split("#", 1)[0].lstrip("/")
-    if local and not (root / "static" / local).is_file():
-        missing.append(ref)
+sys.path.insert(0, str(root))
+
+from static_assets import missing_static_files
+
+missing = missing_static_files(root / "static")
 if missing:
     raise SystemExit("Missing build inputs: " + ", ".join(missing))
 
