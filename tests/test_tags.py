@@ -97,8 +97,8 @@ class TagTests(unittest.TestCase):
 
     def test_beatgrid_markers(self) -> None:
         markers = _parse_beatgrid(_beatgrid_payload())
-        self.assertEqual(markers[0]["beats"], 4)
-        self.assertEqual(markers[1]["bpm"], 128.0)
+        self.assertEqual(markers[0].get("beats"), 4)
+        self.assertEqual(markers[1].get("bpm"), 128.0)
         self.assertEqual(markers[0]["position"], 0.5)
 
     def test_bad_beatgrid_is_empty(self) -> None:

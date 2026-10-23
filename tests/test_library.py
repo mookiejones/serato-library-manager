@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 import library
@@ -58,7 +59,7 @@ class LibraryTests(unittest.TestCase):
         with TempLibrary() as temp:
             created = library.crate_action({"action": "create", "name": "Warmup"})
             added = library.crate_action({"action": "add", "id": created["id"], "asset": 1})
-            playlist = library.export_m3u("Serato Library", created["id"])
+            playlist = library.export_m3u("Serato Library", cast(int, created["id"]))
             library.crate_action({"action": "delete", "id": created["id"]})
             with sqlite3.connect(temp.db) as conn:
                 left = conn.execute(
@@ -144,7 +145,8 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(groups[0]["seconds"], 180)
         self.assertEqual(sessions[0]["name"], "Friday")
         self.assertEqual(sessions[0]["played"], 1)
-        self.assertEqual(detail["entries"][0]["name"], "Same")
+        entries = cast("list[dict[str, object]]", detail["entries"])
+        self.assertEqual(entries[0]["name"], "Same")
 
     def test_missing_history_session(self) -> None:
         with TempLibrary():
