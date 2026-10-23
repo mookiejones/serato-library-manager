@@ -7,8 +7,10 @@ and the first write in a process is backed up first.
 
 from __future__ import annotations
 
+import errno
 import json
 import sqlite3
+import sys
 import threading
 from contextlib import closing
 from datetime import datetime
@@ -19,7 +21,20 @@ from urllib.parse import parse_qs, urlparse
 
 import library
 
-ROOT = Path(__file__).resolve().parent
+
+def app_root() -> Path:
+    """Return the directory that holds static/.
+
+    Returns:
+        The PyInstaller extract directory when the app is frozen, otherwise the directory of this file.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and meipass:
+        return Path(meipass)
+    return Path(__file__).resolve().parent
+
+
+ROOT = app_root()
 STATIC = ROOT / "static"
 HOST = "127.0.0.1"
 PORT = 8765
@@ -36,6 +51,21 @@ def db_path() -> Path:
     """
     return Path(library.MASTER)
 
+
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
 
 BOOL_COLUMNS = {
     "is_corrupt",
@@ -456,17 +486,27 @@ def format_when(value: object) -> str:
         value: Seconds since the epoch, or an empty value.
 
     Returns:
-        A local date and time, or a dash when the value is empty or not positive.
+        A local date and time with an English month name, or a dash when the value is empty or not positive.
     """
-    if blank(value):
+    if blank(value) or isinstance(value, bool):
         return "—"
     try:
-        stamp = int(str(value))
+        if isinstance(value, int):
+            stamp = int(value)
+        elif isinstance(value, (float, str, bytes, bytearray)):
+            stamp = int(float(value))
+        else:
+            return str(value)
     except (TypeError, ValueError):
         return str(value)
     if stamp <= 0:
         return "—"
-    return datetime.fromtimestamp(stamp).strftime("%b %-d, %Y %-I:%M %p")
+    when = datetime.fromtimestamp(stamp)
+    hour = when.hour % 12
+    if hour == 0:
+        hour = 12
+    period = "AM" if when.hour < 12 else "PM"
+    return f"{_MONTHS[when.month - 1]} {when.day}, {when.year} {hour}:{when.minute:02d} {period}"
 
 
 def format_bool(value: object) -> str:
@@ -1360,21 +1400,43 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def serve() -> ThreadingHTTPServer:
+    """Bind the library server on 127.0.0.1 port 8765.
+
+    Returns:
+        A server that is listening and not yet serving.
+
+    Raises:
+        SystemExit: If the master database is missing or the port is already taken.
+    """
+    if not db_path().exists():
+        raise SystemExit(f"Serato library not found at {db_path()}")
+    try:
+        return ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        raise SystemExit(
+            f"http://{HOST}:{PORT} is already in use. "
+            "Quit the other Serato library server (server.py or the desktop window) and try again."
+        ) from exc
+
+
 def main() -> None:
     """Start the library server on 127.0.0.1 port 8765.
 
     Raises:
-        SystemExit: If the master database does not exist.
+        SystemExit: If the master database does not exist or the port is taken.
     """
-    if not db_path().exists():
-        raise SystemExit(f"Serato library not found at {db_path()}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    httpd = serve()
     print(f"Serato library  http://{HOST}:{PORT}")
     print(f"Library         {db_path()}")
     try:
-        server.serve_forever()
+        httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nStopped.")
+    finally:
+        httpd.server_close()
 
 
 if __name__ == "__main__":

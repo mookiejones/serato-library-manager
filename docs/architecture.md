@@ -11,7 +11,17 @@ A local page for the Serato DJ Pro library. The process reads `master.sqlite`. I
 3. Open `http://127.0.0.1:8765`.
 4. Press Ctrl-C to stop the server.
 
-The process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. Python's standard library is the only dependency. There is no installer or linter.
+On macOS the process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. On Windows that file is `%LOCALAPPDATA%\Serato\Library\master.sqlite`. `server.py` uses the Python standard library.
+
+A native window runs the same server:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python desktop.py
+```
+
+Closing the window stops the server. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`. To build an app for the machine you are on, install PyInstaller in that environment and run `pyinstaller serato-library.spec`. The result is `dist/Serato Library.app` on macOS, or `dist/Serato Library/` on Windows. The build is unsigned.
 
 ## Tests
 
@@ -26,7 +36,7 @@ The process exits when `~/Library/Application Support/Serato/Library/master.sqli
 3. Press F5.
 4. The debugger runs `server.py` in the integrated terminal.
 
-`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. "Python: Debug Tests" runs `unittest` discovery for `tests/`. No virtual environment is set, so VS Code uses the system Python. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
+`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. "Python: Debug Tests" runs `unittest` discovery for `tests/`. Those launches use the system Python. The desktop window uses `.venv`. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
 
 ## Containers
 
@@ -59,7 +69,11 @@ Rel(tags, audio, "Reads the tag header")
 
 ### `server.py`
 
-`main` binds `ThreadingHTTPServer` to `127.0.0.1` port `8765`. The handler class is `Handler`. It logs each request and answers JSON with `Cache-Control: no-store`.
+`serve` binds `ThreadingHTTPServer` to `127.0.0.1` port `8765` and exits when that port is already taken. `main` serves until Ctrl-C. The handler class is `Handler`. It logs each request and answers JSON with `Cache-Control: no-store`.
+
+`app_root` locates `static/`. A PyInstaller build reads it from `sys._MEIPASS`. A source checkout reads the directory beside `server.py`.
+
+`desktop.py` imports `webview` (pywebview 6.2.1), calls `serve`, and opens `http://127.0.0.1:8765` in a native window. The window allows text selection. pywebview uses WKWebView on macOS and WebView2, through the WinForms backend, on Windows. The import stays in `desktop.py`, so the server and the tests do not require the package.
 
 A GET path under `/api/` runs a query. Any other GET path is a file in `static/`. `index.html` answers `/` and an empty path. A path that leaves `static/` returns 404.
 
@@ -67,15 +81,15 @@ A GET path under `/api/` runs a query. Any other GET path is a file in `static/`
 
 `load_track` returns every column listed in `FIELDS`, plus the edit form, crate membership, near-duplicate copies, Prepare membership, the resolved file path, and marker data. Copies share title, artist, and length in whole seconds. The query returns at most 12 copies.
 
-Blank display values use a dash. Colors other than `0xFFFFFF` render as `#RRGGBB`. `third_party_type` maps `0` to Local file, `1` to iTunes, and `6` to Apple Music.
+Blank display values use a dash. Dates use English month names, so the label does not follow the machine locale. Colors other than `0xFFFFFF` render as `#RRGGBB`. `third_party_type` maps `0` to Local file, `1` to iTunes, and `6` to Apple Music.
 
 Allowed spaces are `Serato Library`, `Serato Video`, `Apple Music`, and `Prepare`. A missing space name means `Serato Library`.
 
 ### `library.py`
 
-`MASTER` points at the live Serato database named above. Reads use a read-only SQLite URI and `PRAGMA query_only=ON`.
+`default_library_path` chooses the live database: Application Support on macOS, and `%LOCALAPPDATA%\Serato\Library\master.sqlite` on Windows. `MASTER` starts as that path. Reads use a read-only SQLite URI and `PRAGMA query_only=ON`.
 
-`status` reads the `lock` table. A row counts as open only when `ps` shows that process id and the command line contains `serato`. A locked database also counts as open. `writable` is false in both cases.
+`status` reads the `lock` table. A row counts as open only when the process image contains `serato`. macOS and other Unix systems ask `ps`. Windows asks `tasklist`. A locked database also counts as open. `writable` is false in both cases. The payload includes `file_manager`: `Finder` or `File Explorer`.
 
 `begin_write` refuses the call when Serato is open (`SeratoOpen`, HTTP 409). It then calls `ensure_backup` and opens `BEGIN IMMEDIATE` with a one-second timeout. Foreign keys are off for the write. The backup folder is `Library/Backups/serato-web-<timestamp>/` beside `master.sqlite`. The copy includes `root.sqlite` when that file sits beside the master database. One process backs up a given master path once.
 
@@ -85,17 +99,17 @@ Nested crate names in the database use `NAME_SPLIT` (`U+105E8A`). `display_name`
 
 Container type `0` is the space root and stays out of the crate list. Type `2` is a smart crate. Smart-crate rules are JSON in `smart_crate_rules`.
 
-A write to a track or crate updates `master.sqlite`, then mirrors the change into the location database from the `connection` table. Location id `3` falls back to `root.sqlite` beside the master file. A test database whose path is not the live master mirrors only files in the same directory, or under `/tmp/`. A missing drive produces a warning and leaves the audio file in place.
+A write to a track or crate updates `master.sqlite`, then mirrors the change into the location database from the `connection` table. Location id `3` falls back to `root.sqlite` beside the master file. A test database whose path is not the live master mirrors only files in the same directory, or under `/tmp/`. A missing drive, or a database or filesystem error while mirroring, produces a warning and leaves the audio file in place. Any other mirror error propagates.
 
-`save_track` accepts `name`, `artist`, `album`, `genre`, `year`, `composer`, `remixer`, `label`, `grouping`, `comments`, `key`, `emoji`, `bpm`, `color`, `rating`, `is_beatgrid_locked`, and `portable_id`. A new `portable_id` also sets `file_name`, clears `is_missing`, and records `file_size` when the file is present. Every save sets `time_modified`.
+`save_track` accepts `name`, `artist`, `album`, `genre`, `year`, `composer`, `remixer`, `label`, `grouping`, `comments`, `key`, `emoji`, `bpm`, `color`, `rating`, `is_beatgrid_locked`, and `portable_id`. A new `portable_id` also sets `file_name`, clears `is_missing`, and records `file_size`. If that file's size cannot be read, the save is refused. Every save sets `time_modified`.
 
 `crate_action` accepts `create`, `rename`, `delete`, `color`, `expanded`, `rules`, `add`, `remove`, `prepare`, and `remove_library`. Delete removes the crate and its descendants. `remove_library` removes the track from the space and its crates. It does not delete the audio file. `prepare` adds or removes the track in the Prepare space.
 
-`history_sessions` and `history_entries` read `history_session` and `history_entry`. `duplicate_groups` groups tracks in one space by title, artist, and length in whole seconds. Rows with an empty title, an empty artist, or no length are skipped.
+`history_sessions` and `history_entries` read `history_session` and `history_entry`. `duplicate_groups` groups tracks in one space by title, artist, and length in whole seconds. Rows with an empty title, an empty artist, or no length are skipped. Asset ids in a group are sorted.
 
-`export_m3u` writes an extended M3U for one crate or for the whole space. `import_m3u` creates a normal crate and adds tracks whose `portable_id` matches a playlist path. Unmatched paths stay out of the crate. The result lists at most 50 of them.
+`export_m3u` writes an extended M3U for one crate or for the whole space. A track with no path is named in a `# omitted, no path` comment and left out of the playlist. A missing length is written as `-1`. `import_m3u` creates a normal crate and adds tracks whose `portable_id` matches a playlist path. Unmatched paths stay out of the crate. The result lists at most 50 of them.
 
-`reveal` runs `open -R` on the resolved audio file. `markers_for` calls `tags.read_serato_tags` when the file is on disk.
+`reveal` shows the resolved audio file in the host file manager. macOS runs `open -R`. Windows runs `explorer /select,`. `markers_for` calls `tags.read_serato_tags` when the file is on disk.
 
 ### `tags.py`
 
@@ -103,7 +117,7 @@ A write to a track or crate updates `master.sqlite`, then mirrors the change int
 
 Markers2 is base64 after a `01 01` header. Each entry is `CUE`, `LOOP`, or `FLIP`. A cue has index, start in milliseconds, color, and name. A loop adds end time and a locked flag. A flip has index, enabled, and name.
 
-BeatGrid version byte `1` yields markers. Each marker has a position in seconds. The last marker stores BPM. Earlier markers store a beat count. More than 4096 markers returns an empty list.
+BeatGrid version byte `1` yields markers. Each marker has a position in seconds. The last marker stores BPM. Earlier markers store a beat count. More than 4096 markers, or a payload shorter than the declared marker count, returns an empty list.
 
 ### `static/`
 
@@ -111,13 +125,13 @@ BeatGrid version byte `1` yields markers. Each marker has a position in seconds.
 
 `app.js` keeps library state in `state`. The list paints only the rows inside the scroll window. Row height is 36 pixels. Track sort keys include name, artist, album, BPM, key, and the other columns the header exposes. Crate sort is custom order, name, or date added.
 
-The detail pane edits the fields `save_track` accepts, shows marker sections, lists near-duplicate copies, and offers crate membership, Prepare, reveal in Finder, and remove from the library. Writes stay disabled while `writable` is false. Color choices are None, Red, Orange, Yellow, Green, Blue, Purple, and Pink.
+The detail pane edits the fields `save_track` accepts, shows marker sections, lists near-duplicate copies, and offers crate membership, Prepare, reveal in the host file manager, and remove from the library. The reveal label uses `file_manager` from the track status. Writes stay disabled while `writable` is false. Color choices are None, Red, Orange, Yellow, Green, Blue, Purple, and Pink.
 
 `app.css` is the layout and color for that screen.
 
 ## HTTP API
 
-The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413. Invalid JSON returns 400. Serato open or a database lock returns 409 with a `serato` object: `open`, `writable`, `pid`, `process`, and `message`.
+The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413. Invalid JSON returns 400. Serato open or a database lock returns 409 with a `serato` object: `open`, `writable`, `pid`, `process`, `message`, and `file_manager`.
 
 | Method | Path | Query or body | Result |
 |--------|------|---------------|--------|
@@ -131,7 +145,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | POST | `/api/track` | `id`, `space`, `fields` | Saves track fields |
 | POST | `/api/crate` | `action` plus ids and fields | Crate or membership change |
 | POST | `/api/import.m3u` | `space`, `parent`, `name`, `text` | New crate from playlist text |
-| POST | `/api/reveal` | `id` | Reveals the file in Finder |
+| POST | `/api/reveal` | `id` | Reveals the file in Finder or File Explorer |
 
 `GET /api/library` crate objects use `id`, `parent`, `name`, `smart`, `order`, `color`, `expanded`, `added`, `tracks`, and `rules` on smart crates. The space root crate is omitted. `root_id` is returned separately.
 

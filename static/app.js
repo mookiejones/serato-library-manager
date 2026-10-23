@@ -843,7 +843,8 @@ function renderDetail(track) {
   actions.className = "actions";
   const reveal = document.createElement("button");
   reveal.type = "button";
-  reveal.textContent = "Reveal in Finder";
+  const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
+  reveal.textContent = `Reveal in ${manager}`;
   reveal.disabled = !track.file_on_disk;
   reveal.addEventListener("click", () => revealTrack(track.id));
   const prepare = document.createElement("button");

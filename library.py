@@ -9,17 +9,49 @@ write in a process copies the database into Library/Backups first.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
+import sys
 import time
 import uuid
+from collections.abc import Callable, Mapping
 from contextlib import closing
 from pathlib import Path
+from typing import cast
 from urllib.parse import unquote, urlparse
 
-from tags import read_serato_tags
+from tags import SeratoTags, read_serato_tags
 
-LIVE_MASTER = Path.home() / "Library/Application Support/Serato/Library/master.sqlite"
+
+def default_library_path() -> Path:
+    """Return the Serato master database for this operating system.
+
+    Returns:
+        On Windows, master.sqlite under %LOCALAPPDATA%\\Serato\\Library.
+        On macOS and other systems, master.sqlite under Application Support.
+    """
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+        return base / "Serato" / "Library" / "master.sqlite"
+    return Path.home() / "Library/Application Support/Serato/Library/master.sqlite"
+
+
+def file_manager_name() -> str:
+    """Return the name of the host file manager.
+
+    Returns:
+        Finder on macOS, File Explorer on Windows, and file manager elsewhere.
+    """
+    if sys.platform == "win32":
+        return "File Explorer"
+    if sys.platform == "darwin":
+        return "Finder"
+    return "file manager"
+
+
+LIVE_MASTER = default_library_path()
 MASTER = LIVE_MASTER
 NAME_SPLIT = "\U00105e8a"
 LIBRARY_SPACE = "Serato Library"
@@ -85,6 +117,50 @@ _KEY_VALUES = {
 _backed_up: set[str] = set()
 
 
+def _as_int(value: object) -> int:
+    """Convert a SQLite or JSON number the way int() does.
+
+    Args:
+        value: A number or numeric text.
+
+    Returns:
+        The integer value. bool becomes 0 or 1.
+
+    Raises:
+        TypeError: If value is not a number or text.
+        ValueError: If text is not an integer.
+    """
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, (float, str, bytes, bytearray)):
+        return int(value)
+    raise TypeError(
+        "int() argument must be a string, a bytes-like object or a real number, not "
+        f"{type(value).__name__}"
+    )
+
+
+def _as_float(value: object) -> float:
+    """Convert a SQLite or JSON number the way float() does.
+
+    Args:
+        value: A number or numeric text.
+
+    Returns:
+        The float value.
+
+    Raises:
+        TypeError: If value is not a number or text.
+        ValueError: If text is not a float.
+    """
+    if isinstance(value, (int, float, str, bytes, bytearray)):
+        return float(value)
+    raise TypeError(
+        "float() argument must be a string or a real number, not "
+        f"{type(value).__name__}"
+    )
+
+
 class LibraryError(Exception):
     """Raised when a library request cannot be completed.
 
@@ -109,13 +185,13 @@ class SeratoOpen(LibraryError):
 
     The HTTP status is 409. info is the status() payload.
     """
-    def __init__(self, info: dict):
+    def __init__(self, info: dict[str, object]):
         """Build a lock error from a status payload.
 
         Args:
             info: Dict from status() with a message key.
         """
-        super().__init__(info["message"], 409)
+        super().__init__(cast(str, info["message"]), 409)
         self.info = info
 
 
@@ -198,10 +274,24 @@ def _process_is_serato(pid: int) -> bool:
         pid: Process id from the lock table.
 
     Returns:
-        True when ps reports a command line that contains serato.
+        True when the process image name contains serato.
     """
     if not pid or pid <= 0:
         return False
+    if sys.platform == "win32":
+        return _windows_process_is_serato(pid)
+    return _unix_process_is_serato(pid)
+
+
+def _unix_process_is_serato(pid: int) -> bool:
+    """Return whether ps shows a Serato command for this process id.
+
+    Args:
+        pid: Process id from the lock table.
+
+    Returns:
+        True when ps reports a command name that contains serato.
+    """
     try:
         result = subprocess.run(
             ["ps", "-p", str(int(pid)), "-o", "comm="],
@@ -217,7 +307,31 @@ def _process_is_serato(pid: int) -> bool:
     return "serato" in result.stdout.lower()
 
 
-def _status_rows(conn: sqlite3.Connection) -> dict:
+def _windows_process_is_serato(pid: int) -> bool:
+    """Return whether tasklist shows a Serato image for this process id.
+
+    Args:
+        pid: Process id from the lock table.
+
+    Returns:
+        True when the tasklist image name contains serato.
+    """
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    return "serato" in result.stdout.lower()
+
+
+def _status_rows(conn: sqlite3.Connection) -> dict[str, object]:
     """Read the lock table and decide whether edits are allowed.
 
     Args:
@@ -258,32 +372,35 @@ def _status_rows(conn: sqlite3.Connection) -> dict:
     }
 
 
-def status(path: Path | None = None) -> dict:
+def status(path: Path | None = None) -> dict[str, object]:
     """Report whether Serato has the library open.
 
     Args:
         path: Database path. None selects MASTER.
 
     Returns:
-        A status dict. A locked database is reported as open.
+        A status dict. A locked database is reported as open. file_manager names Finder or File Explorer.
 
     Raises:
         sqlite3.OperationalError: If the database fails for a reason other than a lock.
         LibraryError: If the database file does not exist.
     """
+    info: dict[str, object]
     try:
         with closing(read_conn(path)) as conn:
-            return _status_rows(conn)
+            info = _status_rows(conn)
     except sqlite3.OperationalError as exc:
-        if "locked" in str(exc).lower():
-            return {
-                "open": True,
-                "writable": False,
-                "pid": None,
-                "process": "Serato DJ Pro",
-                "message": "Serato DJ Pro has the library open. Edits stay off until it quits.",
-            }
-        raise
+        if "locked" not in str(exc).lower():
+            raise
+        info = {
+            "open": True,
+            "writable": False,
+            "pid": None,
+            "process": "Serato DJ Pro",
+            "message": "Serato DJ Pro has the library open. Edits stay off until it quits.",
+        }
+    info["file_manager"] = file_manager_name()
+    return info
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -531,7 +648,7 @@ def _ancestry(conn: sqlite3.Connection, crate_id: int) -> list[str]:
     Returns:
         Display names. The space root is omitted.
     """
-    names = []
+    names: list[str] = []
     seen: set[int] = set()
     current = crate_id
     while current and current not in seen:
@@ -540,10 +657,17 @@ def _ancestry(conn: sqlite3.Connection, crate_id: int) -> list[str]:
             "SELECT parent_id, name, type FROM container WHERE id = ?",
             (current,),
         ).fetchone()
-        if row is None or int(row["type"]) == 0:
+        if row is None:
             break
-        names.append(display_name(row["name"]))
-        current = row["parent_id"]
+        kind: object = row["type"]
+        if _as_int(kind) == 0:
+            break
+        stored: object = row["name"]
+        names.append(display_name(cast(str, stored)))
+        parent: object = row["parent_id"]
+        if parent is None:
+            break
+        current = _as_int(parent)
     names.reverse()
     return names
 
@@ -607,7 +731,7 @@ def _stored_name(conn: sqlite3.Connection, parent_id: int, display: str, crate_t
         SELECT id FROM container
         WHERE parent_id = ? AND name = ? COLLATE NOCASE AND type = ? AND id != ?
         """,
-        (parent_id, candidate, crate_type, existing_id or -1),
+        (parent_id, candidate, crate_type, -1 if existing_id is None else existing_id),
     ).fetchone()
     if clash is None:
         return candidate
@@ -694,7 +818,7 @@ def _next_revision(conn: sqlite3.Connection) -> int:
     return int(conn.execute("SELECT revision FROM serato").fetchone()[0])
 
 
-def _with_location(path: Path, fn: object) -> str | None:
+def _with_location(path: Path, fn: Callable[[sqlite3.Connection], str | None]) -> str | None:
     """Run a write against a location database and return a warning on failure.
 
     Args:
@@ -702,7 +826,7 @@ def _with_location(path: Path, fn: object) -> str | None:
         fn: Callable that receives the location connection and returns a warning or None.
 
     Returns:
-        None on success, or a warning string when the mirror is skipped or fails.
+        None on success, or a warning when the mirror is skipped or the location database raises sqlite3.Error or OSError. Other exceptions propagate.
     """
     if not path.is_file() or not _mirror_allowed(path):
         return "Saved in the main library. That track's drive is not connected, so Serato may reconcile the edit when the drive returns."
@@ -715,7 +839,7 @@ def _with_location(path: Path, fn: object) -> str | None:
         warning = fn(conn)
         conn.commit()
         return warning
-    except Exception as exc:
+    except (sqlite3.Error, OSError) as exc:
         conn.rollback()
         return f"Saved in the main library. The location database was not updated ({exc})."
     finally:
@@ -767,7 +891,7 @@ def _clean_text(field: str, value: object) -> str:
     return value
 
 
-def _clean_fields(fields: dict) -> dict:
+def _clean_fields(fields: object) -> dict[str, object]:
     """Validate a track edit payload.
 
     Args:
@@ -781,11 +905,14 @@ def _clean_fields(fields: dict) -> dict:
     """
     if not isinstance(fields, dict) or not fields:
         raise LibraryError("Choose a field to save.")
-    unknown = set(fields) - TRACK_FIELDS
-    if unknown:
+    raw = cast("dict[object, object]", fields)
+    if any(key not in TRACK_FIELDS for key in raw):
         raise LibraryError("That field cannot be edited.")
-    cleaned = {}
-    for field, value in fields.items():
+    cleaned: dict[str, object] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            raise LibraryError("That field cannot be edited.")
+        field = key
         if field in TEXT_FIELDS:
             cleaned[field] = _clean_text(field, value)
         elif field == "bpm":
@@ -793,7 +920,7 @@ def _clean_fields(fields: dict) -> dict:
                 cleaned[field] = None
             else:
                 try:
-                    number = float(value)
+                    number = _as_float(value)
                 except (TypeError, ValueError):
                     raise LibraryError("BPM needs a number.") from None
                 if number < 0 or number > 999:
@@ -804,7 +931,7 @@ def _clean_fields(fields: dict) -> dict:
                 cleaned[field] = 0xFFFFFF
             else:
                 try:
-                    color = int(value)
+                    color = _as_int(value)
                 except (TypeError, ValueError):
                     raise LibraryError("Color needs a number.") from None
                 if color < 0 or color > 0xFFFFFF:
@@ -815,7 +942,7 @@ def _clean_fields(fields: dict) -> dict:
                 cleaned[field] = None
             else:
                 try:
-                    rating = float(value)
+                    rating = _as_float(value)
                 except (TypeError, ValueError):
                     raise LibraryError("Rating needs a number.") from None
                 if rating < 0 or rating > 1:
@@ -855,7 +982,7 @@ def _portable_for_existing_file(value: object) -> str:
         return str(path)
 
 
-def _assign(conn: sqlite3.Connection, table: str, columns: dict, where: str, key: object) -> None:
+def _assign(conn: sqlite3.Connection, table: str, columns: Mapping[str, object], where: str, key: object) -> None:
     """Update columns that exist on a table.
 
     Args:
@@ -873,7 +1000,7 @@ def _assign(conn: sqlite3.Connection, table: str, columns: dict, where: str, key
     conn.execute(sql, [value for _, value in pairs] + [key])
 
 
-def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: dict) -> str | None:
+def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: Mapping[str, object]) -> str | None:
     """Copy saved asset columns into the track's location database.
 
     Args:
@@ -905,7 +1032,7 @@ def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: dict) -> s
     return _with_location(path, apply)
 
 
-def save_track(asset_id: int, fields: dict, space: str = LIBRARY_SPACE) -> dict:
+def save_track(asset_id: int, fields: object, space: str = LIBRARY_SPACE) -> dict[str, object]:
     """Save editable fields for one track.
 
     Args:
@@ -917,7 +1044,7 @@ def save_track(asset_id: int, fields: dict, space: str = LIBRARY_SPACE) -> dict:
         A dict with ok, id, and warning.
 
     Raises:
-        LibraryError: If the fields are invalid or the track is not in the space.
+        LibraryError: If the fields are invalid, the track is not in the space, or the new file's size cannot be read.
         SeratoOpen: If Serato still has the library open.
     """
     cleaned = _clean_fields(fields)
@@ -937,13 +1064,14 @@ def save_track(asset_id: int, fields: dict, space: str = LIBRARY_SPACE) -> dict:
         if row is None:
             raise LibraryError("That track is not in this space.", 404)
         values = dict(cleaned)
-        if portable is not None:
+        if isinstance(portable, str):
             values["file_name"] = Path(portable).name
             values["is_missing"] = 0
+            size_path = Path(portable) if Path(portable).is_absolute() else Path.home() / portable
             try:
-                values["file_size"] = Path(portable).stat().st_size if Path(portable).is_absolute() else (Path.home() / portable).stat().st_size
-            except OSError:
-                pass
+                values["file_size"] = size_path.stat().st_size
+            except OSError as exc:
+                raise LibraryError("That path could not be read.", 400) from exc
         values["time_modified"] = int(time.time())
         _assign(conn, "asset", values, "id = ?", asset_id)
         conn.commit()
@@ -987,14 +1115,18 @@ def _rules_blob(rules: object) -> str:
     Raises:
         LibraryError: If the value is not a rules object with a rules list.
     """
-    if isinstance(rules, str):
+    parsed: object = rules
+    if isinstance(parsed, str):
         try:
-            rules = json.loads(rules)
+            parsed = json.loads(parsed)
         except json.JSONDecodeError as exc:
             raise LibraryError("Smart crate rules need to be JSON.") from exc
-    if not isinstance(rules, dict) or not isinstance(rules.get("rules", []), list):
+    if not isinstance(parsed, dict):
         raise LibraryError("Smart crate rules need a rules list.")
-    return json.dumps(rules, ensure_ascii=False, separators=(",", ":"))
+    raw = cast("dict[object, object]", parsed)
+    if not isinstance(raw.get("rules", []), list):
+        raise LibraryError("Smart crate rules need a rules list.")
+    return json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
 
 
 def _root_parent(master: sqlite3.Connection, root: sqlite3.Connection, parent_id: int, space: str) -> int | None:
@@ -1082,7 +1214,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
     return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
 
-def _create_crate(conn: sqlite3.Connection, space: str, parent_id: int | None, name: str, smart: bool, rules: object) -> dict:
+def _create_crate(conn: sqlite3.Connection, space: str, parent_id: object, name: str, smart: bool, rules: object) -> dict[str, object]:
     """Insert a crate and mirror it to the main drive database.
 
     Args:
@@ -1100,7 +1232,7 @@ def _create_crate(conn: sqlite3.Connection, space: str, parent_id: int | None, n
         LibraryError: If the name is invalid or the parent is a smart crate.
     """
     root_id = _space_root(conn, space)
-    parent = root_id if not parent_id or parent_id == root_id else int(parent_id)
+    parent = root_id if parent_id is None or parent_id == root_id else _as_int(parent_id)
     if parent != root_id:
         parent_row = _container(conn, parent, space)
         if int(parent_row["type"]) == 2:
@@ -1186,7 +1318,7 @@ def _link_new_crate(conn: sqlite3.Connection, crate_id: int, parent_id: int, nam
     return warning
 
 
-def _rename_crate(conn: sqlite3.Connection, space: str, crate_id: int, name: str) -> dict:
+def _rename_crate(conn: sqlite3.Connection, space: str, crate_id: int, name: str) -> dict[str, object]:
     """Rename a crate and refresh export filenames.
 
     Args:
@@ -1267,7 +1399,7 @@ def _delete_ids(conn: sqlite3.Connection, crate_ids: list[int]) -> None:
         conn.execute("DELETE FROM container WHERE id = ? AND type != 0", (crate_id,))
 
 
-def _delete_crate(conn: sqlite3.Connection, space: str, crate_id: int) -> dict:
+def _delete_crate(conn: sqlite3.Connection, space: str, crate_id: int) -> dict[str, object]:
     """Delete a crate, its descendants, and the mirrored rows.
 
     Args:
@@ -1308,7 +1440,7 @@ def _delete_crate(conn: sqlite3.Connection, space: str, crate_id: int) -> dict:
     return {"ok": True, "id": crate_id, "warning": warning}
 
 
-def _mirror_container_fields(conn: sqlite3.Connection, crate_id: int, columns: dict, refresh_names: bool = False) -> str | None:
+def _mirror_container_fields(conn: sqlite3.Connection, crate_id: int, columns: Mapping[str, object], refresh_names: bool = False) -> str | None:
     """Copy crate columns into the linked row in root.sqlite.
 
     Args:
@@ -1342,7 +1474,7 @@ def _mirror_container_fields(conn: sqlite3.Connection, crate_id: int, columns: d
     return _with_location(root_path, apply)
 
 
-def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color: object) -> dict:
+def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color: object) -> dict[str, object]:
     """Set a crate color.
 
     Args:
@@ -1364,7 +1496,7 @@ def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color: objec
         value = None
     else:
         try:
-            value = int(color)
+            value = _as_int(color)
         except (TypeError, ValueError):
             raise LibraryError("Color needs a number.") from None
         if value < 0 or value > 0xFFFFFF:
@@ -1376,7 +1508,7 @@ def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color: objec
     return {"ok": True, "id": crate_id, "warning": warning}
 
 
-def _set_expanded(conn: sqlite3.Connection, space: str, crate_id: int, expanded: object) -> dict:
+def _set_expanded(conn: sqlite3.Connection, space: str, crate_id: int, expanded: object) -> dict[str, object]:
     """Store whether a crate is expanded in the tree.
 
     Args:
@@ -1398,7 +1530,7 @@ def _set_expanded(conn: sqlite3.Connection, space: str, crate_id: int, expanded:
     return {"ok": True, "id": crate_id, "warning": warning}
 
 
-def _set_rules(conn: sqlite3.Connection, space: str, crate_id: int, rules: object) -> dict:
+def _set_rules(conn: sqlite3.Connection, space: str, crate_id: int, rules: object) -> dict[str, object]:
     """Replace the rules of a smart crate.
 
     Args:
@@ -1519,7 +1651,7 @@ def _space_asset(conn: sqlite3.Connection, asset_id: int, space: str, create: bo
     return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
 
 
-def _membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, space: str, add: bool) -> dict:
+def _membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, space: str, add: bool) -> dict[str, object]:
     """Add or remove a track from a normal crate.
 
     Args:
@@ -1692,7 +1824,7 @@ def _prepare_container(conn: sqlite3.Connection) -> int:
     return int(row[0])
 
 
-def _set_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> dict:
+def _set_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> dict[str, object]:
     """Add or remove a track from the Prepare space.
 
     Args:
@@ -1815,7 +1947,7 @@ def _mirror_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> str |
     return _with_location(root_path, apply)
 
 
-def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> dict:
+def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> dict[str, object]:
     """Remove a track from a space and from the crates in that space.
 
     The audio file stays on disk.
@@ -1886,7 +2018,7 @@ def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> d
     return {"ok": True, "id": asset_id, "warning": warning}
 
 
-def crate_action(payload: dict) -> dict:
+def crate_action(payload: Mapping[str, object]) -> dict[str, object]:
     """Run one crate edit.
 
     Args:
@@ -1903,7 +2035,7 @@ def crate_action(payload: dict) -> dict:
         KeyError: If a required id is missing.
     """
     action = payload.get("action")
-    space = payload.get("space") or LIBRARY_SPACE
+    space = cast(str, payload.get("space") or LIBRARY_SPACE)
     conn = begin_write()
     try:
         if action == "create":
@@ -1911,35 +2043,33 @@ def crate_action(payload: dict) -> dict:
                 conn,
                 space,
                 payload.get("parent"),
-                payload.get("name") or "",
+                cast(str, payload.get("name") or ""),
                 bool(payload.get("smart")),
                 payload.get("rules"),
             )
         elif action == "rename":
-            result = _rename_crate(conn, space, int(payload["id"]), payload.get("name") or "")
+            result = _rename_crate(conn, space, _as_int(payload["id"]), cast(str, payload.get("name") or ""))
         elif action == "delete":
-            result = _delete_crate(conn, space, int(payload["id"]))
+            result = _delete_crate(conn, space, _as_int(payload["id"]))
         elif action == "color":
-            result = _set_color(conn, space, int(payload["id"]), payload.get("color"))
+            result = _set_color(conn, space, _as_int(payload["id"]), payload.get("color"))
         elif action == "expanded":
-            result = _set_expanded(conn, space, int(payload["id"]), payload.get("expanded"))
+            result = _set_expanded(conn, space, _as_int(payload["id"]), payload.get("expanded"))
         elif action == "rules":
-            result = _set_rules(conn, space, int(payload["id"]), payload.get("rules"))
+            result = _set_rules(conn, space, _as_int(payload["id"]), payload.get("rules"))
         elif action == "add":
-            result = _membership(conn, int(payload["id"]), int(payload["asset"]), space, True)
+            result = _membership(conn, _as_int(payload["id"]), _as_int(payload["asset"]), space, True)
         elif action == "remove":
-            result = _membership(conn, int(payload["id"]), int(payload["asset"]), space, False)
+            result = _membership(conn, _as_int(payload["id"]), _as_int(payload["asset"]), space, False)
         elif action == "prepare":
-            result = _set_prepare(conn, int(payload["asset"]), bool(payload.get("add", True)))
+            result = _set_prepare(conn, _as_int(payload["asset"]), bool(payload.get("add", True)))
             if payload.get("add", True):
-                # _set_prepare(add) mirrors through _membership. A remove mirrors itself.
-                pass
-            if payload.get("add", True):
-                extra = _mirror_prepare(conn, int(payload["asset"]), True)
+                # _set_prepare(add) mirrors through _membership. This also mirrors the Prepare crate.
+                extra = _mirror_prepare(conn, _as_int(payload["asset"]), True)
                 if extra and not result.get("warning"):
                     result["warning"] = extra
         elif action == "remove_library":
-            result = _remove_from_space(conn, int(payload["asset"]), space)
+            result = _remove_from_space(conn, _as_int(payload["asset"]), space)
         else:
             raise LibraryError("That crate action is not available.")
         conn.commit()
@@ -1951,7 +2081,7 @@ def crate_action(payload: dict) -> dict:
         conn.close()
 
 
-def history_sessions() -> list[dict]:
+def history_sessions() -> list[dict[str, object]]:
     """List history sessions, newest first.
 
     Returns:
@@ -1982,7 +2112,7 @@ def history_sessions() -> list[dict]:
     ]
 
 
-def history_entries(session_id: int) -> dict:
+def history_entries(session_id: int) -> dict[str, object]:
     """Load one history session and its played entries.
 
     Args:
@@ -2040,14 +2170,14 @@ def history_entries(session_id: int) -> dict:
     }
 
 
-def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict]:
+def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict[str, object]]:
     """Group tracks that share a title, artist, and length in whole seconds.
 
     Args:
         space: Space to scan.
 
     Returns:
-        Groups with name, artist, seconds, and asset ids. Empty titles and artists are skipped.
+        Groups with name, artist, seconds, and asset ids sorted by id. Empty titles and artists are skipped.
 
     Raises:
         LibraryError: If the space is not allowed.
@@ -2072,9 +2202,10 @@ def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict]:
             """,
             (space,),
         ).fetchall()
-    groups = []
+    groups: list[dict[str, object]] = []
     for row in rows:
-        ids = [int(part) for part in (row["ids"] or "").split(",") if part]
+        raw_ids: object = row["ids"] or ""
+        ids = sorted(int(part) for part in cast(str, raw_ids).split(",") if part)
         groups.append(
             {
                 "name": row["name"],
@@ -2116,7 +2247,7 @@ def export_m3u(space: str, crate_id: int | None) -> str:
         crate_id: Crate to export. None exports every track in the space.
 
     Returns:
-        Playlist text ending in a newline.
+        Playlist text ending in a newline. A track with no path is named in a comment and left out. A missing length is written as -1.
 
     Raises:
         LibraryError: If the space is not allowed or the crate is not in that space.
@@ -2153,13 +2284,15 @@ def export_m3u(space: str, crate_id: int | None) -> str:
             ).fetchall()
     lines = ["#EXTM3U", f"#PLAYLIST:{title}"]
     for row in rows:
-        path = _resolved(row["portable_id"])
-        if not path:
-            continue
-        seconds = int((row["length_ms"] or 0) / 1000)
         artist = row["artist"] or ""
         name = row["name"] or "Untitled"
         label = f"{artist} - {name}" if artist else name
+        path = _resolved(row["portable_id"])
+        if path is None:
+            lines.append(f"# omitted, no path: {label}")
+            continue
+        length = row["length_ms"]
+        seconds = -1 if length is None else int(length) // 1000
         lines.append(f"#EXTINF:{seconds},{label}")
         lines.append(path)
     return "\n".join(lines) + "\n"
@@ -2198,7 +2331,7 @@ def _match_portable(conn: sqlite3.Connection, space: str, raw_path: str) -> int 
     return int(row[0]) if row else None
 
 
-def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
+def import_m3u(space: str, parent_id: int | None, name: str, text: object) -> dict[str, object]:
     """Create a crate from M3U text and add the tracks that already exist.
 
     Args:
@@ -2216,7 +2349,7 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
     """
     if not isinstance(text, str) or not text.strip():
         raise LibraryError("The playlist is empty.")
-    paths = []
+    paths: list[str] = []
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -2224,9 +2357,9 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
         paths.append(line)
     conn = begin_write()
     try:
-        matched = []
-        unmatched = []
-        seen = set()
+        matched: list[int] = []
+        unmatched: list[str] = []
+        seen: set[int] = set()
         for raw in paths:
             asset_id = _match_portable(conn, space, raw)
             if asset_id is None or asset_id in seen:
@@ -2236,8 +2369,11 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
             seen.add(asset_id)
             matched.append(asset_id)
         created = _create_crate(conn, space, parent_id, name or "Imported playlist", False, None)
+        crate_id = created["id"]
+        if not isinstance(crate_id, int):
+            raise LibraryError("The crate could not be created.")
         for asset_id in matched:
-            _membership(conn, created["id"], asset_id, space, True)
+            _membership(conn, crate_id, asset_id, space, True)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -2255,8 +2391,24 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
     }
 
 
-def reveal(asset_id: int) -> dict:
-    """Show the audio file in Finder.
+def reveal_command(path: str) -> list[str]:
+    """Build the command that shows one file in the system file manager.
+
+    Args:
+        path: Absolute path of the audio file.
+
+    Returns:
+        Argv for Finder, File Explorer, or the parent folder on another system.
+    """
+    if sys.platform == "win32":
+        return ["explorer", "/select,", path]
+    if sys.platform == "darwin":
+        return ["open", "-R", path]
+    return ["xdg-open", str(Path(path).parent)]
+
+
+def reveal(asset_id: int) -> dict[str, object]:
+    """Show the audio file in the system file manager.
 
     Args:
         asset_id: Asset id.
@@ -2274,11 +2426,11 @@ def reveal(asset_id: int) -> dict:
     path = _resolved(row["portable_id"])
     if not path or not Path(path).is_file():
         raise LibraryError("That file is not on disk.", 404)
-    subprocess.run(["open", "-R", path], check=False)
+    subprocess.run(reveal_command(path), check=False)
     return {"ok": True, "path": path}
 
 
-def markers_for(path: str | None, on_disk: bool) -> dict:
+def markers_for(path: str | None, on_disk: bool) -> SeratoTags:
     """Read cue data when the audio file is on disk.
 
     Args:

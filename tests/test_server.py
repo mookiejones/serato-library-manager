@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import threading
 import unittest
 import urllib.error
 import urllib.request
+from datetime import datetime
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 
 import server
-from server import blank, format_bpm, format_bool, format_color, require_space
+from server import blank, format_bpm, format_bool, format_color, format_when, require_space
 from tests.fixture import TempLibrary
 import library
 from library import LibraryError
@@ -24,6 +27,11 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(format_bool(1), "Yes")
         self.assertEqual(format_color(0xFFFFFF), "None")
         self.assertEqual(format_color(0xCC0000), "#CC0000")
+        when = datetime(2026, 1, 15, 15, 5)
+        self.assertEqual(format_when(int(when.timestamp())), "Jan 15, 2026 3:05 PM")
+        self.assertEqual(format_when(when.timestamp()), "Jan 15, 2026 3:05 PM")
+        self.assertEqual(format_when(0), "—")
+        self.assertEqual(format_when(False), "—")
 
     def test_require_space(self) -> None:
         self.assertEqual(require_space(None), "Serato Library")
@@ -75,6 +83,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["track_count"], 2)
         self.assertTrue(payload["writable"])
+        self.assertEqual(payload["serato"]["file_manager"], library.file_manager_name())
         self.assertEqual(payload["tracks"][0]["name"], "Same")
 
     def test_save_and_read_track(self) -> None:
@@ -127,6 +136,21 @@ class ApiTests(unittest.TestCase):
             )
         self.assertEqual(status, 409)
         self.assertFalse(payload["serato"]["writable"])
+
+    def test_frozen_app_reads_static_from_the_bundle(self) -> None:
+        with unittest.mock.patch.object(server.sys, "frozen", True, create=True), unittest.mock.patch.object(
+            server.sys, "_MEIPASS", "/bundle", create=True
+        ):
+            self.assertEqual(server.app_root(), Path("/bundle"))
+
+    def test_taken_port_names_the_other_server(self) -> None:
+        with unittest.mock.patch(
+            "server.ThreadingHTTPServer",
+            side_effect=OSError(errno.EADDRINUSE, "Address already in use"),
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                server.serve()
+        self.assertIn("server.py", str(caught.exception))
 
 
 if __name__ == "__main__":

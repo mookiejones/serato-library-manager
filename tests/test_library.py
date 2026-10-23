@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import library
@@ -17,6 +18,7 @@ class LibraryTests(unittest.TestCase):
             info = library.status()
         self.assertTrue(info["writable"])
         self.assertFalse(info["open"])
+        self.assertEqual(info["file_manager"], library.file_manager_name())
         self.assertIn(temp.db.name, "master.sqlite")
 
     def test_status_blocks_a_live_serato_process(self) -> None:
@@ -65,7 +67,37 @@ class LibraryTests(unittest.TestCase):
         self.assertTrue(added["ok"])
         self.assertIn("#PLAYLIST:Warmup", playlist)
         self.assertIn("same-a.mp3", playlist)
+        self.assertIn("#EXTINF:180,", playlist)
         self.assertEqual(left, 0)
+
+    def test_export_names_a_track_with_no_path(self) -> None:
+        with TempLibrary() as temp:
+            with sqlite3.connect(temp.db) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, length_ms, portable_id)
+                    VALUES
+                        (3, 'Ghost', 'Artist', NULL, NULL),
+                        (4, 'Quiet', 'Artist', NULL, 'Music/quiet.mp3')
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO space_asset (id, asset_id, space_id)
+                    VALUES (3, 3, 1), (4, 4, 1)
+                    """
+                )
+            playlist = library.export_m3u("Serato Library", None)
+        lines = playlist.splitlines()
+        self.assertIn("# omitted, no path: Artist - Ghost", lines)
+        self.assertIn("#EXTINF:-1,Artist - Quiet", lines)
+        self.assertNotIn("Ghost", [line for line in lines if not line.startswith("#")])
+
+    def test_parent_zero_is_not_the_space_root(self) -> None:
+        with TempLibrary():
+            with self.assertRaises(LibraryError) as caught:
+                library.crate_action({"action": "create", "name": "Orphan", "parent": 0})
+        self.assertEqual(caught.exception.status, 404)
 
     def test_unknown_crate_action_rolls_back(self) -> None:
         with TempLibrary():
@@ -126,6 +158,60 @@ class LibraryTests(unittest.TestCase):
                 with self.assertRaises(LibraryError):
                     library.reveal(1)
         run.assert_not_called()
+
+    def test_default_library_path_follows_the_operating_system(self) -> None:
+        with mock.patch("library.sys.platform", "darwin"), mock.patch(
+            "library.Path.home", return_value=Path("/Users/dj")
+        ):
+            self.assertEqual(
+                library.default_library_path(),
+                Path("/Users/dj/Library/Application Support/Serato/Library/master.sqlite"),
+            )
+        with (
+            mock.patch("library.sys.platform", "win32"),
+            mock.patch.dict("os.environ", {"LOCALAPPDATA": r"C:\Users\dj\AppData\Local"}),
+        ):
+            self.assertEqual(
+                library.default_library_path(),
+                Path(r"C:\Users\dj\AppData\Local") / "Serato" / "Library" / "master.sqlite",
+            )
+
+    def test_reveal_command_matches_the_file_manager(self) -> None:
+        with mock.patch("library.sys.platform", "darwin"):
+            self.assertEqual(library.reveal_command("/Music/a.mp3"), ["open", "-R", "/Music/a.mp3"])
+            self.assertEqual(library.file_manager_name(), "Finder")
+        with mock.patch("library.sys.platform", "win32"):
+            self.assertEqual(
+                library.reveal_command(r"C:\Music\a.mp3"),
+                ["explorer", "/select,", r"C:\Music\a.mp3"],
+            )
+            self.assertEqual(library.file_manager_name(), "File Explorer")
+
+    def test_windows_serato_process_blocks_the_library(self) -> None:
+        completed = mock.Mock(returncode=0, stdout='"Serato DJ Pro.exe","99","Console","1","1 K"')
+        with TempLibrary():
+            with sqlite3.connect(library.MASTER) as conn:
+                conn.execute(
+                    "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (99, 'Serato DJ Pro')"
+                )
+            with (
+                mock.patch("library.sys.platform", "win32"),
+                mock.patch("library.subprocess.run", return_value=completed) as run,
+            ):
+                info = library.status()
+        self.assertTrue(info["open"])
+        self.assertFalse(info["writable"])
+        self.assertEqual(info["file_manager"], "File Explorer")
+        self.assertEqual(run.call_args.args[0][0], "tasklist")
+
+    def test_unix_process_check_uses_ps(self) -> None:
+        completed = mock.Mock(returncode=0, stdout="Serato DJ Pro\n")
+        with (
+            mock.patch("library.sys.platform", "darwin"),
+            mock.patch("library.subprocess.run", return_value=completed) as run,
+        ):
+            self.assertTrue(library._process_is_serato(42))
+        self.assertEqual(run.call_args.args[0][:2], ["ps", "-p"])
 
     def test_disallowed_space(self) -> None:
         with TempLibrary():
