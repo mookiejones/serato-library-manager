@@ -39,7 +39,6 @@ sphinx-quickstart docs/
 ```
 
 **conf.py essentials:**
-
 ```python
 extensions = [
     'sphinx.ext.autodoc',
@@ -101,7 +100,6 @@ python:
 ```
 
 For detailed setup, see:
-
 - **[SPHINX_CONFIG.md](SPHINX_CONFIG.md)** - Full Sphinx configuration
 - **[TUTORIALS.md](TUTORIALS.md)** - Tutorial writing guide
 
