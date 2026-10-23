@@ -105,6 +105,14 @@ class TagTests(unittest.TestCase):
         self.assertEqual(_parse_beatgrid(b"\x02\x00\x00\x00\x00\x01"), [])
         huge = bytes([1, 0]) + (4097).to_bytes(4, "big")
         self.assertEqual(_parse_beatgrid(huge), [])
+        short = bytes([1, 0]) + (2).to_bytes(4, "big") + struct.pack(">f", 1.0)
+        self.assertEqual(_parse_beatgrid(short), [])
+
+    def test_bad_markers_base64_is_empty(self) -> None:
+        parsed = _parse_markers2(b"\x01\x01@")
+        self.assertEqual(parsed["cues"], [])
+        self.assertEqual(parsed["loops"], [])
+        self.assertEqual(parsed["flips"], [])
 
     def test_file_header_is_read(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

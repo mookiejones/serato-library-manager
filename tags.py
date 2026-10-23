@@ -8,11 +8,74 @@ because replacing an ID3 tag can drop those frames.
 from __future__ import annotations
 
 import base64
+import binascii
 import struct
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 
-def read_serato_tags(path: str | None) -> dict:
+class Cue(TypedDict):
+    """One Serato cue point."""
+
+    index: int
+    start_ms: int
+    color: str | None
+    name: str
+
+
+class Loop(TypedDict):
+    """One Serato loop."""
+
+    index: int
+    start_ms: int
+    end_ms: int
+    color: str | None
+    locked: bool
+    name: str
+
+
+class Flip(TypedDict):
+    """One Serato flip."""
+
+    index: int
+    enabled: bool
+    name: str
+
+
+class BeatMarker(TypedDict):
+    """One beatgrid marker.
+
+    Earlier markers store a beat count. The last marker stores BPM.
+    """
+
+    position: float
+    bpm: NotRequired[float]
+    beats: NotRequired[int]
+
+
+class MarkerEntries(TypedDict):
+    """Cues, loops, and flips from one Markers2 payload."""
+
+    cues: list[Cue]
+    loops: list[Loop]
+    flips: list[Flip]
+
+
+class SeratoTags(TypedDict):
+    """Cue data read from an audio file.
+
+    unavailable is set by the library layer when the file was not read.
+    """
+
+    cues: list[Cue]
+    loops: list[Loop]
+    flips: list[Flip]
+    beatgrid: list[BeatMarker]
+    found: bool
+    unavailable: NotRequired[bool]
+
+
+def read_serato_tags(path: str | None) -> SeratoTags:
     """Read Serato cue, loop, flip, and beatgrid data from an audio file.
 
     The read covers the first 2,000,000 bytes and, for a longer file, the last
@@ -28,7 +91,7 @@ def read_serato_tags(path: str | None) -> dict:
         >>> read_serato_tags(None)["found"]
         False
     """
-    empty = {"cues": [], "loops": [], "flips": [], "beatgrid": [], "found": False}
+    empty: SeratoTags = {"cues": [], "loops": [], "flips": [], "beatgrid": [], "found": False}
     if not path:
         return empty
     file = Path(path)
@@ -47,8 +110,10 @@ def read_serato_tags(path: str | None) -> dict:
         return empty
 
     frames = _geob_frames(head) + _geob_frames(tail)
-    cues, loops, flips = [], [], []
-    beatgrid = []
+    cues: list[Cue] = []
+    loops: list[Loop] = []
+    flips: list[Flip] = []
+    beatgrid: list[BeatMarker] = []
     found = False
     for name, payload in frames:
         if name == "Serato Markers2":
@@ -74,7 +139,7 @@ def _geob_frames(blob: bytes) -> list[tuple[str, bytes]]:
     Returns:
         Pairs of GEOB description and payload.
     """
-    frames = []
+    frames: list[tuple[str, bytes]] = []
     cursor = 0
     while cursor < len(blob) - 10:
         offset = blob.find(b"ID3", cursor)
@@ -126,7 +191,7 @@ def _parse_id3(blob: bytes, offset: int) -> list[tuple[str, bytes]] | None:
     end = min(len(blob), start + tag_size)
     if end <= start:
         return None
-    frames = []
+    frames: list[tuple[str, bytes]] = []
     pos = start
     while pos + 10 <= end:
         frame_id = blob[pos:pos + 4]
@@ -206,7 +271,7 @@ def _decode_text(encoding: int, raw: bytes) -> str:
     return raw.decode("utf-8", "replace").rstrip("\x00")
 
 
-def _parse_markers2(payload: bytes) -> dict:
+def _parse_markers2(payload: bytes) -> MarkerEntries:
     """Parse a Serato Markers2 payload into cues, loops, and flips.
 
     Args:
@@ -215,7 +280,7 @@ def _parse_markers2(payload: bytes) -> dict:
     Returns:
         A dict with keys cues, loops, and flips. An unrecognized payload is empty.
     """
-    result = {"cues": [], "loops": [], "flips": []}
+    result: MarkerEntries = {"cues": [], "loops": [], "flips": []}
     if len(payload) < 2 or payload[:2] != b"\x01\x01":
         return result
     encoded = payload[2:].replace(b"\n", b"").replace(b"\x00", b"")
@@ -226,7 +291,7 @@ def _parse_markers2(payload: bytes) -> dict:
     pad = (-len(encoded)) % 4
     try:
         decoded = base64.b64decode(encoded + (b"=" * pad), validate=False)
-    except Exception:
+    except binascii.Error:
         return result
     if decoded.startswith(b"\x01\x01"):
         decoded = decoded[2:]
@@ -271,7 +336,7 @@ def _color3(raw: bytes) -> str | None:
     return f"#{raw[0]:02X}{raw[1]:02X}{raw[2]:02X}"
 
 
-def _parse_cue(blob: bytes) -> dict | None:
+def _parse_cue(blob: bytes) -> Cue | None:
     """Parse one CUE entry.
 
     Args:
@@ -291,7 +356,7 @@ def _parse_cue(blob: bytes) -> dict | None:
     }
 
 
-def _parse_loop(blob: bytes) -> dict | None:
+def _parse_loop(blob: bytes) -> Loop | None:
     """Parse one LOOP entry.
 
     Args:
@@ -314,7 +379,7 @@ def _parse_loop(blob: bytes) -> dict | None:
     }
 
 
-def _parse_flip(blob: bytes) -> dict | None:
+def _parse_flip(blob: bytes) -> Flip | None:
     """Parse one FLIP entry.
 
     Args:
@@ -333,14 +398,14 @@ def _parse_flip(blob: bytes) -> dict | None:
     return {"index": blob[1], "enabled": bool(blob[2]), "name": name}
 
 
-def _parse_beatgrid(payload: bytes) -> list[dict]:
+def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
     """Parse a Serato BeatGrid payload.
 
     Args:
         payload: BeatGrid bytes. Version byte 1 is accepted. More than 4096 markers is rejected.
 
     Returns:
-        Marker dicts. Earlier markers store a beat count. The last marker stores BPM.
+        Marker dicts. Earlier markers store a beat count. The last marker stores BPM. A payload shorter than the declared marker count is empty.
     """
     if len(payload) < 6 or payload[0] != 1:
         return []
@@ -348,10 +413,10 @@ def _parse_beatgrid(payload: bytes) -> list[dict]:
     if count <= 0 or count > 4096:
         return []
     pos = 6
-    markers = []
+    markers: list[BeatMarker] = []
     for index in range(count):
         if pos + 8 > len(payload):
-            break
+            return []
         position = struct.unpack(">f", payload[pos:pos + 4])[0]
         pos += 4
         if index == count - 1:
