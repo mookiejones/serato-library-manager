@@ -13,6 +13,15 @@ A local page for the Serato DJ Pro library. The process reads `master.sqlite`. I
 
 The process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. Python's standard library is the only dependency. There is no installer, test runner, or linter.
 
+## Debug in VS Code
+
+1. Open this repository in VS Code.
+2. Install the recommended Python extension when VS Code offers it.
+3. Press F5.
+4. The debugger runs `server.py` in the integrated terminal.
+
+`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. No virtual environment is set, so VS Code uses the system Python. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
+
 ## Containers
 
 ```mermaid

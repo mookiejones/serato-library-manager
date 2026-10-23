@@ -17,6 +17,14 @@ Serves `http://127.0.0.1:8765`. The process exits if `~/Library/Application Supp
 - `tags.py` only reads Serato GEOB frames (`Markers2`, `BeatGrid`) from audio files. Rewriting an ID3 tag can drop those frames.
 - `static/` is `index.html`, `app.js`, and `app.css`. Views are crates, history, missing, duplicates, and stems. Spaces are Serato Library, Serato Video, Apple Music, and Prepare.
 - `docs/serato-library-tools.md` is research notes, not runtime config.
+- `docs/architecture.md` is the code reference. Update it in the same change as the behavior it describes.
+- `.vscode/launch.json` starts `server.py` on F5. There is no project virtualenv.
+
+## After a change
+
+1. Update `docs/architecture.md` when behavior, the API, the layout, or the run path changes.
+2. Update this file when the run command or the layout summary changes.
+3. Commit the change. Do not push unless asked.
 
 ## Library safety
 
