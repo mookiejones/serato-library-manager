@@ -86,25 +86,72 @@ _backed_up: set[str] = set()
 
 
 class LibraryError(Exception):
+    """Raised when a library request cannot be completed.
+
+    Attributes:
+        message: Text returned to the page.
+        status: HTTP status for that failure. Defaults to 400.
+    """
     def __init__(self, message: str, status: int = 400):
+        """Store the message and HTTP status.
+
+        Args:
+            message: Text returned to the page.
+            status: HTTP status. Defaults to 400.
+        """
         super().__init__(message)
         self.message = message
         self.status = status
 
 
 class SeratoOpen(LibraryError):
+    """Raised when Serato DJ Pro still holds the library lock.
+
+    The HTTP status is 409. info is the status() payload.
+    """
     def __init__(self, info: dict):
+        """Build a lock error from a status payload.
+
+        Args:
+            info: Dict from status() with a message key.
+        """
         super().__init__(info["message"], 409)
         self.info = info
 
 
-def serato_str_norm(value):
+def serato_str_norm(value: object) -> str | None:
+    """Normalize text the way Serato smart crates compare strings.
+
+    Args:
+        value: A field value.
+
+    Returns:
+        The lowercased text, or None when value is None.
+
+    Example:
+        >>> serato_str_norm("Ab")
+        'ab'
+    """
     if value is None:
         return None
     return str(value).lower()
 
 
-def serato_key_type(value):
+def serato_key_type(value: object) -> int:
+    """Map a key name to Serato's integer key type.
+
+    Args:
+        value: A Camelot or traditional key, or None.
+
+    Returns:
+        The integer key, or -1 when the name is empty or unknown.
+
+    Example:
+        >>> serato_key_type("1A")
+        0
+        >>> serato_key_type(None)
+        -1
+    """
     if value is None:
         return -1
     text = str(value).strip().lower()
@@ -114,11 +161,27 @@ def serato_key_type(value):
 
 
 def register(conn: sqlite3.Connection) -> None:
+    """Install Serato comparison functions on a SQLite connection.
+
+    Args:
+        conn: Connection that will run smart-crate SQL.
+    """
     conn.create_function("serato_str_norm", 1, serato_str_norm, deterministic=True)
     conn.create_function("serato_raw_key_string_to_key_type", 1, serato_key_type, deterministic=True)
 
 
 def read_conn(path: Path | None = None) -> sqlite3.Connection:
+    """Open a read-only connection to a Serato database.
+
+    Args:
+        path: Database path. None selects MASTER.
+
+    Returns:
+        A connection with row access and query_only enabled.
+
+    Raises:
+        LibraryError: If the database file does not exist.
+    """
     database = Path(path or MASTER)
     if not database.exists():
         raise LibraryError(f"Serato library not found at {database}", 404)
@@ -129,6 +192,14 @@ def read_conn(path: Path | None = None) -> sqlite3.Connection:
 
 
 def _process_is_serato(pid: int) -> bool:
+    """Return whether a process id is a live Serato process.
+
+    Args:
+        pid: Process id from the lock table.
+
+    Returns:
+        True when ps reports a command line that contains serato.
+    """
     if not pid or pid <= 0:
         return False
     try:
@@ -147,6 +218,17 @@ def _process_is_serato(pid: int) -> bool:
 
 
 def _status_rows(conn: sqlite3.Connection) -> dict:
+    """Read the lock table and decide whether edits are allowed.
+
+    Args:
+        conn: Open database connection.
+
+    Returns:
+        A status dict with open, writable, pid, process, and message.
+
+    Raises:
+        sqlite3.OperationalError: If the lock query fails for a reason other than a missing table.
+    """
     try:
         rows = conn.execute(
             "SELECT owner_process_id, owner_process_name FROM lock"
@@ -177,6 +259,18 @@ def _status_rows(conn: sqlite3.Connection) -> dict:
 
 
 def status(path: Path | None = None) -> dict:
+    """Report whether Serato has the library open.
+
+    Args:
+        path: Database path. None selects MASTER.
+
+    Returns:
+        A status dict. A locked database is reported as open.
+
+    Raises:
+        sqlite3.OperationalError: If the database fails for a reason other than a lock.
+        LibraryError: If the database file does not exist.
+    """
     try:
         with closing(read_conn(path)) as conn:
             return _status_rows(conn)
@@ -193,10 +287,27 @@ def status(path: Path | None = None) -> dict:
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """Return the column names of one table.
+
+    Args:
+        conn: Open database connection.
+        table: Table name.
+
+    Returns:
+        Column names from PRAGMA table_info.
+    """
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
 def _parse_db_path(value: str | None) -> Path | None:
+    """Turn a connection URI into a filesystem path.
+
+    Args:
+        value: A file URI, a plain path, or None.
+
+    Returns:
+        The path, or None when value is empty.
+    """
     if not value:
         return None
     if value.startswith("file:"):
@@ -205,6 +316,14 @@ def _parse_db_path(value: str | None) -> Path | None:
 
 
 def _location_paths(conn: sqlite3.Connection) -> dict[int, Path]:
+    """Map location ids to database files that exist on disk.
+
+    Args:
+        conn: Open master connection.
+
+    Returns:
+        Location id to database path. Location 3 falls back to root.sqlite beside the master file.
+    """
     found: dict[int, Path] = {}
     try:
         rows = conn.execute("SELECT location_id, database_uri FROM connection").fetchall()
@@ -222,7 +341,17 @@ def _location_paths(conn: sqlite3.Connection) -> dict[int, Path]:
 
 
 def _mirror_allowed(path: Path) -> bool:
-    """A relocated test database may only touch files beside itself."""
+    """Return whether a location database may be updated.
+
+    A live master database may mirror any connected location file. A relocated
+    test database may mirror only a file beside itself, or a file under /tmp.
+
+    Args:
+        path: Location database path.
+
+    Returns:
+        True when a write to path is allowed.
+    """
     master = Path(MASTER).resolve()
     if master == LIVE_MASTER.resolve():
         return True
@@ -231,6 +360,12 @@ def _mirror_allowed(path: Path) -> bool:
 
 
 def _backup_database(source: Path, dest: Path) -> None:
+    """Copy one SQLite database with the backup API.
+
+    Args:
+        source: Database to read.
+        dest: New database file. Parent directories are created.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(f"file:{source}?mode=ro", uri=True)) as src:
         with closing(sqlite3.connect(dest)) as dst:
@@ -238,6 +373,14 @@ def _backup_database(source: Path, dest: Path) -> None:
 
 
 def ensure_backup() -> Path | None:
+    """Copy the master database once per process before the first write.
+
+    Returns:
+        The new backup directory, or None when this process already backed up that path.
+
+    Raises:
+        FileExistsError: If the timestamped backup directory already exists.
+    """
     master = Path(MASTER)
     key = str(master.resolve())
     if key in _backed_up:
@@ -254,6 +397,17 @@ def ensure_backup() -> Path | None:
 
 
 def begin_write() -> sqlite3.Connection:
+    """Open a write transaction after Serato has quit.
+
+    The first call in a process also copies the databases into Library/Backups.
+
+    Returns:
+        A connection inside BEGIN IMMEDIATE. The caller commits and closes it.
+
+    Raises:
+        SeratoOpen: If Serato holds the lock or the database is locked.
+        sqlite3.OperationalError: If the write transaction fails for another reason.
+    """
     info = status()
     if info["open"]:
         raise SeratoOpen(info)
@@ -277,6 +431,18 @@ def begin_write() -> sqlite3.Connection:
 
 
 def _space_id(conn: sqlite3.Connection, space: str) -> int:
+    """Return the id of an allowed space.
+
+    Args:
+        conn: Open write connection.
+        space: Space name.
+
+    Returns:
+        The space id.
+
+    Raises:
+        LibraryError: If the space is not allowed or is missing from this library.
+    """
     if space not in ALLOWED_SPACES:
         raise LibraryError("That space is not available here.")
     row = conn.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
@@ -286,6 +452,18 @@ def _space_id(conn: sqlite3.Connection, space: str) -> int:
 
 
 def _space_root(conn: sqlite3.Connection, space: str) -> int:
+    """Return the root container id for a space.
+
+    Args:
+        conn: Open connection.
+        space: Space name.
+
+    Returns:
+        The container whose type is 0.
+
+    Raises:
+        LibraryError: If the space has no root crate.
+    """
     row = conn.execute(
         """
         SELECT c.id FROM container c
@@ -300,6 +478,19 @@ def _space_root(conn: sqlite3.Connection, space: str) -> int:
 
 
 def _container(conn: sqlite3.Connection, crate_id: int, space: str) -> sqlite3.Row:
+    """Load one crate that belongs to a space.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+        space: Space name.
+
+    Returns:
+        The container row.
+
+    Raises:
+        LibraryError: If the crate is not in that space.
+    """
     row = conn.execute(
         """
         SELECT c.id, c.parent_id, c.name, c.type, c.space_id, s.name AS space_name
@@ -315,10 +506,31 @@ def _container(conn: sqlite3.Connection, crate_id: int, space: str) -> sqlite3.R
 
 
 def display_name(name: str) -> str:
+    """Return the visible portion of a stored crate name.
+
+    Args:
+        name: Name stored in container.name.
+
+    Returns:
+        Text before the Serato name separator.
+
+    Example:
+        >>> display_name("Warmup")
+        'Warmup'
+    """
     return name.split(NAME_SPLIT, 1)[0]
 
 
 def _ancestry(conn: sqlite3.Connection, crate_id: int) -> list[str]:
+    """Return crate names from the space root down to one crate.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+
+    Returns:
+        Display names. The space root is omitted.
+    """
     names = []
     seen: set[int] = set()
     current = crate_id
@@ -337,6 +549,15 @@ def _ancestry(conn: sqlite3.Connection, crate_id: int) -> list[str]:
 
 
 def _descendant_ids(conn: sqlite3.Connection, crate_id: int) -> list[int]:
+    """Return a crate id and the ids of crates nested under it.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+
+    Returns:
+        Ids from a recursive container query, including crate_id.
+    """
     rows = conn.execute(
         """
         WITH RECURSIVE tree(id) AS (
@@ -355,6 +576,21 @@ def _descendant_ids(conn: sqlite3.Connection, crate_id: int) -> list[int]:
 
 
 def _stored_name(conn: sqlite3.Connection, parent_id: int, display: str, crate_type: int, existing_id: int | None) -> str:
+    """Build a unique stored crate name.
+
+    Args:
+        conn: Open connection.
+        parent_id: Parent container id.
+        display: Name typed in the page.
+        crate_type: Container type. Smart crates use 2.
+        existing_id: Crate being renamed, or None for a new crate.
+
+    Returns:
+        The name to store, including a hidden suffix when needed to avoid a clash.
+
+    Raises:
+        LibraryError: If the name is empty, contains the separator, is longer than 400 characters, or clashes with a suffixed crate.
+    """
     text = (display or "").strip()
     if not text or NAME_SPLIT in text:
         raise LibraryError("Use a crate name without the Serato name separator.")
@@ -381,11 +617,29 @@ def _stored_name(conn: sqlite3.Connection, parent_id: int, display: str, crate_t
 
 
 def _filename(conn: sqlite3.Connection, crate_id: int, crate_type: int) -> str:
+    """Build the export filename Serato stores for a crate.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+        crate_type: 2 for a smart crate, otherwise a normal crate.
+
+    Returns:
+        A path of ancestor names joined by %% with a .crate or .scrate suffix.
+    """
     ext = ".scrate" if int(crate_type) == 2 else ".crate"
     return "%%".join(_ancestry(conn, crate_id)) + ext
 
 
 def _upsert_filename(conn: sqlite3.Connection, crate_id: int, filename: str, revision: int | None = None) -> None:
+    """Store a crate export filename.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+        filename: Export filename.
+        revision: Revision to store when the table has that column. None uses the current time.
+    """
     columns = _columns(conn, "dj_container_metadata")
     if "revision" in columns:
         conn.execute(
@@ -410,6 +664,13 @@ def _upsert_filename(conn: sqlite3.Connection, crate_id: int, filename: str, rev
 
 
 def _refresh_filenames(conn: sqlite3.Connection, crate_id: int, revision: int | None = None) -> None:
+    """Rebuild export filenames for a crate and its descendants.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+        revision: Revision passed to each filename update.
+    """
     for current in _descendant_ids(conn, crate_id):
         row = conn.execute("SELECT type FROM container WHERE id = ?", (current,)).fetchone()
         if row is None or int(row[0]) == 0:
@@ -418,6 +679,14 @@ def _refresh_filenames(conn: sqlite3.Connection, crate_id: int, revision: int | 
 
 
 def _next_revision(conn: sqlite3.Connection) -> int:
+    """Advance the serato.revision counter when that column exists.
+
+    Args:
+        conn: Open write connection.
+
+    Returns:
+        The new revision, or the current time when the column is absent.
+    """
     columns = _columns(conn, "serato")
     if "revision" not in columns:
         return int(time.time())
@@ -425,7 +694,16 @@ def _next_revision(conn: sqlite3.Connection) -> int:
     return int(conn.execute("SELECT revision FROM serato").fetchone()[0])
 
 
-def _with_location(path: Path, fn) -> str | None:
+def _with_location(path: Path, fn: object) -> str | None:
+    """Run a write against a location database and return a warning on failure.
+
+    Args:
+        path: Location database file.
+        fn: Callable that receives the location connection and returns a warning or None.
+
+    Returns:
+        None on success, or a warning string when the mirror is skipped or fails.
+    """
     if not path.is_file() or not _mirror_allowed(path):
         return "Saved in the main library. That track's drive is not connected, so Serato may reconcile the edit when the drive returns."
     conn = sqlite3.connect(path, timeout=1)
@@ -445,6 +723,18 @@ def _with_location(path: Path, fn) -> str | None:
 
 
 def _asset_location(conn: sqlite3.Connection, asset_id: int) -> sqlite3.Row:
+    """Load the location columns for one asset.
+
+    Args:
+        conn: Open connection.
+        asset_id: Asset id.
+
+    Returns:
+        The asset row.
+
+    Raises:
+        LibraryError: If the track is not in the library.
+    """
     row = conn.execute(
         "SELECT id, location_id, external_id, portable_id, file_name FROM asset WHERE id = ?",
         (asset_id,),
@@ -454,7 +744,19 @@ def _asset_location(conn: sqlite3.Connection, asset_id: int) -> sqlite3.Row:
     return row
 
 
-def _clean_text(field: str, value) -> str:
+def _clean_text(field: str, value: object) -> str:
+    """Validate one text field before it is saved.
+
+    Args:
+        field: Field name. emoji is limited to 16 characters. Other text is limited to 4000.
+        value: Submitted value.
+
+    Returns:
+        The text to store. None becomes an empty string.
+
+    Raises:
+        LibraryError: If the value is not text or is too long.
+    """
     if value is None:
         return ""
     if not isinstance(value, str):
@@ -466,6 +768,17 @@ def _clean_text(field: str, value) -> str:
 
 
 def _clean_fields(fields: dict) -> dict:
+    """Validate a track edit payload.
+
+    Args:
+        fields: Map of column name to submitted value.
+
+    Returns:
+        Values safe to assign on the asset row.
+
+    Raises:
+        LibraryError: If the payload is empty, names an unknown column, or contains an out-of-range value.
+    """
     if not isinstance(fields, dict) or not fields:
         raise LibraryError("Choose a field to save.")
     unknown = set(fields) - TRACK_FIELDS
@@ -515,7 +828,18 @@ def _clean_fields(fields: dict) -> dict:
     return cleaned
 
 
-def _portable_for_existing_file(value) -> str:
+def _portable_for_existing_file(value: object) -> str:
+    """Turn a submitted path into a portable_id for a file that exists.
+
+    Args:
+        value: Path typed in the page.
+
+    Returns:
+        A path relative to the home directory when possible, otherwise the absolute path.
+
+    Raises:
+        LibraryError: If the value is empty, the file is missing, or the path cannot be read.
+    """
     if not isinstance(value, str) or not value.strip():
         raise LibraryError("Choose a file path.")
     path = Path(value).expanduser()
@@ -531,7 +855,16 @@ def _portable_for_existing_file(value) -> str:
         return str(path)
 
 
-def _assign(conn: sqlite3.Connection, table: str, columns: dict, where: str, key) -> None:
+def _assign(conn: sqlite3.Connection, table: str, columns: dict, where: str, key: object) -> None:
+    """Update columns that exist on a table.
+
+    Args:
+        conn: Open write connection.
+        table: Table name.
+        columns: Column names and values.
+        where: SQL predicate with one bound parameter.
+        key: Value for that parameter.
+    """
     present = _columns(conn, table)
     pairs = [(name, value) for name, value in columns.items() if name in present]
     if not pairs:
@@ -541,6 +874,16 @@ def _assign(conn: sqlite3.Connection, table: str, columns: dict, where: str, key
 
 
 def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: dict) -> str | None:
+    """Copy saved asset columns into the track's location database.
+
+    Args:
+        master: Read connection for the master database.
+        asset_id: Asset id.
+        columns: Columns already saved on the master asset row.
+
+    Returns:
+        None, or a warning when the location database is not updated.
+    """
     asset = _asset_location(master, asset_id)
     paths = _location_paths(master)
     path = paths.get(int(asset["location_id"] or 0))
@@ -549,6 +892,11 @@ def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: dict) -> s
         return "Saved in the main library. That track's drive is not connected, so Serato may reconcile the edit when the drive returns."
 
     def apply(conn: sqlite3.Connection) -> None:
+        """Write mirrored asset columns inside the location transaction.
+
+        Args:
+            conn: Location database connection.
+        """
         revision = _next_revision(conn)
         values = dict(columns)
         values["revision"] = revision
@@ -558,6 +906,20 @@ def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: dict) -> s
 
 
 def save_track(asset_id: int, fields: dict, space: str = LIBRARY_SPACE) -> dict:
+    """Save editable fields for one track.
+
+    Args:
+        asset_id: Asset id.
+        fields: Columns accepted by TRACK_FIELDS.
+        space: Space that must contain the track.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the fields are invalid or the track is not in the space.
+        SeratoOpen: If Serato still has the library open.
+    """
     cleaned = _clean_fields(fields)
     portable = cleaned.get("portable_id")
     conn = begin_write()
@@ -599,6 +961,12 @@ def save_track(asset_id: int, fields: dict, space: str = LIBRARY_SPACE) -> dict:
 
 
 def _mark_smart(conn: sqlite3.Connection, crate_id: int) -> None:
+    """Record a smart crate as needing a refresh when that table exists.
+
+    Args:
+        conn: Open write connection.
+        crate_id: Smart crate id.
+    """
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'updated_smart_crate'"
     ).fetchone()
@@ -607,7 +975,18 @@ def _mark_smart(conn: sqlite3.Connection, crate_id: int) -> None:
     conn.execute("INSERT INTO updated_smart_crate (container_id) VALUES (?)", (crate_id,))
 
 
-def _rules_blob(rules) -> str:
+def _rules_blob(rules: object) -> str:
+    """Normalize smart-crate rules to a JSON string.
+
+    Args:
+        rules: A rules dict, or a JSON string of that dict.
+
+    Returns:
+        Compact JSON.
+
+    Raises:
+        LibraryError: If the value is not a rules object with a rules list.
+    """
     if isinstance(rules, str):
         try:
             rules = json.loads(rules)
@@ -619,6 +998,17 @@ def _rules_blob(rules) -> str:
 
 
 def _root_parent(master: sqlite3.Connection, root: sqlite3.Connection, parent_id: int, space: str) -> int | None:
+    """Find the parent container id in root.sqlite for a master crate.
+
+    Args:
+        master: Master connection.
+        root: Location connection.
+        parent_id: Parent id in the master database.
+        space: Space name.
+
+    Returns:
+        The location parent id, or None when the space is missing there.
+    """
     row = master.execute(
         """
         SELECT external_container_id FROM location_container
@@ -639,6 +1029,19 @@ def _root_parent(master: sqlite3.Connection, root: sqlite3.Connection, parent_id
 
 
 def _insert_root_container(root: sqlite3.Connection, parent_id: int, name: str, crate_type: int, space: str, rules: str | None) -> int | None:
+    """Insert a crate into a location database.
+
+    Args:
+        root: Location connection.
+        parent_id: Parent container id in that database.
+        name: Stored crate name.
+        crate_type: 1 for a normal crate, 2 for a smart crate.
+        space: Space name.
+        rules: Smart-crate JSON, or None.
+
+    Returns:
+        The new container id, or None when the space is missing.
+    """
     space_row = root.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
     if space_row is None:
         return None
@@ -668,10 +1071,34 @@ def _insert_root_container(root: sqlite3.Connection, parent_id: int, name: str, 
 
 
 def _tables(conn: sqlite3.Connection) -> set[str]:
+    """Return the table names in a database.
+
+    Args:
+        conn: Open connection.
+
+    Returns:
+        Names from sqlite_master.
+    """
     return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
 
-def _create_crate(conn: sqlite3.Connection, space: str, parent_id: int | None, name: str, smart: bool, rules) -> dict:
+def _create_crate(conn: sqlite3.Connection, space: str, parent_id: int | None, name: str, smart: bool, rules: object) -> dict:
+    """Insert a crate and mirror it to the main drive database.
+
+    Args:
+        conn: Open master write connection.
+        space: Space name.
+        parent_id: Parent crate id. None or the space root places the crate at the top level.
+        name: Display name.
+        smart: True to create a smart crate.
+        rules: Smart-crate rules. An empty value gets a default rule set.
+
+    Returns:
+        A dict with ok, id, name, and warning.
+
+    Raises:
+        LibraryError: If the name is invalid or the parent is a smart crate.
+    """
     root_id = _space_root(conn, space)
     parent = root_id if not parent_id or parent_id == root_id else int(parent_id)
     if parent != root_id:
@@ -709,6 +1136,20 @@ def _create_crate(conn: sqlite3.Connection, space: str, parent_id: int | None, n
 
 
 def _link_new_crate(conn: sqlite3.Connection, crate_id: int, parent_id: int, name: str, crate_type: int, space: str, rules: str | None) -> str | None:
+    """Mirror a new crate into root.sqlite and store the external id.
+
+    Args:
+        conn: Open master write connection.
+        crate_id: New master container id.
+        parent_id: Parent id in the master database.
+        name: Stored name.
+        crate_type: Container type.
+        space: Space name.
+        rules: Smart-crate JSON, or None.
+
+    Returns:
+        None, or a warning when the drive database is not updated.
+    """
     paths = _location_paths(conn)
     root_path = paths.get(3)
     if root_path is None:
@@ -717,6 +1158,14 @@ def _link_new_crate(conn: sqlite3.Connection, crate_id: int, parent_id: int, nam
     created: dict[str, int | None | bool] = {"id": None, "ok": False}
 
     def apply(root: sqlite3.Connection):
+        """Insert the mirrored crate inside the location transaction.
+
+        Args:
+            root: Location database connection.
+
+        Returns:
+            None, or a warning when the parent crate is not on that drive.
+        """
         parent = _root_parent(conn, root, parent_id, space)
         if parent is None:
             return "The crate is saved. Its parent is not on the main drive, so Serato may drop it on the next sync."
@@ -738,6 +1187,20 @@ def _link_new_crate(conn: sqlite3.Connection, crate_id: int, parent_id: int, nam
 
 
 def _rename_crate(conn: sqlite3.Connection, space: str, crate_id: int, name: str) -> dict:
+    """Rename a crate and refresh export filenames.
+
+    Args:
+        conn: Open master write connection.
+        space: Space name.
+        crate_id: Container id.
+        name: New display name.
+
+    Returns:
+        A dict with ok, id, name, and warning.
+
+    Raises:
+        LibraryError: If the crate is the space root or the name is invalid.
+    """
     row = _container(conn, crate_id, space)
     if int(row["type"]) == 0:
         raise LibraryError("The space root cannot be renamed.")
@@ -749,6 +1212,15 @@ def _rename_crate(conn: sqlite3.Connection, space: str, crate_id: int, name: str
 
 
 def _external_ids(conn: sqlite3.Connection, crate_ids: list[int]) -> list[int]:
+    """Return location-database ids for crates linked to location 3.
+
+    Args:
+        conn: Open master connection.
+        crate_ids: Master container ids.
+
+    Returns:
+        External container ids. An empty input returns an empty list.
+    """
     if not crate_ids:
         return []
     marks = ",".join("?" * len(crate_ids))
@@ -764,6 +1236,12 @@ def _external_ids(conn: sqlite3.Connection, crate_ids: list[int]) -> list[int]:
 
 
 def _delete_ids(conn: sqlite3.Connection, crate_ids: list[int]) -> None:
+    """Delete crates and their membership rows.
+
+    Args:
+        conn: Open write connection. The master and location schemas differ, so the SQL follows the columns that exist.
+        crate_ids: Container ids. The space root is not deleted.
+    """
     if not crate_ids:
         return
     marks = ",".join("?" * len(crate_ids))
@@ -790,6 +1268,19 @@ def _delete_ids(conn: sqlite3.Connection, crate_ids: list[int]) -> None:
 
 
 def _delete_crate(conn: sqlite3.Connection, space: str, crate_id: int) -> dict:
+    """Delete a crate, its descendants, and the mirrored rows.
+
+    Args:
+        conn: Open master write connection.
+        space: Space name.
+        crate_id: Container id.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the crate is the space root or is not in the space.
+    """
     row = _container(conn, crate_id, space)
     if int(row["type"]) == 0:
         raise LibraryError("The space root cannot be deleted.")
@@ -800,6 +1291,11 @@ def _delete_crate(conn: sqlite3.Connection, space: str, crate_id: int) -> dict:
     root_path = _location_paths(conn).get(3)
     if external and root_path is not None:
         def apply(root: sqlite3.Connection):
+            """Delete the mirrored crates inside the location transaction.
+
+            Args:
+                root: Location database connection.
+            """
             whole: list[int] = []
             for external_id in external:
                 whole.extend(_descendant_ids(root, external_id))
@@ -813,12 +1309,28 @@ def _delete_crate(conn: sqlite3.Connection, space: str, crate_id: int) -> dict:
 
 
 def _mirror_container_fields(conn: sqlite3.Connection, crate_id: int, columns: dict, refresh_names: bool = False) -> str | None:
+    """Copy crate columns into the linked row in root.sqlite.
+
+    Args:
+        conn: Open master connection.
+        crate_id: Master container id.
+        columns: Columns to assign.
+        refresh_names: True to rebuild export filenames after the assign.
+
+    Returns:
+        None, or a warning when the crate is not linked to the main drive.
+    """
     external = _external_ids(conn, [crate_id])
     root_path = _location_paths(conn).get(3)
     if not external or root_path is None:
         return "Saved in the main library. This crate is not linked to the main drive, so Serato may reconcile it later."
 
     def apply(root: sqlite3.Connection):
+        """Assign mirrored crate columns inside the location transaction.
+
+        Args:
+            root: Location database connection.
+        """
         revision = _next_revision(root)
         values = dict(columns)
         values["revision"] = revision
@@ -830,7 +1342,21 @@ def _mirror_container_fields(conn: sqlite3.Connection, crate_id: int, columns: d
     return _with_location(root_path, apply)
 
 
-def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color) -> dict:
+def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color: object) -> dict:
+    """Set a crate color.
+
+    Args:
+        conn: Open master write connection.
+        space: Space name.
+        crate_id: Container id.
+        color: A 24-bit integer. Empty or white clears the color.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the crate is the space root or the color is not a valid integer.
+    """
     row = _container(conn, crate_id, space)
     if int(row["type"]) == 0:
         raise LibraryError("The space root has no color.")
@@ -850,7 +1376,21 @@ def _set_color(conn: sqlite3.Connection, space: str, crate_id: int, color) -> di
     return {"ok": True, "id": crate_id, "warning": warning}
 
 
-def _set_expanded(conn: sqlite3.Connection, space: str, crate_id: int, expanded) -> dict:
+def _set_expanded(conn: sqlite3.Connection, space: str, crate_id: int, expanded: object) -> dict:
+    """Store whether a crate is expanded in the tree.
+
+    Args:
+        conn: Open master write connection.
+        space: Space name.
+        crate_id: Container id.
+        expanded: A true-like value stores 1. Every other value stores 0.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the crate is not in the space.
+    """
     _container(conn, crate_id, space)
     value = 1 if expanded in (True, 1, "1", "true") else 0
     conn.execute("UPDATE container SET expanded = ? WHERE id = ?", (value, crate_id))
@@ -858,7 +1398,21 @@ def _set_expanded(conn: sqlite3.Connection, space: str, crate_id: int, expanded)
     return {"ok": True, "id": crate_id, "warning": warning}
 
 
-def _set_rules(conn: sqlite3.Connection, space: str, crate_id: int, rules) -> dict:
+def _set_rules(conn: sqlite3.Connection, space: str, crate_id: int, rules: object) -> dict:
+    """Replace the rules of a smart crate.
+
+    Args:
+        conn: Open master write connection.
+        space: Space name.
+        crate_id: Container id.
+        rules: Rules object or JSON text.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the crate is not smart or the rules are invalid.
+    """
     row = _container(conn, crate_id, space)
     if int(row["type"]) != 2:
         raise LibraryError("Only a smart crate has rules.")
@@ -873,6 +1427,11 @@ def _set_rules(conn: sqlite3.Connection, space: str, crate_id: int, rules) -> di
     warning = None
     if external and root_path is not None:
         def apply(root: sqlite3.Connection):
+            """Update mirrored smart-crate rules inside the location transaction.
+
+            Args:
+                root: Location database connection.
+            """
             revision = _next_revision(root)
             if "needs_refresh" in _columns(root, "smart_crate_rules"):
                 root.execute(
@@ -890,6 +1449,19 @@ def _set_rules(conn: sqlite3.Connection, space: str, crate_id: int, rules) -> di
 
 
 def _ensure_location_container(conn: sqlite3.Connection, crate_id: int, location_id: int) -> int:
+    """Return the location_container row for a crate and a drive.
+
+    Args:
+        conn: Open master write connection.
+        crate_id: Container id.
+        location_id: Asset location id.
+
+    Returns:
+        The location_container id.
+
+    Raises:
+        LibraryError: If the drive has its own database but this crate is not stored on it.
+    """
     row = conn.execute(
         """
         SELECT id FROM location_container
@@ -914,6 +1486,20 @@ def _ensure_location_container(conn: sqlite3.Connection, crate_id: int, location
 
 
 def _space_asset(conn: sqlite3.Connection, asset_id: int, space: str, create: bool) -> int:
+    """Return the space_asset id for a track, creating the row when asked.
+
+    Args:
+        conn: Open write connection.
+        asset_id: Asset id.
+        space: Space name.
+        create: True inserts the membership when it is missing.
+
+    Returns:
+        The space_asset id.
+
+    Raises:
+        LibraryError: If the track is not in the space and create is false.
+    """
     row = conn.execute(
         """
         SELECT sa.id FROM space_asset sa
@@ -934,6 +1520,21 @@ def _space_asset(conn: sqlite3.Connection, asset_id: int, space: str, create: bo
 
 
 def _membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, space: str, add: bool) -> dict:
+    """Add or remove a track from a normal crate.
+
+    Args:
+        conn: Open master write connection.
+        crate_id: Container id.
+        asset_id: Asset id.
+        space: Space name.
+        add: True adds the track. False removes it.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the crate is smart, is the space root, or the track is not in the space.
+    """
     row = _container(conn, crate_id, space)
     if int(row["type"]) == 2:
         raise LibraryError("Smart crates choose their tracks from rules.")
@@ -987,6 +1588,18 @@ def _membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, space: s
 
 
 def _mirror_membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, space: str, add: bool) -> str | None:
+    """Mirror a crate membership change into the location database.
+
+    Args:
+        conn: Open master connection.
+        crate_id: Master container id.
+        asset_id: Asset id.
+        space: Space name.
+        add: True adds the mirrored membership. False removes it.
+
+    Returns:
+        None, or a warning when the drive database is left unchanged.
+    """
     external = _external_ids(conn, [crate_id])
     asset = _asset_location(conn, asset_id)
     root_path = _location_paths(conn).get(int(asset["location_id"] or 0))
@@ -998,6 +1611,14 @@ def _mirror_membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, s
         return "Saved in the main library. This track lives on another drive, so that drive's database was not changed."
 
     def apply(root: sqlite3.Connection):
+        """Apply a membership change inside the location transaction.
+
+        Args:
+            root: Location database connection.
+
+        Returns:
+            None, or a warning when the space is missing from that database.
+        """
         space_row = root.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
         if space_row is None:
             return "Saved in the main library. This space is not in the drive database."
@@ -1046,6 +1667,17 @@ def _mirror_membership(conn: sqlite3.Connection, crate_id: int, asset_id: int, s
 
 
 def _prepare_container(conn: sqlite3.Connection) -> int:
+    """Return the Prepare crate id.
+
+    Args:
+        conn: Open connection.
+
+    Returns:
+        The first Prepare container whose type is 1.
+
+    Raises:
+        LibraryError: If Prepare has no crate.
+    """
     row = conn.execute(
         """
         SELECT c.id FROM container c
@@ -1061,6 +1693,19 @@ def _prepare_container(conn: sqlite3.Connection) -> int:
 
 
 def _set_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> dict:
+    """Add or remove a track from the Prepare space.
+
+    Args:
+        conn: Open master write connection.
+        asset_id: Asset id.
+        add: True adds the track. False removes it from Prepare.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the track or the Prepare crate is missing.
+    """
     _asset_location(conn, asset_id)
     crate_id = _prepare_container(conn)
     if add:
@@ -1089,12 +1734,30 @@ def _set_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> dict:
 
 
 def _mirror_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> str | None:
+    """Mirror a Prepare membership change into root.sqlite.
+
+    Args:
+        conn: Open master connection.
+        asset_id: Asset id.
+        add: True adds the track. False removes it.
+
+    Returns:
+        None, or a warning when the drive database is left unchanged.
+    """
     asset = _asset_location(conn, asset_id)
     root_path = _location_paths(conn).get(3)
     if asset["external_id"] is None or root_path is None or int(asset["location_id"] or 0) != 3:
         return "Saved in the main library. Prepare on the drive database was left unchanged."
 
     def apply(root: sqlite3.Connection):
+        """Apply a Prepare change inside the location transaction.
+
+        Args:
+            root: Location database connection.
+
+        Returns:
+            None, or a warning when Prepare is missing from that database.
+        """
         space_row = root.execute("SELECT id FROM space WHERE name = 'Prepare'").fetchone()
         crate = root.execute(
             """
@@ -1153,6 +1816,21 @@ def _mirror_prepare(conn: sqlite3.Connection, asset_id: int, add: bool) -> str |
 
 
 def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> dict:
+    """Remove a track from a space and from the crates in that space.
+
+    The audio file stays on disk.
+
+    Args:
+        conn: Open master write connection.
+        asset_id: Asset id.
+        space: Space name.
+
+    Returns:
+        A dict with ok, id, and warning.
+
+    Raises:
+        LibraryError: If the track is not in the library or the space.
+    """
     _asset_location(conn, asset_id)
     _space_asset(conn, asset_id, space, create=False)
     conn.execute(
@@ -1181,6 +1859,11 @@ def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> d
     root_path = _location_paths(conn).get(3)
     if external and external["external_id"] is not None and int(external["location_id"] or 0) == 3 and root_path is not None:
         def apply(root: sqlite3.Connection):
+            """Remove the mirrored space membership inside the location transaction.
+
+            Args:
+                root: Location database connection.
+            """
             space_row = root.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
             if space_row is None:
                 return None
@@ -1204,6 +1887,21 @@ def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> d
 
 
 def crate_action(payload: dict) -> dict:
+    """Run one crate edit.
+
+    Args:
+        payload: JSON object with action and the fields that action requires.
+            Actions are create, rename, delete, color, expanded, rules, add,
+            remove, prepare, and remove_library.
+
+    Returns:
+        The action result dict.
+
+    Raises:
+        LibraryError: If the action is unknown or its fields are invalid.
+        SeratoOpen: If Serato still has the library open.
+        KeyError: If a required id is missing.
+    """
     action = payload.get("action")
     space = payload.get("space") or LIBRARY_SPACE
     conn = begin_write()
@@ -1254,6 +1952,11 @@ def crate_action(payload: dict) -> dict:
 
 
 def history_sessions() -> list[dict]:
+    """List history sessions, newest first.
+
+    Returns:
+        Session dicts with id, name, times, entry count, and played count.
+    """
     with closing(read_conn()) as conn:
         rows = conn.execute(
             """
@@ -1280,6 +1983,17 @@ def history_sessions() -> list[dict]:
 
 
 def history_entries(session_id: int) -> dict:
+    """Load one history session and its played entries.
+
+    Args:
+        session_id: history_session id.
+
+    Returns:
+        The session fields and an entries list.
+
+    Raises:
+        LibraryError: If the session does not exist.
+    """
     with closing(read_conn()) as conn:
         session = conn.execute(
             "SELECT id, name, start_time, end_time, notes FROM history_session WHERE id = ?",
@@ -1327,6 +2041,17 @@ def history_entries(session_id: int) -> dict:
 
 
 def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict]:
+    """Group tracks that share a title, artist, and length in whole seconds.
+
+    Args:
+        space: Space to scan.
+
+    Returns:
+        Groups with name, artist, seconds, and asset ids. Empty titles and artists are skipped.
+
+    Raises:
+        LibraryError: If the space is not allowed.
+    """
     if space not in ALLOWED_SPACES:
         raise LibraryError("That space is not available here.")
     with closing(read_conn()) as conn:
@@ -1362,6 +2087,14 @@ def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict]:
 
 
 def _resolved(portable_id: str | None) -> str | None:
+    """Resolve a portable id to a path string.
+
+    Args:
+        portable_id: Stored path, or None.
+
+    Returns:
+        An existing file path when one of the candidates is a file, otherwise the first candidate. None when the id is empty.
+    """
     if not portable_id:
         return None
     raw = Path(portable_id)
@@ -1376,6 +2109,18 @@ def _resolved(portable_id: str | None) -> str | None:
 
 
 def export_m3u(space: str, crate_id: int | None) -> str:
+    """Build an extended M3U playlist.
+
+    Args:
+        space: Space name.
+        crate_id: Crate to export. None exports every track in the space.
+
+    Returns:
+        Playlist text ending in a newline.
+
+    Raises:
+        LibraryError: If the space is not allowed or the crate is not in that space.
+    """
     if space not in ALLOWED_SPACES:
         raise LibraryError("That space is not available here.")
     with closing(read_conn()) as conn:
@@ -1421,6 +2166,16 @@ def export_m3u(space: str, crate_id: int | None) -> str:
 
 
 def _match_portable(conn: sqlite3.Connection, space: str, raw_path: str) -> int | None:
+    """Find a track whose portable_id matches a playlist path.
+
+    Args:
+        conn: Open connection.
+        space: Space name.
+        raw_path: A playlist line. file: URLs are accepted.
+
+    Returns:
+        The asset id, or None when no track matches.
+    """
     path = Path(raw_path.strip())
     if raw_path.startswith("file:"):
         path = Path(unquote(urlparse(raw_path).path))
@@ -1444,6 +2199,21 @@ def _match_portable(conn: sqlite3.Connection, space: str, raw_path: str) -> int 
 
 
 def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
+    """Create a crate from M3U text and add the tracks that already exist.
+
+    Args:
+        space: Space that receives the crate.
+        parent_id: Parent crate id. None places the crate at the space root.
+        name: Crate name. An empty name becomes Imported playlist.
+        text: Playlist body. Comment lines are ignored.
+
+    Returns:
+        A dict with the new crate id, added count, and unmatched paths.
+
+    Raises:
+        LibraryError: If the playlist is empty or the crate cannot be created.
+        SeratoOpen: If Serato still has the library open.
+    """
     if not isinstance(text, str) or not text.strip():
         raise LibraryError("The playlist is empty.")
     paths = []
@@ -1486,6 +2256,17 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: str) -> dict:
 
 
 def reveal(asset_id: int) -> dict:
+    """Show the audio file in Finder.
+
+    Args:
+        asset_id: Asset id.
+
+    Returns:
+        A dict with ok and path.
+
+    Raises:
+        LibraryError: If the track is missing or the file is not on disk.
+    """
     with closing(read_conn()) as conn:
         row = conn.execute("SELECT portable_id FROM asset WHERE id = ?", (asset_id,)).fetchone()
     if row is None:
@@ -1498,6 +2279,15 @@ def reveal(asset_id: int) -> dict:
 
 
 def markers_for(path: str | None, on_disk: bool) -> dict:
+    """Read cue data when the audio file is on disk.
+
+    Args:
+        path: Resolved audio path.
+        on_disk: False skips the file read.
+
+    Returns:
+        Cue, loop, flip, and beatgrid lists, plus found and unavailable flags.
+    """
     if not on_disk:
         return {"cues": [], "loops": [], "flips": [], "beatgrid": [], "found": False, "unavailable": True}
     parsed = read_serato_tags(path)

@@ -28,6 +28,11 @@ BODY_LIMIT = 2_000_000
 
 
 def db_path() -> Path:
+    """Return the Serato master database path.
+
+    Returns:
+        The path stored on library.MASTER.
+    """
     return Path(library.MASTER)
 
 BOOL_COLUMNS = {
@@ -141,6 +146,14 @@ _lock = threading.Lock()
 
 
 def connect() -> sqlite3.Connection:
+    """Open the master database for a read-only query.
+
+    Returns:
+        A connection with row access and query_only enabled.
+
+    Raises:
+        FileNotFoundError: If the master database file does not exist.
+    """
     path = db_path()
     if not path.exists():
         raise FileNotFoundError(f"Serato library not found at {path}")
@@ -151,7 +164,12 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
-def db_stamp() -> tuple:
+def db_stamp() -> tuple[int, int]:
+    """Return the cache key for the master database and its WAL file.
+
+    Returns:
+        Modification times in nanoseconds. A missing file contributes 0.
+    """
     path = db_path()
     stamps = []
     for candidate in (path, Path(str(path) + "-wal")):
@@ -160,19 +178,50 @@ def db_stamp() -> tuple:
 
 
 def invalidate() -> None:
+    """Drop the cached library payloads."""
     _cache["stamp"] = None
     _cache["libraries"] = {}
 
 
 def display_name(name: str) -> str:
+    """Return the visible crate name.
+
+    Args:
+        name: Stored crate name. Text after the Serato name separator is hidden.
+
+    Returns:
+        The name shown in the page.
+    """
     return name.split(NAME_SPLIT, 1)[0]
 
 
-def blank(value) -> bool:
+def blank(value: object) -> bool:
+    """Return whether a field should display as empty.
+
+    Args:
+        value: A database value.
+
+    Returns:
+        True when value is None or an empty string.
+
+    Example:
+        >>> blank(None)
+        True
+        >>> blank(0)
+        False
+    """
     return value is None or value == ""
 
 
-def format_when(value) -> str:
+def format_when(value: object) -> str:
+    """Format a Unix timestamp for the track detail pane.
+
+    Args:
+        value: Seconds since the epoch, or an empty value.
+
+    Returns:
+        A local date and time, or a dash when the value is empty or not positive.
+    """
     if blank(value):
         return "—"
     try:
@@ -184,13 +233,33 @@ def format_when(value) -> str:
     return datetime.fromtimestamp(stamp).strftime("%b %-d, %Y %-I:%M %p")
 
 
-def format_bool(value) -> str:
+def format_bool(value: object) -> str:
+    """Format a SQLite boolean for display.
+
+    Args:
+        value: A numeric flag, or None.
+
+    Returns:
+        Yes, No, or a dash.
+
+    Example:
+        >>> format_bool(1)
+        'Yes'
+    """
     if value is None:
         return "—"
     return "Yes" if int(value) else "No"
 
 
-def format_size(value) -> str:
+def format_size(value: object) -> str:
+    """Format a file size in bytes.
+
+    Args:
+        value: Size in bytes, or an empty value.
+
+    Returns:
+        A unit label plus the exact byte count, or a dash.
+    """
     if blank(value):
         return "—"
     size = int(value)
@@ -205,7 +274,15 @@ def format_size(value) -> str:
     return f"{amount:.1f} {units[unit]} ({size:,} bytes)"
 
 
-def format_bitrate(value) -> str:
+def format_bitrate(value: object) -> str:
+    """Format a bit rate stored in bits per second.
+
+    Args:
+        value: Bits per second, or an empty value.
+
+    Returns:
+        A kilobit label, or a dash.
+    """
     if blank(value):
         return "—"
     kbps = float(value) / 1000
@@ -214,7 +291,15 @@ def format_bitrate(value) -> str:
     return f"{kbps:.1f} kbps"
 
 
-def format_rate(value) -> str:
+def format_rate(value: object) -> str:
+    """Format a sample rate stored in hertz.
+
+    Args:
+        value: Hertz, or an empty value.
+
+    Returns:
+        A kilohertz or hertz label, or a dash.
+    """
     if blank(value):
         return "—"
     hz = float(value)
@@ -225,7 +310,16 @@ def format_rate(value) -> str:
     return f"{hz:g} Hz"
 
 
-def format_length(ms, sec) -> str:
+def format_length(ms: object, sec: object) -> str:
+    """Format a track length.
+
+    Args:
+        ms: Length in milliseconds.
+        sec: Length in whole seconds, used when ms is empty.
+
+    Returns:
+        A minutes and seconds label, or a dash when both inputs are empty.
+    """
     if not blank(ms):
         total = int(ms) / 1000
     elif not blank(sec):
@@ -237,7 +331,19 @@ def format_length(ms, sec) -> str:
     return f"{minutes}:{seconds:06.3f}" if not blank(ms) else f"{minutes}:{int(seconds):02d}"
 
 
-def format_color(value) -> str:
+def format_color(value: object) -> str:
+    """Format a Serato color integer.
+
+    Args:
+        value: A 24-bit color, or None. White (0xFFFFFF) means no color.
+
+    Returns:
+        None, a #RRGGBB string, or a dash.
+
+    Example:
+        >>> format_color(0xFFFFFF)
+        'None'
+    """
     if value is None:
         return "—"
     color = int(value)
@@ -246,7 +352,15 @@ def format_color(value) -> str:
     return f"#{color:06X}"
 
 
-def format_rating(value) -> str:
+def format_rating(value: object) -> str:
+    """Format a rating stored from 0 to 1.
+
+    Args:
+        value: A fraction of five stars, or None.
+
+    Returns:
+        A five-star label, or the text Not rated.
+    """
     if value is None:
         return "Not rated"
     score = float(value)
@@ -254,7 +368,15 @@ def format_rating(value) -> str:
     return f"{'★' * filled}{'☆' * (5 - filled)} ({score:g})"
 
 
-def format_bits(value) -> str:
+def format_bits(value: object) -> str:
+    """Format an integer bit field.
+
+    Args:
+        value: A bit mask, or None.
+
+    Returns:
+        The number and the indexes of set bits, or a dash.
+    """
     if value is None:
         return "—"
     number = int(value)
@@ -264,7 +386,19 @@ def format_bits(value) -> str:
     return f"{number} (bits {', '.join(bits)})"
 
 
-def format_bpm(value) -> str:
+def format_bpm(value: object) -> str:
+    """Format a BPM value.
+
+    Args:
+        value: Beats per minute, or an empty value.
+
+    Returns:
+        A whole number or a trimmed decimal, or a dash.
+
+    Example:
+        >>> format_bpm(120)
+        '120'
+    """
     if blank(value):
         return "—"
     number = float(value)
@@ -273,7 +407,15 @@ def format_bpm(value) -> str:
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
-def format_source(value) -> str:
+def format_source(value: object) -> str:
+    """Format the third_party_type column.
+
+    Args:
+        value: 0 for a local file, 1 for iTunes, 6 for Apple Music, or another integer.
+
+    Returns:
+        A source label, the raw number, or a dash.
+    """
     if value is None:
         return "—"
     number = int(value)
@@ -283,7 +425,15 @@ def format_source(value) -> str:
     return str(number)
 
 
-def hex_blob(value) -> str:
+def hex_blob(value: object) -> str:
+    """Format a binary column as hex text.
+
+    Args:
+        value: Bytes, another value, or None.
+
+    Returns:
+        Hex text, the string form, or a dash when the value is empty.
+    """
     if value is None:
         return "—"
     if isinstance(value, bytes):
@@ -294,6 +444,14 @@ def hex_blob(value) -> str:
 
 
 def resolve_path(portable_id: str | None) -> tuple[str | None, bool | None]:
+    """Resolve a Serato portable_id to a local path.
+
+    Args:
+        portable_id: An absolute path, a path under the home directory, or None.
+
+    Returns:
+        The candidate path and whether that path exists. Both items are None when the id is empty.
+    """
     if blank(portable_id):
         return None, None
     raw = Path(portable_id)
@@ -308,6 +466,15 @@ def resolve_path(portable_id: str | None) -> tuple[str | None, bool | None]:
 
 
 def format_field(column: str, row: dict) -> str:
+    """Format one track column for the detail pane.
+
+    Args:
+        column: Asset column name.
+        row: Track row, including derived fields such as crates and resolved_path.
+
+    Returns:
+        Display text for that column.
+    """
     value = row.get(column)
     if column in BOOL_COLUMNS or column == "file_on_disk":
         if column == "file_on_disk" and value is None:
@@ -363,6 +530,17 @@ def format_field(column: str, row: dict) -> str:
 
 
 def require_space(space: str | None) -> str:
+    """Return an allowed Serato space name.
+
+    Args:
+        space: Requested space. None selects Serato Library.
+
+    Returns:
+        The space name to query.
+
+    Raises:
+        LibraryError: If the space is not one of the four spaces this page edits.
+    """
     chosen = space or LIBRARY_SPACE
     if chosen not in library.ALLOWED_SPACES:
         raise library.LibraryError("That space is not available here.")
@@ -370,6 +548,17 @@ def require_space(space: str | None) -> str:
 
 
 def load_library(space: str | None = None) -> dict:
+    """Load the track list and crate tree for one space.
+
+    Args:
+        space: Space name. None selects Serato Library.
+
+    Returns:
+        Tracks, crates, counts, lock status, and whether edits are allowed.
+
+    Raises:
+        LibraryError: If the space name is not allowed.
+    """
     chosen = require_space(space)
     with _lock:
         payload = dict(_load_library(chosen))
@@ -380,6 +569,17 @@ def load_library(space: str | None = None) -> dict:
 
 
 def _load_library(space: str) -> dict:
+    """Query and cache one space.
+
+    Args:
+        space: An allowed space name.
+
+    Returns:
+        The cached payload for that space. The cache drops when the database stamp changes.
+
+    Raises:
+        FileNotFoundError: If the master database is missing.
+    """
     stamp = db_stamp()
     if _cache["stamp"] != stamp:
         _cache["stamp"] = stamp
@@ -509,6 +709,18 @@ def _load_library(space: str) -> dict:
 
 
 def load_track(asset_id: int, space: str | None = None) -> dict | None:
+    """Load one track, its editable fields, and its marker data.
+
+    Args:
+        asset_id: Asset id in master.sqlite.
+        space: Space that must contain the track. None selects Serato Library.
+
+    Returns:
+        The detail payload, or None when the track is not in the space.
+
+    Raises:
+        LibraryError: If the space name is not allowed.
+    """
     chosen = require_space(space)
     with closing(connect()) as conn:
         row = conn.execute(
@@ -672,12 +884,24 @@ def load_track(asset_id: int, space: str | None = None) -> dict | None:
 
 
 class Handler(BaseHTTPRequestHandler):
+    """Serve the JSON API and the files in static/."""
     server_version = "SeratoLibrary/1.0"
 
     def log_message(self, fmt: str, *args) -> None:
+        """Print one access-log line.
+
+        Args:
+            fmt: Log format string from BaseHTTPRequestHandler.
+            *args: Values for that format string.
+        """
         print(f"[{self.log_date_time_string()}] {self.address_string()} {fmt % args}")
 
     def do_GET(self) -> None:
+        """Answer a GET request.
+
+        Library, status, track, history, duplicate, and M3U paths return data.
+        Every other path is a file under static/.
+        """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         try:
@@ -734,6 +958,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_file(parsed.path)
 
     def do_POST(self) -> None:
+        """Answer a JSON POST that edits the library or reveals a file.
+
+        A body larger than BODY_LIMIT returns 413. Serato holding the database returns 409.
+        """
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
         if length > BODY_LIMIT:
@@ -785,7 +1013,13 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError, KeyError):
             self.send_json({"error": "That request is not valid."}, status=400)
 
-    def send_json(self, payload, status: int = 200) -> None:
+    def send_json(self, payload: object, status: int = 200) -> None:
+        """Write a JSON response.
+
+        Args:
+            payload: Object encoded as UTF-8 JSON.
+            status: HTTP status code. Defaults to 200.
+        """
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -795,6 +1029,11 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_file(self, url_path: str) -> None:
+        """Write one file from static/.
+
+        Args:
+            url_path: Request path. An empty path or / serves index.html.
+        """
         rel = "index.html" if url_path in {"", "/"} else url_path.lstrip("/")
         candidate = (STATIC / rel).resolve()
         static_root = STATIC.resolve()
@@ -816,6 +1055,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    """Start the library server on 127.0.0.1 port 8765.
+
+    Raises:
+        SystemExit: If the master database does not exist.
+    """
     if not db_path().exists():
         raise SystemExit(f"Serato library not found at {db_path()}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)

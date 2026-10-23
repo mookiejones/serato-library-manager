@@ -49,6 +49,8 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
+`server.py`, `library.py`, and `tags.py` document each function with a Google-style docstring.
+
 ### `server.py`
 
 `main` binds `ThreadingHTTPServer` to `127.0.0.1` port `8765`. The handler class is `Handler`. It logs each request and answers JSON with `Cache-Control: no-store`.

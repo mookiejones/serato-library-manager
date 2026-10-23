@@ -13,6 +13,21 @@ from pathlib import Path
 
 
 def read_serato_tags(path: str | None) -> dict:
+    """Read Serato cue, loop, flip, and beatgrid data from an audio file.
+
+    The read covers the first 2,000,000 bytes and, for a longer file, the last
+    512,000 bytes. A missing path or an unreadable file returns an empty result.
+
+    Args:
+        path: Filesystem path of the audio file, or None.
+
+    Returns:
+        A dict with keys cues, loops, flips, beatgrid, and found.
+
+    Example:
+        >>> read_serato_tags(None)["found"]
+        False
+    """
     empty = {"cues": [], "loops": [], "flips": [], "beatgrid": [], "found": False}
     if not path:
         return empty
@@ -51,6 +66,14 @@ def read_serato_tags(path: str | None) -> dict:
 
 
 def _geob_frames(blob: bytes) -> list[tuple[str, bytes]]:
+    """Collect Serato GEOB payloads from an ID3 byte string.
+
+    Args:
+        blob: Bytes that may contain one or more ID3 tags.
+
+    Returns:
+        Pairs of GEOB description and payload.
+    """
     frames = []
     cursor = 0
     while cursor < len(blob) - 10:
@@ -67,6 +90,14 @@ def _geob_frames(blob: bytes) -> list[tuple[str, bytes]]:
 
 
 def _synchsafe(raw: bytes) -> int:
+    """Decode a synchsafe integer used by an ID3 tag size.
+
+    Args:
+        raw: Four size bytes. The high bit of each byte is ignored.
+
+    Returns:
+        The decoded integer.
+    """
     value = 0
     for byte in raw:
         value = (value << 7) | (byte & 0x7F)
@@ -74,6 +105,15 @@ def _synchsafe(raw: bytes) -> int:
 
 
 def _parse_id3(blob: bytes, offset: int) -> list[tuple[str, bytes]] | None:
+    """Parse one ID3v2.3 or ID3v2.4 tag and return its GEOB frames.
+
+    Args:
+        blob: The buffer that contains the tag.
+        offset: Index of the ID3 header.
+
+    Returns:
+        GEOB name and payload pairs, or None when the header is not a supported tag.
+    """
     if blob[offset:offset + 3] != b"ID3":
         return None
     if offset + 10 > len(blob):
@@ -107,6 +147,14 @@ def _parse_id3(blob: bytes, offset: int) -> list[tuple[str, bytes]] | None:
 
 
 def _geob_body(body: bytes) -> tuple[str, bytes]:
+    """Split a GEOB frame body into its description and data.
+
+    Args:
+        body: Frame bytes after the GEOB header. The first byte is the text encoding.
+
+    Returns:
+        The frame description and the remaining payload.
+    """
     encoding = body[0]
     rest = body[1:]
     _, rest = _split_text(0, rest)  # MIME is always Latin-1
@@ -116,6 +164,15 @@ def _geob_body(body: bytes) -> tuple[str, bytes]:
 
 
 def _split_text(encoding: int, buf: bytes) -> tuple[str, bytes]:
+    """Split one encoded text field from the front of a buffer.
+
+    Args:
+        encoding: ID3 text encoding byte.
+        buf: Remaining frame bytes.
+
+    Returns:
+        The decoded text and the unused tail.
+    """
     if encoding in (1, 2):
         width = 2
         index = 0
@@ -131,6 +188,15 @@ def _split_text(encoding: int, buf: bytes) -> tuple[str, bytes]:
 
 
 def _decode_text(encoding: int, raw: bytes) -> str:
+    """Decode an ID3 text field.
+
+    Args:
+        encoding: 0 for Latin-1, 1 for UTF-16, 2 for UTF-16-BE, otherwise UTF-8.
+        raw: Encoded field bytes.
+
+    Returns:
+        The decoded text with trailing NUL bytes removed.
+    """
     if encoding == 0:
         return raw.decode("latin-1", "replace").rstrip("\x00")
     if encoding == 1:
@@ -141,6 +207,14 @@ def _decode_text(encoding: int, raw: bytes) -> str:
 
 
 def _parse_markers2(payload: bytes) -> dict:
+    """Parse a Serato Markers2 payload into cues, loops, and flips.
+
+    Args:
+        payload: Decoded GEOB data. A leading 01 01 byte pair marks the base64 body.
+
+    Returns:
+        A dict with keys cues, loops, and flips. An unrecognized payload is empty.
+    """
     result = {"cues": [], "loops": [], "flips": []}
     if len(payload) < 2 or payload[:2] != b"\x01\x01":
         return result
@@ -184,12 +258,28 @@ def _parse_markers2(payload: bytes) -> dict:
 
 
 def _color3(raw: bytes) -> str | None:
+    """Format three color bytes as a CSS hex color.
+
+    Args:
+        raw: At least three bytes of red, green, and blue.
+
+    Returns:
+        A string such as #CC0000, or None when raw is shorter than three bytes.
+    """
     if len(raw) < 3:
         return None
     return f"#{raw[0]:02X}{raw[1]:02X}{raw[2]:02X}"
 
 
 def _parse_cue(blob: bytes) -> dict | None:
+    """Parse one CUE entry.
+
+    Args:
+        blob: Bytes of a single CUE record.
+
+    Returns:
+        Index, start time in milliseconds, color, and name. None when the record is short.
+    """
     if len(blob) < 13:
         return None
     name = blob[12:].split(b"\x00", 1)[0].decode("utf-8", "replace")
@@ -202,6 +292,14 @@ def _parse_cue(blob: bytes) -> dict | None:
 
 
 def _parse_loop(blob: bytes) -> dict | None:
+    """Parse one LOOP entry.
+
+    Args:
+        blob: Bytes of a single LOOP record.
+
+    Returns:
+        Index, start, end, color, locked flag, and name. None when the record is short.
+    """
     if len(blob) < 20:
         return None
     color = blob[14:18]
@@ -217,6 +315,14 @@ def _parse_loop(blob: bytes) -> dict | None:
 
 
 def _parse_flip(blob: bytes) -> dict | None:
+    """Parse one FLIP entry.
+
+    Args:
+        blob: Bytes of a single FLIP record.
+
+    Returns:
+        Index, enabled flag, and name. None when the record is short.
+    """
     if len(blob) < 4:
         return None
     name_end = blob.find(b"\x00", 3)
@@ -228,6 +334,14 @@ def _parse_flip(blob: bytes) -> dict | None:
 
 
 def _parse_beatgrid(payload: bytes) -> list[dict]:
+    """Parse a Serato BeatGrid payload.
+
+    Args:
+        payload: BeatGrid bytes. Version byte 1 is accepted. More than 4096 markers is rejected.
+
+    Returns:
+        Marker dicts. Earlier markers store a beat count. The last marker stores BPM.
+    """
     if len(payload) < 6 or payload[0] != 1:
         return []
     count = int.from_bytes(payload[2:6], "big")
