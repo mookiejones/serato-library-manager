@@ -230,5 +230,34 @@ class DirectoryTests(unittest.TestCase):
         self.assertEqual(logs, Path.home() / ".local" / "state" / "serato-library" / "logs")
 
 
+class VersionTests(unittest.TestCase):
+    """The app version has one definition.
+
+    Sentry's release and PostHog's ``app_version`` import
+    ``APP_VERSION``. ``__version__`` must stay that same string.
+    """
+
+    def test_version_alias_matches_the_constant(self) -> None:
+        """Keep ``__version__`` equal to ``APP_VERSION``.
+
+        Returns:
+            None. The test fails when the alias is a second literal.
+        """
+        self.assertEqual(app_config.__version__, app_config.APP_VERSION)
+        self.assertEqual(app_config.APP_VERSION, "0.1.1")
+
+    def test_docs_quote_the_same_version(self) -> None:
+        """Keep the privacy and architecture notes on ``APP_VERSION``.
+
+        Returns:
+            None. The test fails when either document still names another
+            release string.
+        """
+        root = Path(__file__).resolve().parents[1]
+        for relative in ("PRIVACY.md", "docs/architecture.md"):
+            text = (root / relative).read_text(encoding="utf-8")
+            self.assertIn(app_config.APP_VERSION, text)
+
+
 if __name__ == "__main__":
     unittest.main()
