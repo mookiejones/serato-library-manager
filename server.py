@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 import sqlite3
 import sys
 import threading
@@ -1492,27 +1493,34 @@ class Handler(BaseHTTPRequestHandler):
 
         Args:
             url_path: Request path. An empty path or / serves index.html.
+
+        The request is joined to ``static/`` and passed through
+        ``os.path.realpath``. The result must sit inside that directory.
+        A path that climbs out, including one that only shares a prefix
+        with the directory name, returns 404.
         """
         rel = "index.html" if url_path in {"", "/"} else url_path.lstrip("/")
-        candidate = (STATIC / rel).resolve()
-        static_root = STATIC.resolve()
-        # Keep the resolved path under static/. A request such as
-        # /../library.py must not leave that directory.
-        if not str(candidate).startswith(str(static_root)) or not candidate.is_file():
-            self.send_error(404)
-            return
-        kind = {
-            ".html": "text/html; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".js": "text/javascript; charset=utf-8",
-        }.get(candidate.suffix, "application/octet-stream")
-        body = candidate.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        root = os.path.realpath(STATIC)
+        candidate = os.path.realpath(os.path.join(root, rel))
+        # realpath collapses ".." before the prefix check. The separator
+        # stops a sibling such as "static-evil" from matching "static".
+        if candidate.startswith(root + os.sep):
+            path = Path(candidate)
+            if path.is_file():
+                kind = {
+                    ".html": "text/html; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".js": "text/javascript; charset=utf-8",
+                }.get(path.suffix, "application/octet-stream")
+                body = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        self.send_error(404)
 
 
 def serve() -> ThreadingHTTPServer:

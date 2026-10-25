@@ -41,10 +41,7 @@ class LogTests(unittest.TestCase):
         Returns:
             None.
         """
-        for handler in list(app_log.logger.handlers):
-            if getattr(handler, "name", "") == app_log._FILE_HANDLER:
-                app_log.logger.removeHandler(handler)
-                handler.close()
+        app_log.close_files()
         self._env.stop()
         self._tmp.cleanup()
 
@@ -72,6 +69,13 @@ class LogTests(unittest.TestCase):
         self.assertIn("Logging started.", text)
         self.assertIn("master.sqlite", text)
         self.assertFalse(truncated)
+        app_log.close_files()
+        self.assertFalse(
+            any(
+                getattr(handler, "name", "") == app_log._FILE_HANDLER
+                for handler in app_log.logger.handlers
+            )
+        )
 
     def test_symlink_is_not_copied(self) -> None:
         """Skip a log name that is a symlink.

@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 import app_config
+import app_log
 import sentry_sdk
 import telemetry
 from posthog import Posthog
@@ -559,6 +560,7 @@ class ApiPrivacyTests(unittest.TestCase):
         telemetry.shutdown()
         self._factory.stop()
         self._env.stop()
+        app_log.close_files()
         self._tmp.cleanup()
         self.library.__exit__(None, None, None)
 

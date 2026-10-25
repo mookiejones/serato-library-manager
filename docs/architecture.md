@@ -82,7 +82,7 @@ When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_check` runs first a
 
 `static_assets.py` lists local `src` and `href` files in `static/index.html`. Remote URLs, anchors, and data URLs are skipped. `serato-library.spec` exits before it analyzes the program when one of those files is missing. The release zip check compares the same files, byte for byte, with the source tree.
 
-A GET path under `/api/` runs a query. Any other GET path is a file in `static/`. `index.html` answers `/` and an empty path. A path that leaves `static/` returns 404.
+A GET path under `/api/` runs a query. Any other GET path is a file in `static/`. The request is joined to that directory and passed through `os.path.realpath`. It is served only when the result starts with the directory plus a separator and the result is a file. `index.html` answers `/` and an empty path. Anything else returns 404.
 
 `load_library` caches one payload per space. The cache key is the size and modification time of `master.sqlite` and its WAL file. A cache miss can record `library_scanned` with a track-count bucket. A POST takes a process lock, drops that cache, then writes. Settings and log routes are answered before that lock.
 

@@ -80,6 +80,20 @@ def configure() -> Path:
     return directory
 
 
+def close_files() -> None:
+    """Close the rotating log so its directory can be removed.
+
+    Windows will not delete a file that this process still has open.
+    The next call to :func:`configure` opens the file again. The stderr
+    handler stays in place.
+    """
+    for handler in list(logger.handlers):
+        if getattr(handler, "name", "") != _FILE_HANDLER:
+            continue
+        logger.removeHandler(handler)
+        handler.close()
+
+
 def _log_files(directory: Path) -> list[Path]:
     """Return the rotating log files that stay inside ``directory``.
 
