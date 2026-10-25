@@ -10,9 +10,9 @@ Sharing is off until you turn it on. The first time the page opens it asks:
 
 A report leaves the machine only after you opt in, and only when this copy of the app has a key for that service.
 
-Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, and `tags_read`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. Each event includes the app version (`1.0.0`) and the operating system. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
+Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, and `tags_read`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. Each event includes `app` set to `serato-library-manager`, the app version (`1.0.0`), and the operating system. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
 
-Crash reports go to Sentry. A report is the exception type and a stack trace. A file path in that report is replaced with `[path]`. A Python file is kept as its name only, such as `server.py`. The machine hostname is not sent. Request bodies and local variables are not sent.
+Crash reports go to Sentry. A report is the exception type and a stack trace. The tag `app` is `serato-library-manager`. A file path in that report is replaced with `[path]`. A Python file is kept as its name only, such as `server.py`. The machine hostname is not sent. Request bodies and local variables are not sent.
 
 The install is identified by a random id created when you save a choice. That id is not your name, and it is not a Serato account.
 

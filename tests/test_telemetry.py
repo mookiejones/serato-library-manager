@@ -176,7 +176,10 @@ class ConsentTests(TelemetryCase):
         """
         self._opt_in()
         with mock.patch.dict(os.environ, {"POSTHOG_KEY": "phc_test"}):
-            opened = telemetry.capture(telemetry.EVENT_APP_OPENED, {"name": "Friday"})
+            opened = telemetry.capture(
+                telemetry.EVENT_APP_OPENED,
+                {"name": "Friday", "app": "/Users/dj/Music/Secret Track.mp3"},
+            )
             scanned = telemetry.capture(
                 telemetry.EVENT_LIBRARY_SCANNED,
                 {"track_count": 2, "name": "Secret Track", "path": "/Users/dj/Music/Secret Track.mp3"},
@@ -185,12 +188,15 @@ class ConsentTests(TelemetryCase):
         self.assertTrue(scanned)
         self.assertEqual(self.fake.events[0][0], "app_opened")
         self.assertNotIn("name", self.fake.events[0][2])
+        self.assertEqual(self.fake.events[0][2]["app"], telemetry.APP_NAME)
+        self.assertNotIn("/Users", json.dumps(self.fake.events[0][2]))
         bucket_event = self.fake.events[1]
         self.assertEqual(bucket_event[0], "library_scanned")
         self.assertEqual(bucket_event[2]["track_count_bucket"], "1-9")
         self.assertNotIn("track_count", bucket_event[2])
         self.assertNotIn("name", bucket_event[2])
         self.assertNotIn("path", bucket_event[2])
+        self.assertEqual(bucket_event[2]["app"], telemetry.APP_NAME)
         self.assertEqual(bucket_event[2]["app_version"], app_config.APP_VERSION)
         self.assertIn(bucket_event[2]["os"], {"Darwin", "Windows", "Linux", "other"})
         install_id = app_config.load_settings().install_id
@@ -267,6 +273,7 @@ class ScrubTests(TelemetryCase):
         event = {
             "message": "failed /Users/dj/Music/Secret Track.mp3",
             "server_name": "studio-mac.local",
+            "tags": {"app": "/Users/dj/Music/Secret Track.mp3", "level": "error"},
             "user": {"id": "11111111-1111-4111-8111-111111111111", "email": "dj@example.com", "ip_address": "203.0.113.4"},
             "request": {"data": {"name": "Secret Track", "portable_id": "/Users/dj/Music/Secret Track.mp3"}},
             "extra": {"path": "/Users/dj/Music/Secret Track.mp3"},
@@ -306,6 +313,8 @@ class ScrubTests(TelemetryCase):
         self.assertIn("[path]", blob)
         self.assertIn("server.py", blob)
         self.assertEqual(scrubbed["server_name"], "local")
+        self.assertEqual(scrubbed["tags"]["app"], telemetry.APP_NAME)
+        self.assertEqual(scrubbed["tags"]["level"], "error")
         self.assertEqual(scrubbed["user"], {"id": "11111111-1111-4111-8111-111111111111"})
         frame = scrubbed["exception"]["values"][0]["stacktrace"]["frames"][0]
         self.assertNotIn("vars", frame)
@@ -344,6 +353,7 @@ class ScrubTests(TelemetryCase):
         self.assertNotIn("/Users/dj/Music", blob)
         self.assertNotIn("Secret Track", blob)
         self.assertIn("[path]", blob)
+        self.assertEqual(delivered[0]["tags"]["app"], telemetry.APP_NAME)
 
     def test_sentry_init_keeps_framework_hooks_off(self) -> None:
         """Initialize Sentry without request hooks or personal data.
@@ -355,8 +365,9 @@ class ScrubTests(TelemetryCase):
         Returns:
             None. The test fails if a privacy flag is left at the SDK default.
         """
-        with mock.patch("sentry_sdk.init") as init:
+        with mock.patch("sentry_sdk.init") as init, mock.patch("sentry_sdk.set_tag") as set_tag:
             telemetry._init_sentry("https://public@o0.ingest.sentry.io/0")
+        set_tag.assert_called_once_with("app", telemetry.APP_NAME)
         kwargs = init.call_args.kwargs
         self.assertFalse(kwargs["auto_enabling_integrations"])
         self.assertFalse(kwargs["send_default_pii"])
@@ -403,6 +414,7 @@ class PosthogHookTests(TelemetryCase):
                     distinct_id=install_id,
                     properties={
                         "track_count_bucket": "10-49",
+                        "app": "other-app",
                         "name": "Secret Track",
                         "path": "/Users/dj/Music/Secret Track.mp3",
                     },
@@ -414,7 +426,9 @@ class PosthogHookTests(TelemetryCase):
         blob = json.dumps(batch)
         self.assertNotIn("Secret Track", blob)
         self.assertNotIn("/Users/dj", blob)
+        self.assertNotIn("other-app", blob)
         self.assertIn("10-49", blob)
+        self.assertEqual(batch[0]["properties"]["app"], telemetry.APP_NAME)
         self.assertTrue(batch[0]["properties"]["$geoip_disable"])
 
 
@@ -484,6 +498,12 @@ class PageContractTests(unittest.TestCase):
         self.assertNotIn("innerHTML", script)
         self.assertNotIn("posthog-js", script)
         self.assertNotIn("sentry-js", page)
+        self.assertIn("the app name", page)
+        privacy = (ROOT / "PRIVACY.md").read_text(encoding="utf-8")
+        architecture = (ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+        self.assertIn(telemetry.APP_NAME, privacy)
+        self.assertIn(telemetry.APP_NAME, architecture)
+        self.assertIn("app=serato-library-manager", architecture)
 
 
 class ApiPrivacyTests(unittest.TestCase):

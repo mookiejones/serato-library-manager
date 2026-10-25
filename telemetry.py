@@ -7,9 +7,11 @@ release builds overwrite from GitHub secrets.
 
 Events are an allowlist: ``app_opened``, ``library_scanned``,
 ``crate_created``, ``backup_made``, and ``tags_read``. Properties are the
-app version, the operating system, and a track-count bucket. Track titles,
-crate names, file paths, and library rows are not properties, and the
-Sentry ``before_send`` hook removes paths if one appears in an exception.
+app name ``serato-library-manager``, the app version, the operating
+system, and a track-count bucket. Track titles, crate names, file paths,
+and library rows are not properties, and the Sentry ``before_send`` hook
+removes paths if one appears in an exception. Crash reports carry the
+tag ``app=serato-library-manager``.
 """
 
 from __future__ import annotations
@@ -33,6 +35,8 @@ except ImportError:  # pragma: no cover - the module ships in this repository
 logger = logging.getLogger("serato.library.telemetry")
 
 DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com"
+# Shared with the owner's other app, which uses the same PostHog project.
+APP_NAME = "serato-library-manager"
 EVENT_APP_OPENED = "app_opened"
 EVENT_LIBRARY_SCANNED = "library_scanned"
 EVENT_CRATE_CREATED = "crate_created"
@@ -64,6 +68,7 @@ BUCKET_LABELS = frozenset(label for _, label in BUCKETS) | {"10000+"}
 # PostHog adds these. Anything else, including titles and paths, is removed.
 POSTHOG_PROPERTY_ALLOWLIST = frozenset(
     {
+        "app",
         "app_version",
         "os",
         TRACK_COUNT_BUCKET,
@@ -418,8 +423,15 @@ def scrub_sentry_event(event: dict[str, Any]) -> dict[str, Any]:
                     frame.pop("context_line", None)
     scrubbed = _scrub_value(cleaned)
     if not isinstance(scrubbed, dict):
-        return {"server_name": "local"}
+        return {"server_name": "local", "tags": {"app": APP_NAME}}
     scrubbed["server_name"] = "local"
+    tags = scrubbed.get("tags")
+    if not isinstance(tags, dict):
+        tags = {}
+    else:
+        tags = {key: value for key, value in tags.items() if key != "app"}
+    tags["app"] = APP_NAME
+    scrubbed["tags"] = tags
     return scrubbed
 
 
@@ -474,10 +486,13 @@ def limit_posthog_event(event: dict[str, Any]) -> dict[str, Any] | None:
             continue
         if key == TRACK_COUNT_BUCKET and value not in BUCKET_LABELS:
             return None
+        if key == "app":
+            continue
         if isinstance(value, str):
             kept[key] = scrub_text(value)
         elif isinstance(value, bool) or isinstance(value, (int, float)):
             kept[key] = value
+    kept["app"] = APP_NAME
     kept["app_version"] = app_config.APP_VERSION
     kept["os"] = os_name()
     kept["$geoip_disable"] = True
@@ -497,11 +512,12 @@ def _allow_properties(event: str, properties: Mapping[str, object]) -> dict[str,
 
     Returns:
         The properties to hand to PostHog, or None when the track count
-        is not an integer. The app version and operating system are
-        always the values this process computed.
+        is not an integer. The app name, app version, and operating
+        system are always the values this process computed.
     """
     allowed = EVENTS[event]
     props: dict[str, object] = {
+        "app": APP_NAME,
         "app_version": app_config.APP_VERSION,
         "os": os_name(),
     }
@@ -547,7 +563,11 @@ def _make_posthog(key: str, host: str) -> Any:
         max_retries=1,
         sync_mode=False,
         before_send=limit_posthog_event,
-        super_properties={"app_version": app_config.APP_VERSION, "os": os_name()},
+        super_properties={
+            "app": APP_NAME,
+            "app_version": app_config.APP_VERSION,
+            "os": os_name(),
+        },
         on_error=_on_error,
     )
 
@@ -566,6 +586,9 @@ def _init_sentry(dsn: str) -> None:
     cannot attach a request hook. ``server_name`` is the constant
     ``local`` because the default is the machine hostname. The before-send
     hook scrubs paths and drops the event when consent is no longer granted.
+    The tag ``app`` is ``serato-library-manager`` so a shared Sentry
+    project can tell this app from the other one. The hook sets that tag
+    again after scrubbing, so a caller cannot replace it.
     """
     import sentry_sdk
     from sentry_sdk.integrations.argv import ArgvIntegration
@@ -586,6 +609,7 @@ def _init_sentry(dsn: str) -> None:
         before_send=before_send,
         disabled_integrations=[ArgvIntegration(), LoggingIntegration()],
     )
+    sentry_sdk.set_tag("app", APP_NAME)
 
 
 def activate() -> None:
