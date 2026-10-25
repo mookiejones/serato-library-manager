@@ -59,6 +59,8 @@ The job name is `review dependency changes`. It needs only `contents: read`. A p
 
 The tag filter `v*.*.*` is a glob. `scripts/release_bundle.py check-tag` accepts only `vMAJOR.MINOR.PATCH`. `v1.2`, `1.2.3`, and `v1.2.3-rc.1` are refused.
 
+Windows runners default to PowerShell, which does not expand `${GITHUB_REF_NAME}`. Every `run` step that expands `${GITHUB_REF_NAME}` or `${GITHUB_REPOSITORY}`, and the publish script that redirects and globs, sets `shell: bash`. `pack` and `check-zips` are plain `python` commands. The archive is written with Python's `zipfile`, not a shell zip tool, so those steps stay on the runner's default shell.
+
 On a tag push, each build job checks the tag, installs the build file, runs `python -m PyInstaller serato-library.spec`, then `python scripts/release_bundle.py pack`. `pack` checks the tree, zips it, unpacks that zip outside the repository, and launches the frozen executable with `SERATO_LIBRARY_SMOKE`. The smoke path writes `ok\n` and returns before a window, a port, or the library. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the zip the command was writing.
 
 The build job then attests the zip with `actions/attest` and uploads it. That job's permissions are `contents: read`, `id-token: write`, and `attestations: write`.
