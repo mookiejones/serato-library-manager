@@ -14,7 +14,7 @@ from http.server import ThreadingHTTPServer
 
 import server
 from server import blank, format_bpm, format_bool, format_color, format_when, require_space
-from tests.fixture import TempLibrary
+from tests.fixture import TempLibrary, open_database
 import library
 from library import LibraryError
 
@@ -123,9 +123,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("same-a.mp3", playlist)
 
     def test_locked_library_returns_409(self) -> None:
-        import sqlite3
-
-        with sqlite3.connect(library.MASTER) as conn:
+        with open_database(library.MASTER) as conn:
             conn.execute(
                 "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (99, 'Serato DJ Pro')"
             )
