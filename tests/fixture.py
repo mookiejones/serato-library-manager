@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,9 +184,63 @@ CREATE TABLE updated_smart_crate (
 """
 
 
+@contextmanager
+def open_database(path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a database, commit on success, and always close the connection.
+
+    ``sqlite3.Connection`` used as a context manager commits or rolls back and
+    leaves the connection open. The statement cache keeps that object alive
+    until cyclic garbage collection. Windows cannot delete a database file
+    while that handle is open, so temporary-library cleanup fails.
+
+    Args:
+        path: Database file to open.
+
+    Yields:
+        A connection. Writes are committed when the block exits without an
+        exception, and rolled back when it raises.
+    """
+    conn = sqlite3.connect(path)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _open_sqlite_handles(path: Path) -> list[str]:
+    """Return this process's open descriptors for a database and its sidecars.
+
+    Args:
+        path: Database file.
+
+    Returns:
+        Descriptor targets from ``/proc``. An empty list on systems without
+        that directory. Windows reports the same leak when the directory is
+        removed.
+    """
+    proc = Path("/proc") / str(os.getpid()) / "fd"
+    if not proc.is_dir():
+        return []
+    needle = os.path.normpath(path)
+    found: list[str] = []
+    for entry in proc.iterdir():
+        try:
+            target = os.readlink(entry)
+        except OSError:
+            continue
+        base = os.path.normpath(target.removesuffix(" (deleted)"))
+        if base == needle or base.startswith(needle + "-"):
+            found.append(target)
+    return found
+
+
 def build_database(path: Path) -> None:
     """Create a small library with one track, one history row, and a duplicate pair."""
-    with sqlite3.connect(path) as conn:
+    with open_database(path) as conn:
         conn.executescript(SCHEMA)
         conn.execute("INSERT INTO serato (revision) VALUES (1)")
         conn.execute("INSERT INTO space (id, name) VALUES (1, 'Serato Library')")
@@ -233,7 +290,11 @@ def build_database(path: Path) -> None:
 
 
 class TempLibrary:
-    """Point library.MASTER at a throwaway database for the duration of a test."""
+    """Point library.MASTER at a throwaway database for the duration of a test.
+
+    The fixture closes the database it opens, and removal fails while this
+    process still has the file open. Windows cannot delete that file.
+    """
 
     def __init__(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -256,4 +317,16 @@ class TempLibrary:
         library._backed_up.clear()
         library._backed_up.update(self._old_backed)
         server.invalidate()
-        self._dir.cleanup()
+        leaked = _open_sqlite_handles(self.db)
+        try:
+            self._dir.cleanup()
+        except PermissionError as exc:
+            raise RuntimeError(
+                "The temporary library could not be removed because a SQLite "
+                "connection still has the file open."
+            ) from exc
+        if leaked:
+            raise RuntimeError(
+                "The temporary library still has an open SQLite handle "
+                f"({leaked[0]}). Close the connection before the directory is removed."
+            )

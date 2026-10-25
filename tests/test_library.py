@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 import unittest
 from pathlib import Path
 from typing import cast
@@ -10,7 +9,7 @@ from unittest import mock
 
 import library
 from library import LibraryError, SeratoOpen
-from tests.fixture import TempLibrary
+from tests.fixture import TempLibrary, open_database
 
 
 class LibraryTests(unittest.TestCase):
@@ -24,7 +23,7 @@ class LibraryTests(unittest.TestCase):
 
     def test_status_blocks_a_live_serato_process(self) -> None:
         with TempLibrary():
-            with sqlite3.connect(library.MASTER) as conn:
+            with open_database(library.MASTER) as conn:
                 conn.execute(
                     "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (99, 'Serato DJ Pro')"
                 )
@@ -38,7 +37,7 @@ class LibraryTests(unittest.TestCase):
     def test_save_track_updates_the_row_and_backs_up(self) -> None:
         with TempLibrary() as temp:
             result = library.save_track(1, {"name": "Renamed", "bpm": 126})
-            with sqlite3.connect(temp.db) as conn:
+            with open_database(temp.db) as conn:
                 row = conn.execute("SELECT name, bpm FROM asset WHERE id = 1").fetchone()
             backups = list((temp.db.resolve().parent / "Backups").glob("serato-web-*"))
             self.assertTrue(result["ok"])
@@ -51,7 +50,7 @@ class LibraryTests(unittest.TestCase):
         with TempLibrary() as temp:
             with self.assertRaises(LibraryError):
                 library.save_track(1, {"bpm": 2000})
-            with sqlite3.connect(temp.db) as conn:
+            with open_database(temp.db) as conn:
                 bpm = conn.execute("SELECT bpm FROM asset WHERE id = 1").fetchone()[0]
         self.assertEqual(bpm, 120)
 
@@ -61,7 +60,7 @@ class LibraryTests(unittest.TestCase):
             added = library.crate_action({"action": "add", "id": created["id"], "asset": 1})
             playlist = library.export_m3u("Serato Library", cast(int, created["id"]))
             library.crate_action({"action": "delete", "id": created["id"]})
-            with sqlite3.connect(temp.db) as conn:
+            with open_database(temp.db) as conn:
                 left = conn.execute(
                     "SELECT COUNT(*) FROM container WHERE name = 'Warmup'"
                 ).fetchone()[0]
@@ -73,7 +72,7 @@ class LibraryTests(unittest.TestCase):
 
     def test_export_names_a_track_with_no_path(self) -> None:
         with TempLibrary() as temp:
-            with sqlite3.connect(temp.db) as conn:
+            with open_database(temp.db) as conn:
                 conn.execute(
                     """
                     INSERT INTO asset (id, name, artist, length_ms, portable_id)
@@ -113,7 +112,7 @@ class LibraryTests(unittest.TestCase):
                 "From playlist",
                 "#EXTM3U\nMusic/same-a.mp3\nMusic/missing.mp3\n",
             )
-            with sqlite3.connect(temp.db) as conn:
+            with open_database(temp.db) as conn:
                 count = conn.execute(
                     "SELECT COUNT(*) FROM container_asset WHERE asset_id = 1"
                 ).fetchone()[0]
@@ -128,7 +127,7 @@ class LibraryTests(unittest.TestCase):
             result = library.import_m3u(
                 "Serato Library", None, "Comments", "# comment only\n"
             )
-            with sqlite3.connect(temp.db) as conn:
+            with open_database(temp.db) as conn:
                 count = conn.execute(
                     "SELECT COUNT(*) FROM container WHERE name = 'Comments'"
                 ).fetchone()[0]
@@ -192,7 +191,7 @@ class LibraryTests(unittest.TestCase):
     def test_windows_serato_process_blocks_the_library(self) -> None:
         completed = mock.Mock(returncode=0, stdout='"Serato DJ Pro.exe","99","Console","1","1 K"')
         with TempLibrary():
-            with sqlite3.connect(library.MASTER) as conn:
+            with open_database(library.MASTER) as conn:
                 conn.execute(
                     "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (99, 'Serato DJ Pro')"
                 )
@@ -219,6 +218,18 @@ class LibraryTests(unittest.TestCase):
         with TempLibrary():
             with self.assertRaises(LibraryError):
                 library.duplicate_groups("Streaming")
+
+    def test_temporary_database_closes_before_cleanup(self) -> None:
+        with TempLibrary() as temp:
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (7, 'holding')"
+                )
+            with open_database(temp.db) as conn:
+                count = conn.execute("SELECT COUNT(*) FROM lock").fetchone()[0]
+            self.assertEqual(count, 1)
+            db = temp.db
+        self.assertFalse(db.exists())
 
 
 if __name__ == "__main__":

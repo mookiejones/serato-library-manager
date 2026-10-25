@@ -26,7 +26,7 @@ Closing the window stops the server. On Windows, use `.venv\Scripts\python` in p
 ## Tests
 
 1. From the repository root, run `python3 -m unittest discover -s tests -t . -v`.
-2. The suite builds a temporary database and points `library.MASTER` at that file.
+2. The suite builds a temporary database and points `library.MASTER` at that file. The fixture closes every SQLite connection before it deletes that directory. Windows cannot delete a database file that still has an open handle, and a `sqlite3` connection used as a context manager commits without closing.
 3. The suite does not open the live Serato library.
 
 ## Debug in VS Code
