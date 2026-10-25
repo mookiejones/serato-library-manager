@@ -5,7 +5,9 @@
  * local server on 127.0.0.1 port 8765. Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, and /api/reveal.
  * The track list is virtualized: only rows near the scroll window are
- * in the DOM. This file does not open master.sqlite itself.
+ * in the DOM. Sharing settings and local logs use /api/settings and
+ * /api/logs. This file does not open master.sqlite itself, and it does
+ * not send library rows anywhere.
  */
 
 // Row height in pixels. It matches --row in app.css. The painter divides
@@ -58,6 +60,8 @@ const state = {
   entries: [],
   duplicateIds: null,
   duplicateSpace: "",
+  telemetryConsent: null,
+  telemetryConfigured: false,
 };
 
 const crateList = document.getElementById("crate-list");
@@ -2142,4 +2146,221 @@ function showFailure(error) {
   detail.replaceChildren(failure);
 }
 
+const consentDialog = document.getElementById("consent-dialog");
+const settingsDialog = document.getElementById("settings-dialog");
+const telemetryToggle = document.getElementById("telemetry-toggle");
+const telemetryNote = document.getElementById("telemetry-note");
+const consentStatus = document.getElementById("consent-status");
+const settingsStatus = document.getElementById("settings-status");
+const logFallback = document.getElementById("log-fallback");
+let consentSettled = false;
+let privacySync = false;
+
+/**
+ * Describe the current sharing choice in one sentence.
+ *
+ * The note sits under the settings checkbox. It does not include the
+ * install id or any library data. No request is made.
+ *
+ * @returns {string} Status sentence for the settings dialog.
+ */
+function telemetryNoteText() {
+  if (!state.telemetryConfigured) {
+    return "This copy has no telemetry keys, so nothing is sent either way.";
+  }
+  if (state.telemetryConsent === true) {
+    return "Anonymous counts and crash reports can be sent.";
+  }
+  return "Nothing is sent.";
+}
+
+/**
+ * Apply a /api/settings payload to the checkbox and the note.
+ *
+ * privacySync keeps the checkbox assignment from posting the choice
+ * again. A null consent leaves the checkbox off. No request is made.
+ *
+ * @param {object} payload Settings object from the server.
+ * @returns {void}
+ */
+function applyPrivacy(payload) {
+  state.telemetryConsent = payload.telemetry_consent ?? null;
+  state.telemetryConfigured = Boolean(payload.telemetry_configured);
+  privacySync = true;
+  telemetryToggle.checked = state.telemetryConsent === true;
+  privacySync = false;
+  telemetryNote.textContent = telemetryNoteText();
+}
+
+/**
+ * POST the sharing choice.
+ *
+ * False is sent as false. The button or checkbox stays disabled until
+ * the response arrives. A failure leaves the previous choice in place
+ * and shows what to do next.
+ *
+ * @param {boolean} value True to share, false to send nothing.
+ * @param {HTMLElement} status Element that receives the result sentence.
+ * @returns {Promise<boolean>} True when the server stored the choice.
+ */
+async function saveConsent(value, status) {
+  status.textContent = "Saving…";
+  try {
+    const payload = await postJSON("/api/settings", { telemetry_consent: value });
+    applyPrivacy(payload);
+    status.textContent = value
+      ? "Sharing is on. Anonymous counts and crash reports can be sent."
+      : "Sharing is off. Nothing is sent.";
+    return true;
+  } catch (error) {
+    status.textContent = "Couldn't save that choice. Try again.";
+    return false;
+  }
+}
+
+/**
+ * Open the first-launch dialog when the person has not chosen yet.
+ *
+ * Focus moves to Don't share. Escape and a failed save are handled by
+ * the dialog listeners. No library fields are included.
+ *
+ * @returns {void}
+ */
+function showConsent() {
+  if (typeof consentDialog.showModal !== "function") return;
+  if (consentDialog.open) return;
+  consentSettled = false;
+  consentStatus.textContent = "";
+  consentDialog.showModal();
+  document.getElementById("consent-decline").focus();
+}
+
+/**
+ * Load sharing settings and show the prompt when no choice is saved.
+ *
+ * GET /api/settings. A failure leaves sharing off and says so. It does
+ * not block the library view.
+ *
+ * @returns {Promise<void>}
+ */
+async function loadPrivacy() {
+  const response = await fetch("/api/settings");
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
+  applyPrivacy(payload);
+  if (payload.needs_consent_prompt) showConsent();
+}
+
+document.getElementById("consent-decline").addEventListener("click", () => {
+  saveConsent(false, consentStatus).then((ok) => {
+    if (!ok) return;
+    consentSettled = true;
+    consentDialog.close();
+  });
+});
+
+document.getElementById("consent-accept").addEventListener("click", () => {
+  saveConsent(true, consentStatus).then((ok) => {
+    if (!ok) return;
+    consentSettled = true;
+    consentDialog.close();
+  });
+});
+
+consentDialog.addEventListener("close", () => {
+  if (consentSettled || state.telemetryConsent !== null) return;
+  saveConsent(false, consentStatus).then((ok) => {
+    if (ok) {
+      consentSettled = true;
+      return;
+    }
+    consentDialog.showModal();
+  });
+});
+
+document.getElementById("open-settings").addEventListener("click", () => {
+  settingsStatus.textContent = "";
+  logFallback.hidden = true;
+  telemetryNote.textContent = telemetryNoteText();
+  settingsDialog.showModal();
+});
+
+document.getElementById("settings-close").addEventListener("click", () => {
+  settingsDialog.close();
+});
+
+telemetryToggle.addEventListener("change", () => {
+  if (privacySync) return;
+  const want = telemetryToggle.checked;
+  telemetryToggle.disabled = true;
+  saveConsent(want, settingsStatus).then((ok) => {
+    telemetryToggle.disabled = false;
+    if (ok) {
+      consentSettled = true;
+      return;
+    }
+    privacySync = true;
+    telemetryToggle.checked = state.telemetryConsent === true;
+    privacySync = false;
+  });
+});
+
+document.getElementById("open-logs").addEventListener("click", () => {
+  const button = document.getElementById("open-logs");
+  button.disabled = true;
+  settingsStatus.textContent = "Opening…";
+  postJSON("/api/logs/open", {})
+    .then(() => {
+      settingsStatus.textContent = "Opened the logs folder.";
+    })
+    .catch(() => {
+      settingsStatus.textContent = "Couldn't open the logs folder.";
+    })
+    .finally(() => {
+      button.disabled = false;
+    });
+});
+
+document.getElementById("copy-logs").addEventListener("click", async () => {
+  const button = document.getElementById("copy-logs");
+  button.disabled = true;
+  settingsStatus.textContent = "Copying…";
+  try {
+    const response = await fetch("/api/logs");
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Couldn't copy the logs.");
+    const text = payload.text || "";
+    if (!text) {
+      settingsStatus.textContent = "No log entries yet.";
+      return;
+    }
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (error) {
+        copied = false;
+      }
+    }
+    if (copied) {
+      logFallback.hidden = true;
+      settingsStatus.textContent = payload.truncated
+        ? "Copied the latest log entries. Older entries were left out."
+        : "Copied the logs.";
+      return;
+    }
+    logFallback.hidden = false;
+    logFallback.value = text;
+    logFallback.focus();
+    logFallback.select();
+    settingsStatus.textContent = "Couldn't copy automatically. Select the log text and copy it.";
+  } catch (error) {
+    settingsStatus.textContent = "Couldn't copy the logs.";
+  } finally {
+    button.disabled = false;
+  }
+});
+
 loadLibrary().catch(showFailure);
+loadPrivacy().catch((error) => setNotice(error.message || "Couldn't load sharing settings. Nothing is sent."));

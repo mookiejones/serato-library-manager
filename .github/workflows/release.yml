@@ -50,6 +50,14 @@ jobs:
       - name: Install build tools
         run: python -m pip install -r requirements-build.txt
 
+      - name: Bake telemetry keys
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+        shell: bash
+        run: python scripts/write_build_config.py
+
       - name: Build the app
         run: python -m PyInstaller serato-library.spec
 

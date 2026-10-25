@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 import sqlite3
 import sys
 import threading
@@ -19,7 +20,9 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 from urllib.parse import parse_qs, urlparse
 
+import app_log
 import library
+import telemetry
 
 
 def app_root() -> Path:
@@ -1001,6 +1004,10 @@ def _load_library(space: str) -> dict[str, object]:
         "crates": [crate for crate in crates if crate["id"] != root_id],
     }
     _cache["libraries"][space] = payload
+    telemetry.capture(
+        telemetry.EVENT_LIBRARY_SCANNED,
+        {"track_count": len(tracks)},
+    )
     return payload
 
 
@@ -1221,11 +1228,44 @@ class Handler(BaseHTTPRequestHandler):
             format: Log format string from BaseHTTPRequestHandler.
             *args: Values for that format string.
         """
-        print(
-            f"[{self.log_date_time_string()}] {self.address_string()} {format % args}"
-        )
+        line = f"[{self.log_date_time_string()}] {self.address_string()} {format % args}"
+        print(line)
+        app_log.logger.info("%s", format % args)
+
+    def _report_failure(self, exc: BaseException) -> None:
+        """Log an unexpected error and answer with a generic message.
+
+        Args:
+            exc: Exception that escaped a request method.
+
+        The response does not include the exception text, which can contain
+        a file path. The local log keeps the traceback. Sentry receives the
+        exception only after the person has opted in, and the before-send
+        hook still removes paths.
+        """
+        telemetry.capture_exception(exc)
+        app_log.logger.exception("Request failed")
+        try:
+            self.send_json(
+                {"error": "Something went wrong. The details are in the local log."},
+                status=500,
+            )
+        except Exception:
+            app_log.logger.exception("Could not write the error response")
 
     def do_GET(self) -> None:
+        """Answer a GET request.
+
+        Settings and logs are answered before the library routes. Library,
+        status, track, history, duplicate, and M3U paths return data.
+        Every other path is a file under static/.
+        """
+        try:
+            self._do_GET()
+        except Exception as exc:
+            self._report_failure(exc)
+
+    def _do_GET(self) -> None:
         """Answer a GET request.
 
         Library, status, track, history, duplicate, and M3U paths return data.
@@ -1234,6 +1274,13 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         try:
+            if parsed.path == "/api/settings":
+                self.send_json(telemetry.public_settings())
+                return
+            if parsed.path == "/api/logs":
+                text, truncated = app_log.read_logs()
+                self.send_json({"text": text, "truncated": truncated})
+                return
             if parsed.path == "/api/library":
                 self.send_json(load_library(query_text(query, "space")))
                 return
@@ -1291,9 +1338,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_file(parsed.path)
 
     def do_POST(self) -> None:
-        """Answer a JSON POST that edits the library or reveals a file.
+        """Answer a JSON POST that edits the library, reveals a file, or saves settings.
 
         A body larger than BODY_LIMIT returns 413. Serato holding the database returns 409.
+        Settings and the logs folder do not take the library write lock.
+        """
+        try:
+            self._do_POST()
+        except Exception as exc:
+            self._report_failure(exc)
+
+    def _do_POST(self) -> None:
+        """Answer a JSON POST.
+
+        Settings and opening the logs folder return before the library lock.
+        Track, crate, import, and reveal run as before.
         """
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
@@ -1309,6 +1368,12 @@ class Handler(BaseHTTPRequestHandler):
             payload = as_dict(parsed_body)
         except TypeError:
             self.send_json({"error": "The request body is not an object."}, status=400)
+            return
+        if parsed.path == "/api/settings":
+            self._post_settings(payload)
+            return
+        if parsed.path == "/api/logs/open":
+            self._post_open_logs()
             return
         try:
             if parsed.path == "/api/reveal":
@@ -1329,6 +1394,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 elif parsed.path == "/api/crate":
                     result = as_dict(_library_call("crate_action", payload))
+                    if payload.get("action") == "create":
+                        telemetry.capture(telemetry.EVENT_CRATE_CREATED)
                 elif parsed.path == "/api/import.m3u":
                     result = as_dict(
                         _library_call(
@@ -1339,6 +1406,7 @@ class Handler(BaseHTTPRequestHandler):
                             text_or_empty(payload.get("text")),
                         )
                     )
+                    telemetry.capture(telemetry.EVENT_CRATE_CREATED)
                 else:
                     self.send_json(
                         {"error": "That action is not available."}, status=404
@@ -1363,6 +1431,48 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError, KeyError):
             self.send_json({"error": "That request is not valid."}, status=400)
 
+    def _post_settings(self, payload: dict[str, object]) -> None:
+        """Save the sharing choice.
+
+        Args:
+            payload: JSON object. The only accepted field is
+                ``telemetry_consent``, and it must be a boolean. ``False``
+                is a real choice. Any other shape is a 400 so a misspelled
+                field is not stored as the default.
+        """
+        if set(payload) != {"telemetry_consent"} or not isinstance(
+            payload.get("telemetry_consent"), bool
+        ):
+            self.send_json({"error": "That request is not valid."}, status=400)
+            return
+        choice = payload["telemetry_consent"]
+        if not isinstance(choice, bool):
+            self.send_json({"error": "That request is not valid."}, status=400)
+            return
+        try:
+            self.send_json(telemetry.set_consent(choice))
+        except OSError:
+            self.send_json(
+                {"error": "The sharing choice could not be saved."},
+                status=500,
+            )
+
+    def _post_open_logs(self) -> None:
+        """Open the local logs folder.
+
+        The path is the app log directory. The request body cannot choose
+        a different folder. The response does not include that path.
+        """
+        try:
+            app_log.open_logs_folder()
+        except (OSError, RuntimeError):
+            self.send_json(
+                {"error": "The logs folder could not be opened."},
+                status=500,
+            )
+            return
+        self.send_json({"ok": True})
+
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.
 
@@ -1383,27 +1493,34 @@ class Handler(BaseHTTPRequestHandler):
 
         Args:
             url_path: Request path. An empty path or / serves index.html.
+
+        The request is joined to ``static/`` and passed through
+        ``os.path.realpath``. The result must sit inside that directory.
+        A path that climbs out, including one that only shares a prefix
+        with the directory name, returns 404.
         """
         rel = "index.html" if url_path in {"", "/"} else url_path.lstrip("/")
-        candidate = (STATIC / rel).resolve()
-        static_root = STATIC.resolve()
-        # Keep the resolved path under static/. A request such as
-        # /../library.py must not leave that directory.
-        if not str(candidate).startswith(str(static_root)) or not candidate.is_file():
-            self.send_error(404)
-            return
-        kind = {
-            ".html": "text/html; charset=utf-8",
-            ".css": "text/css; charset=utf-8",
-            ".js": "text/javascript; charset=utf-8",
-        }.get(candidate.suffix, "application/octet-stream")
-        body = candidate.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        root = os.path.realpath(STATIC)
+        candidate = os.path.realpath(os.path.join(root, rel))
+        # realpath collapses ".." before the prefix check. The separator
+        # stops a sibling such as "static-evil" from matching "static".
+        if candidate.startswith(root + os.sep):
+            path = Path(candidate)
+            if path.is_file():
+                kind = {
+                    ".html": "text/html; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".js": "text/javascript; charset=utf-8",
+                }.get(path.suffix, "application/octet-stream")
+                body = path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", kind)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        self.send_error(404)
 
 
 def serve() -> ThreadingHTTPServer:
@@ -1417,8 +1534,10 @@ def serve() -> ThreadingHTTPServer:
     """
     if not db_path().exists():
         raise SystemExit(f"Serato library not found at {db_path()}")
+    app_log.configure()
+    app_log.logger.info("Library file: %s", db_path())
     try:
-        return ThreadingHTTPServer((HOST, PORT), Handler)
+        httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
@@ -1426,6 +1545,10 @@ def serve() -> ThreadingHTTPServer:
             f"http://{HOST}:{PORT} is already in use. "
             "Quit the other Serato library server (server.py or the desktop window) and try again."
         ) from exc
+    app_log.logger.info("Server listening on %s:%s", HOST, PORT)
+    telemetry.activate()
+    telemetry.note_app_opened()
+    return httpd
 
 
 def main() -> None:
@@ -1442,6 +1565,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        telemetry.shutdown()
         httpd.server_close()
 
 

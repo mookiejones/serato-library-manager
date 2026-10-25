@@ -23,11 +23,14 @@ python3 -m venv .venv
 
 Closing the window stops the server. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`. To build an app for the machine you are on, install `requirements-build.txt` in that environment and run `python -m PyInstaller serato-library.spec`. The result is `dist/Serato Library.app` on macOS, or `dist/Serato Library/` on Windows. The build is unsigned. Release builds, attestations, and the GitHub settings around them are in [docs/github.md](github.md).
 
+The first time the page opens, it asks whether to share anonymous usage stats and crash reports. The choice stays off until you accept. [PRIVACY.md](../PRIVACY.md) lists what can be sent.
+
 ## Tests
 
-1. From the repository root, run `python3 -m unittest discover -s tests -t . -v`.
-2. The suite builds a temporary database and points `library.MASTER` at that file. The fixture closes every SQLite connection before it deletes that directory. Windows cannot delete a database file that still has an open handle, and a `sqlite3` connection used as a context manager commits without closing.
-3. The suite does not open the live Serato library.
+1. From the repository root, install the pinned packages with `python3 -m pip install -r requirements.txt`. The suite imports `sentry-sdk` and `posthog`.
+2. Run `python3 -m unittest discover -s tests -t . -v`.
+3. The suite builds a temporary database and points `library.MASTER` at that file. The fixture closes every SQLite connection before it deletes that directory. Windows cannot delete a database file that still has an open handle, and a `sqlite3` connection used as a context manager commits without closing.
+4. The suite does not open the live Serato library. `tests/__init__.py` points `SERATO_LIBRARY_CONFIG_DIR` and `SERATO_LIBRARY_LOG_DIR` at a temporary directory for the whole run. A relative value for either variable is ignored.
 
 ## Debug in VS Code
 
@@ -65,7 +68,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, `tags.py`, `desktop.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -75,13 +78,15 @@ Rel(tags, audio, "Reads the tag header")
 
 `desktop.py` imports `webview` (pywebview 6.2.1), calls `serve`, and opens `http://127.0.0.1:8765` in a native window. The window allows text selection. pywebview uses WKWebView on macOS and WebView2, through the WinForms backend, on Windows. The import stays in `desktop.py`, so the server and the tests do not require the package.
 
-When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_check` runs first and `main` returns. The check confirms the bundled page through `server.app_root()`, writes `ok\n` to that path, and does not import pywebview, bind a port, or open the library. A relative path, a symlink, a directory, or a missing parent directory stops the process. The windowed build has no console, so the marker file is the signal the release check reads.
+When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_check` runs first and `main` returns. The check confirms the bundled page through `server.app_root()`, writes `ok\n` to that path, and does not import pywebview, bind a port, open the library, or start telemetry. A relative path, a symlink, a directory, or a missing parent directory stops the process. The windowed build has no console, so the marker file is the signal the release check reads.
 
 `static_assets.py` lists local `src` and `href` files in `static/index.html`. Remote URLs, anchors, and data URLs are skipped. `serato-library.spec` exits before it analyzes the program when one of those files is missing. The release zip check compares the same files, byte for byte, with the source tree.
 
-A GET path under `/api/` runs a query. Any other GET path is a file in `static/`. `index.html` answers `/` and an empty path. A path that leaves `static/` returns 404.
+A GET path under `/api/` runs a query. Any other GET path is a file in `static/`. The request is joined to that directory and passed through `os.path.realpath`. It is served only when the result starts with the directory plus a separator and the result is a file. `index.html` answers `/` and an empty path. Anything else returns 404.
 
-`load_library` caches one payload per space. The cache key is the size and modification time of `master.sqlite` and its WAL file. A POST takes a process lock, drops that cache, then writes.
+`load_library` caches one payload per space. The cache key is the size and modification time of `master.sqlite` and its WAL file. A cache miss can record `library_scanned` with a track-count bucket. A POST takes a process lock, drops that cache, then writes. Settings and log routes are answered before that lock.
+
+The HTTP banner is `SeratoLibrary/1.0`. The sharing release string in `app_config.APP_VERSION` is `1.0.0`. A release tag does not change either string.
 
 `load_track` returns every column listed in `FIELDS`, plus the edit form, crate membership, near-duplicate copies, Prepare membership, the resolved file path, and marker data. Copies share title, artist, and length in whole seconds. The query returns at most 12 copies.
 
@@ -95,7 +100,7 @@ Allowed spaces are `Serato Library`, `Serato Video`, `Apple Music`, and `Prepare
 
 `status` reads the `lock` table. A row counts as open only when the process image contains `serato`. macOS and other Unix systems ask `ps`. Windows asks `tasklist`. A locked database also counts as open. `writable` is false in both cases. The payload includes `file_manager`: `Finder` or `File Explorer`.
 
-`begin_write` refuses the call when Serato is open (`SeratoOpen`, HTTP 409). It then calls `ensure_backup` and opens `BEGIN IMMEDIATE` with a one-second timeout. Foreign keys are off for the write. The backup folder is `Library/Backups/serato-web-<timestamp>/` beside `master.sqlite`. The copy includes `root.sqlite` when that file sits beside the master database. One process backs up a given master path once.
+`begin_write` refuses the call when Serato is open (`SeratoOpen`, HTTP 409). It then calls `ensure_backup` and opens `BEGIN IMMEDIATE` with a one-second timeout. Foreign keys are off for the write. The backup folder is `Library/Backups/serato-web-<timestamp>/` beside `master.sqlite`. The copy includes `root.sqlite` when that file sits beside the master database. One process backs up a given master path once. After that copy, `backup_made` can be recorded. The backup path is not a property of the event.
 
 `register` installs `serato_str_norm` and `serato_raw_key_string_to_key_type` on a write connection. The key function maps Camelot and traditional names onto Serato's integer key.
 
@@ -113,7 +118,7 @@ A write to a track or crate updates `master.sqlite`, then mirrors the change int
 
 `export_m3u` writes an extended M3U for one crate or for the whole space. A track with no path is named in a `# omitted, no path` comment and left out of the playlist. A missing length is written as `-1`. `import_m3u` creates a normal crate and adds tracks whose `portable_id` matches a playlist path. Unmatched paths stay out of the crate. The result lists at most 50 of them.
 
-`reveal` shows the resolved audio file in the host file manager. macOS runs `open -R`. Windows runs `explorer /select,`. `markers_for` calls `tags.read_serato_tags` when the file is on disk.
+`reveal` shows the resolved audio file in the host file manager. macOS runs `open -R`. Windows runs `explorer /select,`. `markers_for` calls `tags.read_serato_tags` when the file is on disk. A successful read can record `tags_read`. The audio path is not a property of the event.
 
 ### `tags.py`
 
@@ -131,7 +136,23 @@ BeatGrid version byte `1` yields markers. Each marker has a position in seconds.
 
 The detail pane edits the fields `save_track` accepts, shows marker sections, lists near-duplicate copies, and offers crate membership, Prepare, reveal in the host file manager, and remove from the library. The reveal label uses `file_manager` from the track status. Writes stay disabled while `writable` is false. Color choices are None, Red, Orange, Yellow, Green, Blue, Purple, and Pink.
 
+The rail ends with Settings. The first launch opens a dialog whose heading is "Share anonymous usage stats and crash reports?" **Don't share** is focused. Esc or closing the dialog saves a decline. Settings holds the same choice as a checkbox, plus **Open logs folder** and **Copy logs**. The page does not load a third-party analytics script, and it does not insert log text with `innerHTML`.
+
 `app.css` is the layout and color for that screen.
+
+## Sharing and logs
+
+`telemetry.py` is the gate. `capture` returns false, and does not queue the event, unless the saved choice is the boolean `True` and `POSTHOG_KEY` is non-empty. `capture_exception` returns without sending unless the choice is `True` and `SENTRY_DSN` is non-empty. A missing package is the same as a missing key: that service stays off. Clients start in `activate`, which `serve` calls after the port is bound, and which `set_consent(True)` calls when the person opts in. `shutdown` runs when the server or the desktop window stops. The smoke path returns before `serve`, so it does not start a client.
+
+Keys are read from the environment first, then from `_build_config.py`. The committed file sets `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` to empty strings. `scripts/write_build_config.py` overwrites that file for a release build. `POSTHOG_HOST` falls back to `https://us.i.posthog.com`. The script prints `yes` or `no`. It does not print the value.
+
+The events are `app_opened` (once per process after consent), `library_scanned`, `crate_created` (a created crate, or a crate created by an M3U import), `backup_made`, and `tags_read`. Properties this process adds are `app` (`serato-library-manager`), `app_version`, `os`, and, for a scan, `track_count_bucket`. Buckets are `0`, `1-9`, `10-49`, `50-99`, `100-499`, `500-999`, `1000-4999`, `5000-9999`, and `10000+`. The exact count is not sent. The PostHog client may also attach its Python and library version fields. A before-send hook drops any other property, including a title or a path, and drops the event if consent is no longer granted. GeoIP is disabled. Feature-flag polling and exception autocapture are off.
+
+Sentry uses `server_name` `local`, environment `local`, release `1.0.0`, and the tag `app=serato-library-manager`. `send_default_pii` is false. Local variables, source context, and request bodies are off. Argv and logging integrations are disabled. Framework auto-enabling is off. `before_send` returns `None` when consent is off. Otherwise it removes request data, frame variables, and absolute paths. A path becomes `[path]`. A final component ending in `.py` is kept as the file name.
+
+`app_config.py` stores `settings.json` with `install_id` and `telemetry_consent`. The id is a random UUID, created when the choice is saved, not before. `None` means the prompt is still due. `False` is a saved decline. The file is written only when both fields are set. A corrupt file is renamed to `settings.json.unreadable`. The directory is `~/Library/Application Support/Serato Library` on macOS, `%APPDATA%\Serato Library` on Windows, and `$XDG_CONFIG_HOME/serato-library` (or `~/.config/serato-library`) elsewhere. `SERATO_LIBRARY_CONFIG_DIR` overrides it when the value is absolute.
+
+`app_log.py` writes `serato-library.log` with `RotatingFileHandler`: 1 MiB and three backups. The directory is `~/Library/Logs/Serato Library` on macOS, `%LOCALAPPDATA%\Serato Library\Logs` on Windows, and `$XDG_STATE_HOME/serato-library/logs` (or `~/.local/state/serato-library/logs`) elsewhere. `SERATO_LIBRARY_LOG_DIR` overrides it when the value is absolute. The startup line can include the database path. That file is not uploaded. Copying the log skips a symlink and skips a file that is not inside the log directory, and it keeps the newest 200,000 characters. Opening the folder runs `open` on macOS, `xdg-open` elsewhere, and `os.startfile` on Windows. The response does not include the path.
 
 ## HTTP API
 
@@ -150,6 +171,12 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | POST | `/api/crate` | `action` plus ids and fields | Crate or membership change |
 | POST | `/api/import.m3u` | `space`, `parent`, `name`, `text` | New crate from playlist text |
 | POST | `/api/reveal` | `id` | Reveals the file in Finder or File Explorer |
+| GET | `/api/settings` | none | `telemetry_consent` (`true`, `false`, or `null`), `needs_consent_prompt`, `telemetry_configured`, `app_version`. The install id and the keys are omitted |
+| POST | `/api/settings` | `telemetry_consent` | Saves the boolean choice. Any other field, or a non-boolean, returns 400 |
+| GET | `/api/logs` | none | `{ "text", "truncated" }` from the local log. The text can contain a path. It is not a report |
+| POST | `/api/logs/open` | none | Opens the logs folder. `{ "ok": true }`. The path is not in the body |
+
+`GET /api/settings` and `GET /api/logs` do not take the library write lock. `POST /api/settings` and `POST /api/logs/open` are handled before that lock. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
 
 `GET /api/library` crate objects use `id`, `parent`, `name`, `smart`, `order`, `color`, `expanded`, `added`, `tracks`, and `rules` on smart crates. The space root crate is omitted. `root_id` is returned separately.
 

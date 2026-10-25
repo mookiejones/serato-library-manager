@@ -5,6 +5,7 @@ The static files are the directory server.py serves. The spec fails when
 index.html points at a local file that is not in that directory.
 """
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -17,6 +18,39 @@ missing = missing_static_files(root / "static")
 if missing:
     raise SystemExit("Missing build inputs: " + ", ".join(missing))
 
+def telemetry_hiddenimports():
+    """Return telemetry modules PyInstaller would otherwise miss.
+
+    Sentry loads its standard-library integrations by name. PostHog is
+    imported only after the person opts in, so analysis does not see that
+    import. A build environment without the packages skips them, and
+    sharing stays off in that build. Framework integrations are not
+    collected. Sentry is initialized with auto-enabling turned off.
+
+    Returns:
+        Module names to pass as hidden imports. Empty when the packages
+        are not installed.
+    """
+    names = []
+    if importlib.util.find_spec("sentry_sdk") is not None:
+        names.extend(
+            [
+                "sentry_sdk",
+                "sentry_sdk.integrations.argv",
+                "sentry_sdk.integrations.atexit",
+                "sentry_sdk.integrations.dedupe",
+                "sentry_sdk.integrations.excepthook",
+                "sentry_sdk.integrations.logging",
+                "sentry_sdk.integrations.modules",
+                "sentry_sdk.integrations.stdlib",
+                "sentry_sdk.integrations.threading",
+            ]
+        )
+    if importlib.util.find_spec("posthog") is not None:
+        names.append("posthog")
+    return names
+
+
 # pywebview picks its backend at runtime. The windowed build must still
 # bundle the one this OS imports: WKWebView on macOS, WebView2 through
 # WinForms on Windows, and GTK elsewhere.
@@ -26,6 +60,7 @@ elif sys.platform == "win32":
     hidden = ["webview.platforms.edgechromium", "webview.platforms.winforms"]
 else:
     hidden = ["webview.platforms.gtk"]
+hidden.extend(telemetry_hiddenimports())
 
 a = Analysis(
     ["desktop.py"],

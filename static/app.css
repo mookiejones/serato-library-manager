@@ -137,6 +137,19 @@ textarea:focus-visible,
   cursor: default;
 }
 
+.rail-foot {
+  margin-top: auto;
+  padding: 8px 4px 0;
+}
+
+.rail-foot button {
+  min-height: 44px;
+  padding: 8px 0;
+  color: #f3ecdf;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .mode-note,
 .crate-foot {
   margin: 8px 4px;
@@ -579,6 +592,93 @@ button:disabled { cursor: default; }
 .copy-row { grid-template-columns: minmax(0, 1.4fr) 72px 48px minmax(0, 1fr); }
 
 .marker button, .copy-row button { text-align: left; }
+
+dialog {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--manila);
+  color: var(--ink);
+  padding: 24px;
+  max-width: 32rem;
+  width: calc(100% - 32px);
+}
+
+dialog::backdrop {
+  background: rgba(27, 20, 14, 0.62);
+}
+
+dialog h2 {
+  margin: 0 0 12px;
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+dialog p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.dialog-note,
+.dialog-status {
+  margin-top: 12px;
+  color: var(--quiet);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 16px;
+}
+
+.dialog-actions button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 4px;
+  text-decoration: none;
+}
+
+#consent-decline,
+#settings-close {
+  background: var(--ink);
+  color: var(--manila);
+}
+
+#consent-accept,
+#open-logs,
+#copy-logs {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+}
+
+dialog .check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin-top: 8px;
+}
+
+dialog .check input {
+  width: 20px;
+  height: 20px;
+}
+
+.log-fallback {
+  width: 100%;
+  min-height: 8rem;
+  margin-top: 12px;
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 8px;
+  font: inherit;
+}
 
 @media (max-width: 980px) {
   .app { grid-template-columns: 1fr; height: auto; }

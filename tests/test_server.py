@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import http.client
 import json
 import threading
 import unittest
@@ -150,6 +151,34 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(payload["writable"])
         self.assertEqual(payload["serato"]["file_manager"], library.file_manager_name())
         self.assertEqual(payload["tracks"][0]["name"], "Same")
+
+    def test_static_path_stays_in_the_directory(self) -> None:
+        """Refuse a request that climbs out of static/.
+
+        The client sends the path unchanged, so ``..`` reaches the handler.
+        The response is 404 and does not include the server source. A file
+        inside static/ is still served.
+
+        Returns:
+            None. The test fails if the parent file is returned.
+        """
+        host, port = self.httpd.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.putrequest("GET", "/../server.py")
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        connection.close()
+        self.assertEqual(response.status, 404)
+        self.assertNotIn(b"def serve", body)
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.putrequest("GET", "/app.css")
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        connection.close()
+        self.assertEqual(response.status, 200)
+        self.assertIn(b"--walnut", body)
 
     def test_save_and_read_track(self) -> None:
         """Save a comment through POST ``/api/track`` and read it back.

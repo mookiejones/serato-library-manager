@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import unquote, urlparse
 
+import telemetry
 from tags import SeratoTags, read_serato_tags
 
 
@@ -519,6 +520,7 @@ def ensure_backup() -> Path | None:
     if root.is_file() and _mirror_allowed(root):
         _backup_database(root, folder / "root.sqlite")
     _backed_up.add(key)
+    telemetry.capture(telemetry.EVENT_BACKUP_MADE)
     return folder
 
 
@@ -2469,4 +2471,5 @@ def markers_for(path: str | None, on_disk: bool) -> SeratoTags:
         return {"cues": [], "loops": [], "flips": [], "beatgrid": [], "found": False, "unavailable": True}
     parsed = read_serato_tags(path)
     parsed["unavailable"] = False
+    telemetry.capture(telemetry.EVENT_TAGS_READ)
     return parsed

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import server
 import static_assets
+import telemetry
 
 SMOKE_ENV = "SERATO_LIBRARY_SMOKE"
 
@@ -101,6 +102,7 @@ def main() -> None:
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=3)
+        telemetry.shutdown()
 
 
 if __name__ == "__main__":
