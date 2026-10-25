@@ -17,6 +17,9 @@ missing = missing_static_files(root / "static")
 if missing:
     raise SystemExit("Missing build inputs: " + ", ".join(missing))
 
+# pywebview picks its backend at runtime. The windowed build must still
+# bundle the one this OS imports: WKWebView on macOS, WebView2 through
+# WinForms on Windows, and GTK elsewhere.
 if sys.platform == "darwin":
     hidden = ["webview.platforms.cocoa"]
 elif sys.platform == "win32":

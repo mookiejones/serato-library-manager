@@ -1,3 +1,12 @@
+/*
+  Layout and color for the Serato library page.
+
+  The rail holds the space menu, the view switch, and the crate or history
+  list. The sheet holds the track list and the detail pane. --row is 36px,
+  the same height app.js uses to decide which rows are inside the scroll
+  window. This file does not fetch data or touch the Serato database.
+*/
+
 :root {
   --walnut: #231910;
   --walnut-lift: #32261c;

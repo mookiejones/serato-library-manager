@@ -18,10 +18,37 @@ from tags import _parse_beatgrid, _parse_cue, _parse_markers2, read_serato_tags
 
 
 def _entry(kind: str, blob: bytes) -> bytes:
+    """Wrap one Markers2 record as a name, a length, and a payload.
+
+    The name is ASCII and NUL-terminated. The length is a 4-byte big-endian
+    count of ``blob``. This builds bytes the parser reads. It does not write
+    an audio file.
+
+    Args:
+        kind: Entry name such as ``CUE``, ``LOOP``, or ``FLIP``.
+        blob: Record payload.
+
+    Returns:
+        The encoded entry.
+    """
     return kind.encode("ascii") + b"\x00" + len(blob).to_bytes(4, "big") + blob
 
 
 def _cue(index: int, start_ms: int, color: bytes, name: str) -> bytes:
+    """Build a CUE record with the offsets ``_parse_cue`` expects.
+
+    Byte 1 is the index, bytes 2-5 the start in milliseconds, bytes 7-9 the
+    RGB color, and the UTF-8 name begins at byte 12.
+
+    Args:
+        index: Cue index stored at byte 1.
+        start_ms: Start time in milliseconds.
+        color: Three RGB bytes.
+        name: UTF-8 cue name.
+
+    Returns:
+        The record bytes. No file is written.
+    """
     raw = bytearray(13 + len(name))
     raw[1] = index
     raw[2:6] = start_ms.to_bytes(4, "big")
@@ -31,6 +58,21 @@ def _cue(index: int, start_ms: int, color: bytes, name: str) -> bytes:
 
 
 def _loop(index: int, start_ms: int, end_ms: int, locked: bool, name: str) -> bytes:
+    """Build a LOOP record with the offsets ``_parse_loop`` expects.
+
+    Bytes 2-5 and 6-9 are the start and end. Bytes 15-17 are RGB, byte 19
+    is the lock flag, and the name begins at byte 20.
+
+    Args:
+        index: Loop index.
+        start_ms: Loop start in milliseconds.
+        end_ms: Loop end in milliseconds.
+        locked: True stores a lock flag of 1.
+        name: UTF-8 loop name.
+
+    Returns:
+        The record bytes. No file is written.
+    """
     raw = bytearray(21 + len(name))
     raw[1] = index
     raw[2:6] = start_ms.to_bytes(4, "big")
@@ -42,10 +84,30 @@ def _loop(index: int, start_ms: int, end_ms: int, locked: bool, name: str) -> by
 
 
 def _flip(index: int, enabled: bool, name: str) -> bytes:
+    """Build a FLIP record with the offsets ``_parse_flip`` expects.
+
+    Byte 1 is the index, byte 2 is the enabled flag, and the UTF-8 name follows.
+
+    Args:
+        index: Flip index.
+        enabled: True stores an enabled flag of 1.
+        name: UTF-8 flip name.
+
+    Returns:
+        The record bytes. No file is written.
+    """
     return bytes([0, index, 1 if enabled else 0]) + name.encode("utf-8") + b"\x00"
 
 
 def _markers_payload() -> bytes:
+    """Encode a cue, a loop, and a flip as a Markers2 GEOB body.
+
+    The body starts with the ``01 01`` header and a base64 body, which is
+    the layout ``read_serato_tags`` decodes. No audio file is written.
+
+    Returns:
+        The Markers2 payload bytes.
+    """
     decoded = _entry("CUE", _cue(3, 1500, b"\xCC\x00\x00", "Drop"))
     decoded += _entry("LOOP", _loop(1, 2000, 4000, True, "Break"))
     decoded += _entry("FLIP", _flip(2, True, "Chop"))
@@ -53,6 +115,14 @@ def _markers_payload() -> bytes:
 
 
 def _beatgrid_payload() -> bytes:
+    """Encode a two-marker beatgrid at version 1.
+
+    The first marker stores a beat count. The last marker stores BPM.
+    Positions and BPM are big-endian floats, matching ``_parse_beatgrid``.
+
+    Returns:
+        The BeatGrid payload bytes. No audio file is written.
+    """
     body = bytes([1, 0]) + (2).to_bytes(4, "big")
     body += struct.pack(">f", 0.5) + (4).to_bytes(4, "big")
     body += struct.pack(">f", 10.0) + struct.pack(">f", 128.0)
@@ -60,6 +130,18 @@ def _beatgrid_payload() -> bytes:
 
 
 def _id3_file(payload: bytes, path: Path) -> None:
+    """Write a tiny ID3v2.3 file that holds one Serato Markers2 frame.
+
+    The tag size is synchsafe. The frame size is a plain big-endian length,
+    which is the ID3v2.3 rule. The file is a fixture, not a playable track.
+
+    Args:
+        payload: Markers2 bytes stored in the GEOB frame.
+        path: File to create or replace.
+
+    Returns:
+        None.
+    """
     description = b"Serato Markers2\x00"
     body = bytes([0]) + b"application/octet-stream\x00" + b"\x00" + description + payload
     frame = b"GEOB" + len(body).to_bytes(4, "big") + b"\x00\x00" + body
@@ -76,12 +158,31 @@ def _id3_file(payload: bytes, path: Path) -> None:
 
 
 class TagTests(unittest.TestCase):
+    """Parse cue, loop, flip, and beatgrid bytes without a live library.
+
+    The cases use fixtures built in this module. They do not open
+    ``master.sqlite`` or rewrite a real audio file.
+    """
     def test_missing_path_is_empty(self) -> None:
+        """Return an empty result when no audio path is given.
+
+        ``read_serato_tags`` must not touch the filesystem for ``None``.
+
+        Returns:
+            None. The test fails if a cue is reported or ``found`` is true.
+        """
         parsed = read_serato_tags(None)
         self.assertFalse(parsed["found"])
         self.assertEqual(parsed["cues"], [])
 
     def test_markers_round_trip(self) -> None:
+        """Decode the cue, loop, and flip built by the fixture helpers.
+
+        Confirms index, color, times, the lock flag, and names. No file is read.
+
+        Returns:
+            None. The test fails if a field moves to the wrong offset.
+        """
         parsed = _parse_markers2(_markers_payload())
         self.assertEqual(parsed["cues"][0]["name"], "Drop")
         self.assertEqual(parsed["cues"][0]["start_ms"], 1500)
@@ -93,15 +194,38 @@ class TagTests(unittest.TestCase):
         self.assertTrue(parsed["flips"][0]["enabled"])
 
     def test_short_cue_is_ignored(self) -> None:
+        """Ignore a CUE record shorter than the fixed header.
+
+        A five-byte blob cannot hold an index, a time, and a color. The parser
+        returns ``None`` instead of inventing a cue.
+
+        Returns:
+            None. The test fails if a short record is accepted.
+        """
         self.assertIsNone(_parse_cue(b"\x00" * 5))
 
     def test_beatgrid_markers(self) -> None:
+        """Read a beat count from the first marker and BPM from the last.
+
+        Uses the version-1 payload. No file is read.
+
+        Returns:
+            None. The test fails if the two marker roles are swapped.
+        """
         markers = _parse_beatgrid(_beatgrid_payload())
         self.assertEqual(markers[0].get("beats"), 4)
         self.assertEqual(markers[1].get("bpm"), 128.0)
         self.assertEqual(markers[0]["position"], 0.5)
 
     def test_bad_beatgrid_is_empty(self) -> None:
+        """Reject an unknown version, too many markers, and a short payload.
+
+        Version byte 2 is ignored. More than 4096 markers is rejected. A count
+        that asks for bytes the payload does not contain returns an empty list.
+
+        Returns:
+            None. The test fails if any of those payloads yields a marker.
+        """
         self.assertEqual(_parse_beatgrid(b"\x02\x00\x00\x00\x00\x01"), [])
         huge = bytes([1, 0]) + (4097).to_bytes(4, "big")
         self.assertEqual(_parse_beatgrid(huge), [])
@@ -109,12 +233,28 @@ class TagTests(unittest.TestCase):
         self.assertEqual(_parse_beatgrid(short), [])
 
     def test_bad_markers_base64_is_empty(self) -> None:
+        """Return no cues when the Markers2 body is not base64.
+
+        The ``01 01`` header is present, but the rest does not decode. No file
+        is read.
+
+        Returns:
+            None. The test fails if a cue, loop, or flip is returned.
+        """
         parsed = _parse_markers2(b"\x01\x01@")
         self.assertEqual(parsed["cues"], [])
         self.assertEqual(parsed["loops"], [])
         self.assertEqual(parsed["flips"], [])
 
     def test_file_header_is_read(self) -> None:
+        """Read a Markers2 frame from the front of an ID3 file.
+
+        Writes a temporary file and parses it. The file is removed with the
+        temporary directory. The Serato library database is not involved.
+
+        Returns:
+            None. The test fails if the cue index is not recovered.
+        """
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "track.mp3"
             _id3_file(_markers_payload(), path)

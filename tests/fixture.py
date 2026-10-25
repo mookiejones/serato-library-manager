@@ -239,7 +239,21 @@ def _open_sqlite_handles(path: Path) -> list[str]:
 
 
 def build_database(path: Path) -> None:
-    """Create a small library with one track, one history row, and a duplicate pair."""
+    """Create a small library with one track pair, a space root, and history.
+
+    The file is a Serato-shaped SQLite database for the suite. It is not
+    the live library. The connection is closed before this function
+    returns, so Windows can delete the file when the test ends.
+
+    Args:
+        path: Database file to create. Parent directories must already exist.
+
+    Returns:
+        None.
+
+    Writes ``path`` and commits the schema, two spaces, two assets that
+    share a title, one history session, and one history entry.
+    """
     with open_database(path) as conn:
         conn.executescript(SCHEMA)
         conn.execute("INSERT INTO serato (revision) VALUES (1)")
@@ -297,6 +311,14 @@ class TempLibrary:
     """
 
     def __init__(self) -> None:
+        """Create an unused temporary directory and remember the live master path.
+
+        The database is not built until ``__enter__``. ``library.MASTER``
+        is left unchanged so importing the fixture does not redirect reads.
+
+        Returns:
+            None.
+        """
         self._dir = tempfile.TemporaryDirectory()
         self.root = Path(self._dir.name)
         self.db = self.root / "master.sqlite"
@@ -304,6 +326,21 @@ class TempLibrary:
         self._old_backed = set(library._backed_up)
 
     def __enter__(self) -> TempLibrary:
+        """Build the fixture database and point ``library.MASTER`` at it.
+
+        Clears the backup-once set and the server library cache so a test
+        sees this file. A path outside the system temporary directory is
+        refused before any test query runs.
+
+        Returns:
+            This fixture.
+
+        Raises:
+            RuntimeError: If the database path is not under the temp directory.
+
+        Writes ``master.sqlite`` in the temporary directory and replaces
+        the process-wide library path until ``__exit__``.
+        """
         build_database(self.db)
         library.MASTER = self.db
         library._backed_up.clear()
@@ -313,6 +350,23 @@ class TempLibrary:
         return self
 
     def __exit__(self, *_) -> None:
+        """Restore ``library.MASTER`` and delete the temporary directory.
+
+        Restores the previous backup-once set and drops the server cache.
+        Windows cannot remove a database file that still has an open
+        SQLite handle, so a leak is reported instead of ignored.
+
+        Args:
+            *_: Exception type, value, and traceback from the ``with`` block.
+                Cleanup runs whether or not the block raised.
+
+        Returns:
+            None. A leak raises instead of being swallowed.
+
+        Raises:
+            RuntimeError: If the directory cannot be removed, or a descriptor
+                for the database is still open on a system that exposes ``/proc``.
+        """
         library.MASTER = self._old_master
         library._backed_up.clear()
         library._backed_up.update(self._old_backed)

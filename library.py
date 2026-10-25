@@ -31,6 +31,8 @@ def default_library_path() -> Path:
         On Windows, master.sqlite under %LOCALAPPDATA%\\Serato\\Library.
         On macOS and other systems, master.sqlite under Application Support.
     """
+    # Windows keeps the library under %LOCALAPPDATA%. macOS uses
+    # ~/Library/Application Support. Other hosts follow the macOS path.
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")
         base = Path(local) if local else Path.home() / "AppData" / "Local"
@@ -53,6 +55,8 @@ def file_manager_name() -> str:
 
 LIVE_MASTER = default_library_path()
 MASTER = LIVE_MASTER
+# Serato stores a crate's visible name and a unique suffix in one column,
+# split by this private-use character. display_name keeps the text before it.
 NAME_SPLIT = "\U00105e8a"
 LIBRARY_SPACE = "Serato Library"
 ALLOWED_SPACES = ("Serato Library", "Serato Video", "Apple Music", "Prepare")
@@ -261,6 +265,7 @@ def read_conn(path: Path | None = None) -> sqlite3.Connection:
     database = Path(path or MASTER)
     if not database.exists():
         raise LibraryError(f"Serato library not found at {database}", 404)
+    # mode=ro rejects writes at the SQLite layer. query_only is a second guard.
     conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA query_only=ON")
@@ -427,6 +432,8 @@ def _parse_db_path(value: str | None) -> Path | None:
     """
     if not value:
         return None
+    # connection.database_uri is a file URI. Percent-decoding recovers spaces.
+    # urlparse leaves the leading slash that file URIs put before the path.
     if value.startswith("file:"):
         return Path(unquote(urlparse(value).path))
     return Path(value)
@@ -472,6 +479,8 @@ def _mirror_allowed(path: Path) -> bool:
     master = Path(MASTER).resolve()
     if master == LIVE_MASTER.resolve():
         return True
+    # A test relocates MASTER. Mirror only a sibling file, or a database
+    # under /tmp, so the suite cannot write a drive Serato still uses.
     resolved = path.resolve()
     return resolved.parent == master.parent or str(resolved).startswith("/tmp/")
 
@@ -690,7 +699,7 @@ def _descendant_ids(conn: sqlite3.Connection, crate_id: int) -> list[int]:
             SELECT c.id
             FROM container c
             JOIN tree t ON c.parent_id = t.id
-            WHERE c.parent_id != c.id
+            WHERE c.parent_id != c.id  -- a crate must not list itself as its parent
         )
         SELECT id FROM tree
         """,
@@ -976,6 +985,8 @@ def _portable_for_existing_file(value: object) -> str:
     except OSError as exc:
         raise LibraryError("That path could not be read.", 400) from exc
     try:
+        # Serato stores portable_id with forward slashes, relative to home
+        # when the file lives there. A file outside home keeps its absolute path.
         relative = path.resolve().relative_to(Path.home())
         return relative.as_posix()
     except ValueError:
@@ -2084,6 +2095,9 @@ def crate_action(payload: Mapping[str, object]) -> dict[str, object]:
 def history_sessions() -> list[dict[str, object]]:
     """List history sessions, newest first.
 
+    Reads history_session and history_entry from the master database.
+    The query does not write, and it does not open audio files.
+
     Returns:
         Session dicts with id, name, times, entry count, and played count.
     """
@@ -2114,6 +2128,9 @@ def history_sessions() -> list[dict[str, object]]:
 
 def history_entries(session_id: int) -> dict[str, object]:
     """Load one history session and its played entries.
+
+    Reads history_session and history_entry. It does not write the database
+    or open the audio files named on the rows.
 
     Args:
         session_id: history_session id.
@@ -2173,6 +2190,9 @@ def history_entries(session_id: int) -> dict[str, object]:
 def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict[str, object]]:
     """Group tracks that share a title, artist, and length in whole seconds.
 
+    Reads the asset and space tables. Whole seconds come from integer
+    division of length_ms. The query does not write.
+
     Args:
         space: Space to scan.
 
@@ -2229,6 +2249,8 @@ def _resolved(portable_id: str | None) -> str | None:
     if not portable_id:
         return None
     raw = Path(portable_id)
+    # Relative ids are tried under the home directory first, then at the
+    # filesystem root. An absolute id is used as stored.
     candidates = [raw] if raw.is_absolute() else [Path.home() / portable_id, Path("/") / portable_id]
     for candidate in candidates:
         try:
@@ -2400,6 +2422,9 @@ def reveal_command(path: str) -> list[str]:
     Returns:
         Argv for Finder, File Explorer, or the parent folder on another system.
     """
+    # Explorer takes the comma as part of the /select switch. The path is
+    # the next argument. Finder's -R reveals the file. Other hosts open
+    # the parent folder because xdg-open has no select-file switch.
     if sys.platform == "win32":
         return ["explorer", "/select,", path]
     if sys.platform == "darwin":

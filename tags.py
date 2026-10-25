@@ -197,6 +197,8 @@ def _parse_id3(blob: bytes, offset: int) -> list[tuple[str, bytes]] | None:
         frame_id = blob[pos:pos + 4]
         if frame_id == b"\x00\x00\x00\x00" or frame_id[0] == 0:
             break
+        # ID3v2.4 stores the frame size as a synchsafe integer. ID3v2.3
+        # stores the same four bytes as a plain big-endian length.
         if version == 4:
             frame_size = _synchsafe(blob[pos + 4:pos + 8])
         else:
@@ -286,6 +288,8 @@ def _parse_markers2(payload: bytes) -> MarkerEntries:
     encoded = payload[2:].replace(b"\n", b"").replace(b"\x00", b"")
     if not encoded:
         return result
+    # Serato omits base64 padding. A length of 4n+1 is not a valid group,
+    # so one alphabet character is added before the standard '=' pad.
     while len(encoded) % 4 == 1:
         encoded += b"A"
     pad = (-len(encoded)) % 4
@@ -301,6 +305,8 @@ def _parse_markers2(payload: bytes) -> MarkerEntries:
         if end < 0 or end + 5 > len(decoded):
             break
         kind = decoded[pos:end].decode("ascii", "replace")
+        # Each entry is a NUL-terminated name, a 4-byte big-endian length,
+        # then that many payload bytes (CUE, LOOP, or FLIP).
         length = int.from_bytes(decoded[end + 1:end + 5], "big")
         start = end + 5
         blob = decoded[start:start + length]
@@ -347,6 +353,8 @@ def _parse_cue(blob: bytes) -> Cue | None:
     """
     if len(blob) < 13:
         return None
+    # Byte 1 is the cue index, bytes 2-5 the start in milliseconds,
+    # bytes 7-9 the RGB color, and the UTF-8 name begins at byte 12.
     name = blob[12:].split(b"\x00", 1)[0].decode("utf-8", "replace")
     return {
         "index": blob[1],
@@ -367,6 +375,9 @@ def _parse_loop(blob: bytes) -> Loop | None:
     """
     if len(blob) < 20:
         return None
+    # Bytes 2-5 and 6-9 are start and end in milliseconds. The color
+    # field is four bytes beginning at offset 14; the first byte is
+    # skipped so the remaining three are RGB. Byte 19 is the lock flag.
     color = blob[14:18]
     name = blob[20:].split(b"\x00", 1)[0].decode("utf-8", "replace") if len(blob) > 20 else ""
     return {
@@ -407,6 +418,8 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
     Returns:
         Marker dicts. Earlier markers store a beat count. The last marker stores BPM. A payload shorter than the declared marker count is empty.
     """
+    # Version byte 1 is the only layout this reader accepts. The marker
+    # count is a big-endian integer at bytes 2-5. Byte 1 is unused.
     if len(payload) < 6 or payload[0] != 1:
         return []
     count = int.from_bytes(payload[2:6], "big")
@@ -419,6 +432,8 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
             return []
         position = struct.unpack(">f", payload[pos:pos + 4])[0]
         pos += 4
+        # Every marker stores a position in seconds. Earlier markers then
+        # store a beat count. Only the last marker stores BPM.
         if index == count - 1:
             bpm = struct.unpack(">f", payload[pos:pos + 4])[0]
             pos += 4

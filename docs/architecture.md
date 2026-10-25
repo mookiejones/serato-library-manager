@@ -65,7 +65,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, and `tags.py` document each function with a Google-style docstring.
+`server.py`, `library.py`, `tags.py`, `desktop.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
