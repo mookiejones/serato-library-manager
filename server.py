@@ -28,6 +28,8 @@ def app_root() -> Path:
     Returns:
         The PyInstaller extract directory when the app is frozen, otherwise the directory of this file.
     """
+    # A PyInstaller build extracts static/ into sys._MEIPASS. A source
+    # checkout serves the directory beside this file.
     meipass = getattr(sys, "_MEIPASS", None)
     if getattr(sys, "frozen", False) and meipass:
         return Path(meipass)
@@ -735,6 +737,8 @@ def resolve_path(portable_id: str | None) -> tuple[str | None, bool | None]:
     if portable_id is None or portable_id == "":
         return None, None
     raw = Path(portable_id)
+    # Relative portable ids are tried under the home directory, then at
+    # the filesystem root. An absolute id is used as Serato stored it.
     candidates = (
         [raw]
         if raw.is_absolute()
@@ -1383,6 +1387,8 @@ class Handler(BaseHTTPRequestHandler):
         rel = "index.html" if url_path in {"", "/"} else url_path.lstrip("/")
         candidate = (STATIC / rel).resolve()
         static_root = STATIC.resolve()
+        # Keep the resolved path under static/. A request such as
+        # /../library.py must not leave that directory.
         if not str(candidate).startswith(str(static_root)) or not candidate.is_file():
             self.send_error(404)
             return

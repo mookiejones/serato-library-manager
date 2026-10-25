@@ -1,3 +1,15 @@
+/**
+ * Serato library page.
+ *
+ * Loads crates, history, missing tracks, duplicates, and stems from the
+ * local server on 127.0.0.1 port 8765. Track and crate edits are POST
+ * requests to /api/track, /api/crate, /api/import.m3u, and /api/reveal.
+ * The track list is virtualized: only rows near the scroll window are
+ * in the DOM. This file does not open master.sqlite itself.
+ */
+
+// Row height in pixels. It matches --row in app.css. The painter divides
+// the scroll offset by this value, so the two must stay equal.
 const ROW = 36;
 const COLORS = [
   [0xffffff, "None"],
@@ -20,6 +32,8 @@ const COLOR_NAMES = {
   pink: 0xe23b8a,
 };
 
+// Page state. The server remains the source of truth; this object is the
+// last payload plus the view the user has open. Writes go through postJSON.
 const state = {
   tracks: [],
   byId: new Map(),
@@ -64,6 +78,15 @@ rows.className = "rows";
 spacer.append(rows);
 list.append(spacer);
 
+/**
+ * Format a track length in milliseconds as m:ss.
+ *
+ * The list column uses a short label so a virtualized row stays one line.
+ * Empty input stays blank. No library request is made.
+ *
+ * @param {number|string|null|undefined} ms Length in milliseconds.
+ * @returns {string} Minutes and zero-padded seconds, or an empty string.
+ */
 function lengthLabel(ms) {
   if (ms == null || ms === "") return "";
   const total = Math.floor(Number(ms) / 1000);
@@ -72,6 +95,16 @@ function lengthLabel(ms) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+/**
+ * Format a Unix timestamp for a history row.
+ *
+ * History stores seconds, while the Date constructor expects milliseconds.
+ * An empty or unreadable stamp stays blank so the row does not show
+ * "Invalid Date". No request is made.
+ *
+ * @param {number|string|null|undefined} stamp Seconds since the Unix epoch.
+ * @returns {string} A short local date and time, or an empty string.
+ */
 function clockLabel(stamp) {
   if (stamp == null || stamp === "") return "";
   const date = new Date(Number(stamp) * 1000);
@@ -79,6 +112,15 @@ function clockLabel(stamp) {
   return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+/**
+ * Format a total duration for the crate footer.
+ *
+ * Hours are included only when the total reaches one hour. The footer
+ * uses this for the tracks currently in view. No request is made.
+ *
+ * @param {number|string} ms Total length in milliseconds.
+ * @returns {string} A label such as "12m" or "1h 2m".
+ */
 function durationLabel(ms) {
   const total = Math.round(Number(ms) / 1000);
   const hours = Math.floor(total / 3600);
@@ -87,6 +129,15 @@ function durationLabel(ms) {
   return `${minutes}m`;
 }
 
+/**
+ * Format a byte count for the crate footer.
+ *
+ * Steps through KB, MB, and GB. A missing size is shown as zero bytes.
+ * No request is made.
+ *
+ * @param {number|string|null|undefined} bytes File size in bytes.
+ * @returns {string} A one-decimal size with its unit.
+ */
 function sizeLabel(bytes) {
   const size = Number(bytes) || 0;
   if (size < 1024) return `${size} bytes`;
@@ -100,11 +151,32 @@ function sizeLabel(bytes) {
   return `${amount.toFixed(1)} ${units[unit]}`;
 }
 
+/**
+ * Format a Serato color integer as a CSS hex color.
+ *
+ * White (0xffffff) means the crate or track has no color, so the swatch
+ * is omitted. No request is made.
+ *
+ * @param {number|string|null|undefined} color Serato color integer.
+ * @returns {string} "#rrggbb", or an empty string when there is no color.
+ */
 function colorHex(color) {
   if (color == null || Number(color) === 0xffffff) return "";
   return `#${Number(color).toString(16).padStart(6, "0")}`;
 }
 
+/**
+ * Compare two tracks for the current list sort.
+ *
+ * Numeric columns keep empty values after every real value. Text uses the
+ * locale, with numbers compared as numbers, so "Track 2" stays before
+ * "Track 10". Equal keys fall back to the id so the order is stable.
+ * No request is made.
+ *
+ * @param {object} a First track or history row.
+ * @param {object} b Second track or history row.
+ * @returns {number} A negative, zero, or positive order for Array sort.
+ */
 function compare(a, b) {
   const key = state.sort;
   const dir = state.sortDir;
@@ -114,6 +186,7 @@ function compare(a, b) {
     const an = av == null || av === "" ? null : Number(av);
     const bn = bv == null || bv === "" ? null : Number(bv);
     if (an == null && bn == null) return a.id - b.id;
+    // Empty BPM, length, or start sorts after every real number.
     if (an == null) return 1;
     if (bn == null) return -1;
     if (an !== bn) return (an - bn) * dir;
@@ -128,16 +201,44 @@ function compare(a, b) {
   return a.id - b.id;
 }
 
+/**
+ * Return whether a track contains every search term.
+ *
+ * The haystack is title, artist, album, genre, key, and file. Terms are
+ * already lowercased. An empty term list matches everything. No request
+ * is made.
+ *
+ * @param {object} track Track or history row.
+ * @param {string[]} terms Lowercased words from the search box.
+ * @returns {boolean} True when every term occurs in the haystack.
+ */
 function matchesQuery(track, terms) {
   if (!terms.length) return true;
   const hay = `${track.name} ${track.artist} ${track.album} ${track.genre} ${track.key} ${track.file}`.toLocaleLowerCase();
   return terms.every((term) => hay.includes(term));
 }
 
+/**
+ * Split the track search box into lowercased words.
+ *
+ * Reads state.query, which the search field copies on each input event.
+ * Does not fetch the library.
+ *
+ * @returns {string[]} Words with empty pieces removed.
+ */
 function queryTerms() {
   return state.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
 }
 
+/**
+ * Group crates by parent and sort each group.
+ *
+ * The sort follows the crate-sort control: library order, name, or date
+ * added. A missing parent is grouped under 0 so those crates still appear.
+ * Does not write the database or the DOM.
+ *
+ * @returns {Map<number, object[]>} Parent id to ordered child crates.
+ */
 function childLists() {
   const children = new Map();
   for (const crate of state.crates) {
@@ -157,6 +258,15 @@ function childLists() {
   return children;
 }
 
+/**
+ * Return the crates that match the crate search, plus their parents.
+ *
+ * Parents stay so a matching child is not stranded without a path from
+ * the root. A cycle in parent ids is stopped by the guard set. Null means
+ * the search box is empty and every crate may show. Does not write.
+ *
+ * @returns {Set<number>|null} Crate ids to keep, or null when there is no query.
+ */
 function crateKeep() {
   const terms = state.crateQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return null;
@@ -166,6 +276,7 @@ function crateKeep() {
     if (!terms.every((term) => crate.name.toLocaleLowerCase().includes(term))) continue;
     let current = crate;
     const guard = new Set();
+    // guard stops a parent cycle from walking the same crate forever.
     while (current && !guard.has(current.id)) {
       guard.add(current.id);
       keep.add(current.id);
@@ -175,11 +286,30 @@ function crateKeep() {
   return keep;
 }
 
+/**
+ * Flatten the crate tree in the order the rail should show.
+ *
+ * A crate search expands every matching branch. Otherwise only crates
+ * whose parent is in state.expanded are walked. Crates whose parent is
+ * missing from the payload are listed at the root so they are not hidden.
+ *
+ * @returns {object[]} Crates with depth and childCount set for the rail.
+ */
 function visibleCrates() {
   const children = childLists();
   const keep = crateKeep();
   const ordered = [];
   const seen = new Set();
+  /**
+   * Append one parent's visible children, then their open descendants.
+   *
+   * Nested inside visibleCrates. Skips an id already seen so a cycle cannot
+   * recurse forever. Does not touch the database.
+   *
+   * @param {number} parent Parent crate id, or the space root id.
+   * @param {number} depth Indent level, starting at 0 under the space root.
+   * @returns {void}
+   */
   function walk(parent, depth) {
     for (const crate of children.get(parent) || []) {
       if (seen.has(crate.id)) continue;
@@ -206,6 +336,16 @@ function visibleCrates() {
   return ordered;
 }
 
+/**
+ * Open every ancestor of a crate so the selection stays on screen.
+ *
+ * Writes those ancestor ids into state.expanded. Stops if the parent
+ * chain cycles. Does not tell the server; the click that selects the
+ * crate saves the expanded flag separately.
+ *
+ * @param {number} id Crate whose parents should be expanded.
+ * @returns {void}
+ */
 function expandAncestors(id) {
   const byId = new Map(state.crates.map((crate) => [crate.id, crate]));
   let crate = byId.get(id);
@@ -219,6 +359,16 @@ function expandAncestors(id) {
   }
 }
 
+/**
+ * Find the visible ancestor of a crate the search has hidden.
+ *
+ * The rail marks that ancestor so the selection is not lost while the
+ * child is filtered out. Returns null when the selection is All tracks
+ * or the selected crate is already visible.
+ *
+ * @param {object[]} visible Crates currently listed.
+ * @returns {number|null} Visible ancestor id, or null.
+ */
 function hiddenSelectionHolder(visible) {
   if (state.activeCrate === "all") return null;
   if (visible.some((crate) => crate.id === state.activeCrate)) return null;
@@ -234,6 +384,14 @@ function hiddenSelectionHolder(visible) {
   return null;
 }
 
+/**
+ * Return the tracks that belong to the current view before search.
+ *
+ * Missing, stems, duplicates, and a single crate each filter state.tracks.
+ * All tracks and history are handled by the caller. Does not fetch.
+ *
+ * @returns {object[]} Tracks for the active mode.
+ */
 function modeTracks() {
   let tracks = state.tracks;
   if (state.mode === "missing") tracks = tracks.filter((track) => track.missing);
@@ -248,6 +406,15 @@ function modeTracks() {
   return tracks;
 }
 
+/**
+ * Build the sorted rows the list will paint.
+ *
+ * History rows are reshaped so they share the columns of a track row.
+ * The result is stored on state.view for the virtualized painter. Does
+ * not contact the server.
+ *
+ * @returns {object[]} Rows after search and sort.
+ */
 function buildView() {
   if (state.mode === "history") {
     const terms = queryTerms();
@@ -280,6 +447,16 @@ function buildView() {
   return result;
 }
 
+/**
+ * Build one crate-rail row, including its disclosure button.
+ *
+ * The row is a treeitem. A crate with children gets an expand button that
+ * calls toggleCrate. Clicking the name calls selectCrate. Smart crates
+ * are labeled. Nothing is written until those handlers run.
+ *
+ * @param {object} crate Crate fields, plus depth, childCount, and count.
+ * @returns {HTMLDivElement} The row, not yet inserted.
+ */
 function crateRow(crate) {
   const row = document.createElement("div");
   row.className = "crate-row";
@@ -340,6 +517,15 @@ function crateRow(crate) {
   return row;
 }
 
+/**
+ * Keep one crate row tabbable after the rail is redrawn.
+ *
+ * The roving tabindex stays on the crate that had focus, or the first
+ * crate when that id is gone. Does not move DOM focus by itself.
+ *
+ * @param {string|null} previousId data-id of the crate that held focus.
+ * @returns {HTMLElement|null} The tabbable crate button, or null when the rail is empty.
+ */
 function placeCrateFocus(previousId) {
   const items = [...crateList.querySelectorAll(".crate")];
   if (!items.length) return null;
@@ -348,6 +534,14 @@ function placeCrateFocus(previousId) {
   return current;
 }
 
+/**
+ * Redraw the crate rail and restore scroll and focus.
+ *
+ * Counts reflect the current track search. An All tracks row is always
+ * first. Replaces the rail's children. Does not fetch or write the library.
+ *
+ * @returns {void}
+ */
 function renderCrates() {
   const scroll = crateList.scrollTop;
   const active = document.activeElement;
@@ -396,6 +590,15 @@ function renderCrates() {
   renderRules();
 }
 
+/**
+ * Show the smart-crate rule summary and its JSON editor.
+ *
+ * The editor is disabled while the library is locked. Saving posts the
+ * JSON through saveRules. Removes any previous rule block first so a
+ * crate change does not leave a stale editor.
+ *
+ * @returns {void}
+ */
 function renderRules() {
   document.querySelector(".rules")?.remove();
   document.querySelector(".rule-edit")?.remove();
@@ -432,6 +635,15 @@ function renderRules() {
   bar.after(line);
 }
 
+/**
+ * Relabel the list headers for tracks or for history.
+ *
+ * History shows deck, played, and start time. Other views show BPM, key,
+ * and length. The active sort is marked. Does not reorder rows; renderList
+ * does that.
+ *
+ * @returns {void}
+ */
 function renderColumns() {
   const columns = state.mode === "history"
     ? [["name", "Title"], ["artist", "Artist"], ["deck", "Deck"], ["played", "Played"], ["start", "Time"]]
@@ -445,6 +657,15 @@ function renderColumns() {
   });
 }
 
+/**
+ * Show the controls and footer that belong to the current view.
+ *
+ * Hides crate tools outside the crate view, marks the selected view and
+ * crate sort, and disables crate edits while Serato holds the lock. The
+ * footer totals the tracks in the view, not the search result.
+ *
+ * @returns {void}
+ */
 function renderShell() {
   const cratesMode = state.mode === "crates";
   const historyMode = state.mode === "history";
@@ -473,6 +694,14 @@ function renderShell() {
   crateFoot.textContent = `${pool.length.toLocaleString()} · ${durationLabel(ms)} · ${sizeLabel(bytes)}`;
 }
 
+/**
+ * Return the tracks the footer should count for this view.
+ *
+ * Ignores the text search so the footer stays the size of the crate,
+ * missing set, stem set, or duplicate set. History uses entries instead.
+ *
+ * @returns {object[]} Tracks included in the footer totals.
+ */
 function footerTracks() {
   if (state.mode === "crates" && state.activeCrate !== "all") {
     const ids = state.crateTracks.get(state.activeCrate);
@@ -486,6 +715,15 @@ function footerTracks() {
   return state.tracks;
 }
 
+/**
+ * Refresh the shell, the count, and the visible rows.
+ *
+ * Selects the first row when the previous selection is no longer in the
+ * view. History opens a session detail; other views fetch the track.
+ * Does not itself request /api/library.
+ *
+ * @returns {void}
+ */
 function renderList() {
   renderShell();
   renderColumns();
@@ -507,9 +745,19 @@ function renderList() {
   }
 }
 
+/**
+ * Paint only the track rows inside the scroll window.
+ *
+ * Row height is ROW. Six extra rows above and below the window keep a
+ * fast scroll from flashing empty space. Replaces the row container.
+ * Does not fetch track details.
+ *
+ * @returns {void}
+ */
 function paintRows() {
   const view = state.view || [];
   const height = list.clientHeight || 600;
+  // Paint six rows past the window so a fast scroll does not flash empty space.
   const start = Math.max(0, Math.floor(list.scrollTop / ROW) - 6);
   const end = Math.min(view.length, Math.ceil((list.scrollTop + height) / ROW) + 6);
   spacer.style.height = `${view.length * ROW}px`;
@@ -591,6 +839,16 @@ function paintRows() {
   }
 }
 
+/**
+ * Expand or collapse a crate and save that flag when edits are allowed.
+ *
+ * A crate search forces every match open, so the twist does nothing then.
+ * The POST goes to /api/crate with action expanded. A 409 means Serato
+ * took the lock and the page stops offering writes.
+ *
+ * @param {number|string} id Crate id.
+ * @returns {void}
+ */
 function toggleCrate(id) {
   if (state.crateQuery) return;
   if (state.expanded.has(id)) state.expanded.delete(id);
@@ -610,6 +868,15 @@ function toggleCrate(id) {
   });
 }
 
+/**
+ * Show one crate, or all tracks, and scroll the list to the top.
+ *
+ * Opens ancestor crates so the selection is visible. Does not write the
+ * database; membership changes go through the detail pane.
+ *
+ * @param {number|string} id Crate id, or "all".
+ * @returns {void}
+ */
 function selectCrate(id) {
   state.activeCrate = id;
   if (id !== "all") expandAncestors(id);
@@ -617,6 +884,14 @@ function selectCrate(id) {
   renderList();
 }
 
+/**
+ * Move the roving tabindex and DOM focus to one crate button.
+ *
+ * Used by the rail's arrow keys. Does nothing when item is missing.
+ *
+ * @param {HTMLElement|undefined|null} item Crate button to focus.
+ * @returns {void}
+ */
 function focusCrateItem(item) {
   if (!item) return;
   for (const button of crateList.querySelectorAll(".crate")) button.tabIndex = -1;
@@ -624,6 +899,16 @@ function focusCrateItem(item) {
   item.focus();
 }
 
+/**
+ * Load one track's detail and ignore a response that lost the race.
+ *
+ * Increments state.request so a slow reply cannot overwrite a newer
+ * selection. GET /api/track reads the row, its crates, and the cue tags.
+ * The list selection is painted immediately.
+ *
+ * @param {number} id Asset id.
+ * @returns {Promise<void>}
+ */
 async function selectTrack(id) {
   state.selectedId = id;
   paintRows();
@@ -648,6 +933,15 @@ async function selectTrack(id) {
   }
 }
 
+/**
+ * Show one history entry in the detail pane.
+ *
+ * History entries are already loaded with the session, so this does not
+ * fetch. An entry that still has an asset id can be opened in the library.
+ *
+ * @param {number} id History entry id.
+ * @returns {void}
+ */
 function selectEntry(id) {
   state.selectedId = id;
   paintRows();
@@ -694,6 +988,19 @@ function selectEntry(id) {
   detail.replaceChildren(body);
 }
 
+/**
+ * Build one labeled editor control for a track field.
+ *
+ * Comments use a textarea. BPM asks for a decimal keyboard. The control
+ * name matches the field save_track accepts. Nothing is saved until the
+ * form is submitted.
+ *
+ * @param {string} name Field name.
+ * @param {string} label Visible label.
+ * @param {string|number|null|undefined} value Current value.
+ * @param {boolean} [wide=false] True when the control spans the pane.
+ * @returns {HTMLLabelElement} The labeled control.
+ */
 function fieldInput(name, label, value, wide = false) {
   const wrap = document.createElement("label");
   if (wide) wrap.className = "wide";
@@ -708,6 +1015,16 @@ function fieldInput(name, label, value, wide = false) {
   return wrap;
 }
 
+/**
+ * Fill the detail pane from a /api/track payload.
+ *
+ * The form edits the fields save_track accepts. Controls stay disabled
+ * while the library is locked. Reveal, Prepare, relocate, and remove call
+ * the matching POST routes. Cue data is shown and is not written back.
+ *
+ * @param {object} track Payload from GET /api/track.
+ * @returns {void}
+ */
 function renderDetail(track) {
   const writable = Boolean(track.serato?.writable && state.writable);
   const body = document.createElement("div");
@@ -921,6 +1238,16 @@ function renderDetail(track) {
   detail.replaceChildren(body);
 }
 
+/**
+ * Build the cue, loop, flip, and beatgrid section.
+ *
+ * The copy says the markers were read from the audio file and are not
+ * written back. A missing file is explained instead of showing an empty
+ * success. Does not fetch.
+ *
+ * @param {object} track Track payload including cues, loops, flips, and beatgrid.
+ * @returns {HTMLElement} The section, not yet inserted.
+ */
 function markerSection(track) {
   const section = document.createElement("section");
   section.className = "group";
@@ -933,6 +1260,15 @@ function markerSection(track) {
   else if (!track.markers_found) note.textContent = "No Serato cues in this file.";
   else note.textContent = "Read from the audio file. These are not written back.";
   section.append(note);
+  /**
+   * Format a cue or loop time as m:ss.sss.
+   *
+   * Nested in markerSection. Three decimal places keep a cue distinguishable
+   * inside one second. Does not read the file again.
+   *
+   * @param {number|string} value Time in milliseconds.
+   * @returns {string} Minutes, seconds, and milliseconds.
+   */
   const ms = (value) => {
     const total = Number(value) / 1000;
     const minutes = Math.floor(total / 60);
@@ -987,6 +1323,16 @@ function markerSection(track) {
   return section;
 }
 
+/**
+ * List other copies of this track and let a click select one.
+ *
+ * Copies share title, artist, and whole-second length. Selecting one
+ * calls selectTrack, which fetches that asset. This builder only creates
+ * the nodes.
+ *
+ * @param {object[]} copies Copy summaries from the track payload.
+ * @returns {HTMLElement} The section.
+ */
 function copySection(copies) {
   const section = document.createElement("section");
   section.className = "group";
@@ -1013,6 +1359,17 @@ function copySection(copies) {
   return section;
 }
 
+/**
+ * List normal crates as checkboxes and name the smart crates.
+ *
+ * Checking a box posts an add or remove. Smart crates are shown but not
+ * edited here because their membership comes from rules. The list is
+ * built from state.crates, not from a new request.
+ *
+ * @param {object} track Track payload with crate_ids.
+ * @param {boolean} writable False disables every checkbox.
+ * @returns {HTMLElement} The section.
+ */
 function membershipSection(track, writable) {
   const section = document.createElement("section");
   section.className = "group";
@@ -1047,6 +1404,15 @@ function membershipSection(track, writable) {
   return section;
 }
 
+/**
+ * Move the list selection by one visible row and keep it on screen.
+ *
+ * History rows call selectEntry. Library rows call selectTrack. The scroll
+ * window follows the row so the selection does not leave the viewport.
+ *
+ * @param {number} delta 1 for the next row, -1 for the previous row.
+ * @returns {void}
+ */
 function moveSelection(delta) {
   const view = state.view || [];
   const index = view.findIndex((track) => track.id === state.selectedId);
@@ -1061,11 +1427,29 @@ function moveSelection(delta) {
   }
 }
 
+/**
+ * Show or hide the notice line above the track list.
+ *
+ * An empty string hides it. Used for save warnings and request errors.
+ * Does not change the library.
+ *
+ * @param {string} text Notice text.
+ * @returns {void}
+ */
 function setNotice(text) {
   notice.textContent = text || "";
   notice.hidden = !text;
 }
 
+/**
+ * Store the lock status and refresh the controls that depend on it.
+ *
+ * state.writable gates every edit. The status line repeats the server's
+ * message, including which file manager Reveal will use.
+ *
+ * @param {object|null|undefined} info Status payload from /api/status or a library response.
+ * @returns {void}
+ */
 function applyStatus(info) {
   state.serato = info;
   state.writable = Boolean(info?.writable);
@@ -1073,11 +1457,32 @@ function applyStatus(info) {
   renderShell();
 }
 
+/**
+ * Stop offering writes after Serato takes the database lock.
+ *
+ * A 409 carries a serato object. The page applies that status and shows
+ * the error. Later saves stay disabled until a reload says the lock is gone.
+ *
+ * @param {Error & {payload?: object, message: string}} error Failed write.
+ * @returns {void}
+ */
 function lockDown(error) {
   applyStatus(error.payload?.serato || { writable: false, message: error.message });
   setNotice(error.message);
 }
 
+/**
+ * POST a JSON body and return the decoded payload.
+ *
+ * Sends Content-Type application/json. A failed response becomes an Error
+ * with status and payload so callers can recognize a 409 lock. Does not
+ * choose the route; the caller passes /api/track, /api/crate, /api/import.m3u,
+ * or /api/reveal.
+ *
+ * @param {string} url API path.
+ * @param {object} body JSON-compatible request body.
+ * @returns {Promise<object>} The decoded JSON object.
+ */
 async function postJSON(url, body) {
   const response = await fetch(url, {
     method: "POST",
@@ -1094,6 +1499,17 @@ async function postJSON(url, body) {
   return payload;
 }
 
+/**
+ * Save the detail form through POST /api/track.
+ *
+ * Empty BPM is stored as null. A BPM that is not a number is refused in
+ * the page before the request. On success the library is reloaded and the
+ * same track is selected again. A 409 locks the page.
+ *
+ * @param {number} id Asset id.
+ * @param {HTMLFormElement} form Editor form built by renderDetail.
+ * @returns {Promise<void>}
+ */
 async function saveTrack(id, form) {
   const data = new FormData(form);
   const bpm = data.get("bpm");
@@ -1130,6 +1546,16 @@ async function saveTrack(id, form) {
   }
 }
 
+/**
+ * Ask the server to show the audio file in the host file manager.
+ *
+ * POST /api/reveal. The server runs Finder on macOS and File Explorer on
+ * Windows. A missing file is reported in the notice. The database is not
+ * modified.
+ *
+ * @param {number} id Asset id.
+ * @returns {Promise<void>}
+ */
 async function revealTrack(id) {
   try {
     await postJSON("/api/reveal", { id });
@@ -1138,6 +1564,16 @@ async function revealTrack(id) {
   }
 }
 
+/**
+ * Add or remove a track in the Prepare space.
+ *
+ * POST /api/crate with action prepare. Reloads the library afterwards.
+ * A 409 locks the page. The audio file stays where it is.
+ *
+ * @param {number} id Asset id.
+ * @param {boolean} add True adds the track. False removes it from Prepare.
+ * @returns {Promise<void>}
+ */
 async function prepareTrack(id, add) {
   try {
     const result = await postJSON("/api/crate", { action: "prepare", asset: id, add, space: state.space });
@@ -1150,6 +1586,16 @@ async function prepareTrack(id, add) {
   }
 }
 
+/**
+ * Point a library row at a different audio path.
+ *
+ * Prompts for a path and posts it as portable_id. The server accepts the
+ * path only when that file exists, and it stores a home-relative id when
+ * it can. A 409 locks the page.
+ *
+ * @param {object} track Track payload. The prompt starts from its resolved path.
+ * @returns {Promise<void>}
+ */
 async function relocateTrack(track) {
   const path = prompt("Path to the audio file", track.resolved_path || track.edit?.portable_id || "");
   if (!path) return;
@@ -1168,6 +1614,15 @@ async function relocateTrack(track) {
   }
 }
 
+/**
+ * Remove a track from this space after a confirmation.
+ *
+ * POST /api/crate with action remove_library. The audio file stays on
+ * disk. The selection is cleared and the list reloads. A 409 locks the page.
+ *
+ * @param {number} id Asset id.
+ * @returns {Promise<void>}
+ */
 async function removeTrack(id) {
   if (!confirm("Remove this track from the library? The audio file stays on disk.")) return;
   try {
@@ -1181,6 +1636,19 @@ async function removeTrack(id) {
   }
 }
 
+/**
+ * Add or remove a track from one crate.
+ *
+ * POST /api/crate with action add or remove. If the request fails, the
+ * checkbox returns to its previous state. A 409 locks the page. The audio
+ * file is not moved.
+ *
+ * @param {number} assetId Asset id.
+ * @param {number} crateId Crate id.
+ * @param {boolean} add True adds the membership.
+ * @param {HTMLInputElement} input Checkbox to restore on failure.
+ * @returns {Promise<void>}
+ */
 async function setMembership(assetId, crateId, add, input) {
   try {
     const result = await postJSON("/api/crate", {
@@ -1199,6 +1667,17 @@ async function setMembership(assetId, crateId, add, input) {
   }
 }
 
+/**
+ * Save smart-crate rules from the JSON editor.
+ *
+ * The text must parse as JSON before it is sent. POST /api/crate with
+ * action rules. Reloads the library and reselects the crate. A 409 locks
+ * the page. Invalid JSON is reported and not sent.
+ *
+ * @param {number} id Smart crate id.
+ * @param {string} text Editor contents.
+ * @returns {Promise<void>}
+ */
 async function saveRules(id, text) {
   let rules;
   try {
@@ -1218,6 +1697,15 @@ async function saveRules(id, text) {
   }
 }
 
+/**
+ * Prompt for a name and create a crate under the current selection.
+ *
+ * All tracks uses the space root as the parent. POST /api/crate with
+ * action create. The new crate is selected after the reload. A 409 locks
+ * the page.
+ *
+ * @returns {Promise<void>}
+ */
 async function createCrate() {
   const name = prompt("New crate name");
   if (!name || !name.trim()) return;
@@ -1233,6 +1721,14 @@ async function createCrate() {
   }
 }
 
+/**
+ * Prompt for a new name and rename the selected crate.
+ *
+ * An empty name, or the same name, does not send a request. POST /api/crate
+ * with action rename. A 409 locks the page.
+ *
+ * @returns {Promise<void>}
+ */
 async function renameCrate() {
   const crate = state.crates.find((item) => item.id === state.activeCrate);
   if (!crate) return;
@@ -1249,6 +1745,14 @@ async function renameCrate() {
   }
 }
 
+/**
+ * Prompt for a palette name and save it on the selected crate.
+ *
+ * The names match COLOR_NAMES. White is sent as null, which is Serato's
+ * "no color" value. POST /api/crate with action color. A 409 locks the page.
+ *
+ * @returns {Promise<void>}
+ */
 async function colorCrate() {
   const crate = state.crates.find((item) => item.id === state.activeCrate);
   if (!crate) return;
@@ -1274,6 +1778,15 @@ async function colorCrate() {
   }
 }
 
+/**
+ * Delete the selected crate and the crates nested inside it.
+ *
+ * Asks for confirmation first. Tracks stay in the library. POST /api/crate
+ * with action delete, then the rail returns to All tracks. A 409 locks
+ * the page.
+ *
+ * @returns {Promise<void>}
+ */
 async function deleteCrate() {
   const crate = state.crates.find((item) => item.id === state.activeCrate);
   if (!crate) return;
@@ -1289,6 +1802,16 @@ async function deleteCrate() {
   }
 }
 
+/**
+ * Create a crate from an M3U file chosen in the page.
+ *
+ * Reads the file text in the browser and posts it to /api/import.m3u.
+ * The server adds only tracks whose portable_id matches a playlist line.
+ * The notice reports how many lines did not match. A 409 locks the page.
+ *
+ * @param {File} file Playlist file from the hidden file input.
+ * @returns {Promise<void>}
+ */
 async function importPlaylist(file) {
   const text = await file.text();
   const name = file.name.replace(/\.m3u8?$/i, "") || "Imported playlist";
@@ -1305,6 +1828,14 @@ async function importPlaylist(file) {
   }
 }
 
+/**
+ * Redraw the history-session list from state.historySessions.
+ *
+ * Each row selects that session. The meta text is the played count.
+ * Does not fetch; loadHistory and openSession do.
+ *
+ * @returns {void}
+ */
 function renderSessions() {
   sessionList.replaceChildren();
   for (const session of state.historySessions) {
@@ -1325,6 +1856,14 @@ function renderSessions() {
   }
 }
 
+/**
+ * Load history sessions from GET /api/history.
+ *
+ * Stores them on state and redraws the session rail. Throws when the
+ * server reports an error so the caller can show it. Does not open a session.
+ *
+ * @returns {Promise<void>}
+ */
 async function loadHistory() {
   const response = await fetch("/api/history");
   const payload = await response.json().catch(() => ({}));
@@ -1333,6 +1872,15 @@ async function loadHistory() {
   renderSessions();
 }
 
+/**
+ * Load one history session and show its entries.
+ *
+ * GET /api/history with the session id. Replaces state.entries and resets
+ * the scroll position. A failed read stays on the notice line.
+ *
+ * @param {number} id history_session id.
+ * @returns {Promise<void>}
+ */
 async function openSession(id) {
   state.historyId = id;
   state.selectedId = null;
@@ -1348,6 +1896,14 @@ async function openSession(id) {
   renderList();
 }
 
+/**
+ * Load duplicate groups for the current space.
+ *
+ * GET /api/duplicates. The ids are stored as a set so the list can filter
+ * without another request. The list is redrawn only when that view is active.
+ *
+ * @returns {Promise<void>}
+ */
 async function loadDuplicates() {
   state.duplicateIds = null;
   const response = await fetch(`/api/duplicates?space=${encodeURIComponent(state.space)}`);
@@ -1360,6 +1916,15 @@ async function loadDuplicates() {
   if (state.mode === "duplicates") renderList();
 }
 
+/**
+ * Leave history and select the same track in the Serato Library space.
+ *
+ * Switches the space menu, reloads that space, and fetches the track
+ * detail. Used from a history entry that still has an asset id.
+ *
+ * @param {number} assetId Asset id in the Serato Library space.
+ * @returns {Promise<void>}
+ */
 async function openInLibrary(assetId) {
   state.space = "Serato Library";
   spaceSelect.value = state.space;
@@ -1370,6 +1935,15 @@ async function openInLibrary(assetId) {
   selectTrack(assetId);
 }
 
+/**
+ * Reload the current space from GET /api/library.
+ *
+ * Replaces tracks, crates, membership sets, and the lock status. Keeps
+ * the selected crate and track when they still exist. Clears duplicate
+ * ids when the space changed so the duplicate view cannot mix spaces.
+ *
+ * @returns {Promise<void>} Resolves after the list is painted. Throws on a failed read.
+ */
 async function loadLibrary() {
   count.textContent = "Loading the library";
   const response = await fetch(`/api/library?space=${encodeURIComponent(state.space)}`);
@@ -1390,6 +1964,16 @@ async function loadLibrary() {
   renderList();
 }
 
+/**
+ * Switch among crates, history, missing, duplicates, and stems.
+ *
+ * History sorts by start time descending and loads sessions once.
+ * Duplicates load when this space has not been scanned yet. Other modes
+ * only change which tracks renderList keeps.
+ *
+ * @param {string} mode View name from the rail buttons.
+ * @returns {void}
+ */
 function setMode(mode) {
   state.mode = mode;
   list.scrollTop = 0;
@@ -1407,6 +1991,9 @@ function setMode(mode) {
   renderList();
 }
 
+// Wire the page controls. These listeners call the functions above; they
+// do not open the database themselves. Export builds a download URL for
+// GET /api/export.m3u. Import reads a local file and posts its text.
 search.addEventListener("input", () => {
   state.query = search.value;
   list.scrollTop = 0;
@@ -1483,12 +2070,16 @@ document.querySelector(".columns").addEventListener("click", (event) => {
   if (state.sort === key) state.sortDir *= -1;
   else {
     state.sort = key;
+    // Numbers open high-to-low. Titles open A-to-Z.
     state.sortDir = key === "bpm" || key === "length_ms" || key === "start" ? -1 : 1;
   }
   renderColumns();
   renderList();
 });
 
+// Arrow keys follow the tree: Right opens a crate, Left closes it or
+// jumps to the parent. Enter and Space select. The roving tabindex keeps
+// one crate button in the tab order.
 crateList.addEventListener("keydown", (event) => {
   const item = event.target.closest?.(".crate");
   if (!item || !crateList.contains(item)) return;
@@ -1534,6 +2125,15 @@ list.addEventListener("keydown", (event) => {
   }
 });
 
+/**
+ * Replace the detail pane when the library cannot be read.
+ *
+ * Used for the first load and for reload failures. The count line says
+ * the library is unavailable. Does not retry by itself.
+ *
+ * @param {Error} error Failure from loadLibrary or a related request.
+ * @returns {void}
+ */
 function showFailure(error) {
   count.textContent = "Library unavailable";
   const failure = document.createElement("p");

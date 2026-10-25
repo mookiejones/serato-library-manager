@@ -20,11 +20,22 @@ SMOKE_ENV = "SERATO_LIBRARY_SMOKE"
 def smoke_check(marker: Path) -> None:
     """Write ``ok`` once the bundled page assets are readable.
 
-    ``SERATO_LIBRARY_SMOKE`` selects this path. It does not open the
-    library, bind a port, or open a window.
+    ``SERATO_LIBRARY_SMOKE`` selects this path so a release check can
+    confirm a frozen build. The check does not open the Serato database,
+    bind a port, or open a window.
+
+    Args:
+        marker: Absolute file path that receives the text ``ok\\n``.
+            A relative path, a symlink, a directory, or a missing parent
+            is refused.
+
+    Returns:
+        None.
 
     Raises:
         SystemExit: If the marker path is unusable or a page asset is missing.
+
+    The marker file is created or overwritten. No other file is written.
     """
     if not marker.is_absolute():
         raise SystemExit(f"{SMOKE_ENV} must be an absolute path.")
@@ -43,12 +54,21 @@ def smoke_check(marker: Path) -> None:
 def main() -> None:
     """Start the library server and open it in a native window.
 
-    When ``SERATO_LIBRARY_SMOKE`` is an absolute file path, check the
-    bundled page and exit instead. That path does not open a window.
+    When ``SERATO_LIBRARY_SMOKE`` is set, ``smoke_check`` runs and this
+    function returns without importing pywebview. Otherwise the server
+    from ``server.py`` is bound to 127.0.0.1 port 8765 and shown in a
+    pywebview window. Closing the window shuts that server down.
+
+    Returns:
+        None.
 
     Raises:
         SystemExit: If pywebview is missing, the library is missing, the port
             is taken, or the smoke check cannot write its marker.
+
+    The window path starts a thread that serves HTTP and opens the live
+    Serato database through that server. The smoke path only writes the
+    marker file.
     """
     marker = os.environ.get(SMOKE_ENV)
     if marker:
