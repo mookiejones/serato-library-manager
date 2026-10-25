@@ -197,6 +197,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("contents: write", text)
         self.assertNotIn("pull_request:", text)
         self.assertNotIn("pull_request_target:", text)
+        self.assertIn("shell: bash", text)
+        for step in text.split("\n      - "):
+            if "run:" not in step:
+                continue
+            uses_bash = "${GITHUB_" in step or ">/dev/null" in step or "printf " in step
+            if uses_bash:
+                self.assertIn("shell: bash", step)
 
     def test_documented_test_command_is_the_suite(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
