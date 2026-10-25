@@ -1,0 +1,39 @@
+# Privacy
+
+Sharing is off until you turn it on. The first time the page opens it asks:
+
+> Share anonymous usage stats and crash reports?
+
+**Don't share** is selected by default. Closing the prompt or pressing Esc saves that choice. Settings in the sidebar can change it later. Nothing is sent before you choose Share, and nothing is sent while the choice stays off.
+
+## What can be sent
+
+A report leaves the machine only after you opt in, and only when this copy of the app has a key for that service.
+
+Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, and `tags_read`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. Each event includes the app version (`1.0.0`) and the operating system. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
+
+Crash reports go to Sentry. A report is the exception type and a stack trace. A file path in that report is replaced with `[path]`. A Python file is kept as its name only, such as `server.py`. The machine hostname is not sent. Request bodies and local variables are not sent.
+
+The install is identified by a random id created when you save a choice. That id is not your name, and it is not a Serato account.
+
+## What is never sent
+
+Track titles, artists, crate names, file paths, playlist text, and the rows in `master.sqlite` are not usage properties. The page does not load a PostHog or Sentry script. Reports leave from the Python process only.
+
+A missing `SENTRY_DSN` keeps crash reports off even after you opt in. A missing `POSTHOG_KEY` keeps usage counts off. `POSTHOG_HOST` defaults to `https://us.i.posthog.com` when a project key is set and no host is configured.
+
+## Where the choice is stored
+
+| System | Settings | Logs |
+|--------|----------|------|
+| macOS | `~/Library/Application Support/Serato Library/settings.json` | `~/Library/Logs/Serato Library/` |
+| Windows | `%APPDATA%\Serato Library\settings.json` | `%LOCALAPPDATA%\Serato Library\Logs\` |
+| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
+
+The log file is `serato-library.log`. It rotates at 1 MiB and keeps three older files. Logs stay on this machine. They can include the path of the library database. They are not uploaded. Settings has **Open logs folder** and **Copy logs**.
+
+## Release builds
+
+A tagged release writes `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` from GitHub Actions secrets into `_build_config.py` before the app is frozen. An empty secret leaves that service off. The copy of `_build_config.py` in git is empty. Do not commit a filled-in key file.
+
+Those values are client keys. They end up inside the unsigned zip. They do not grant access to the Serato library. For a local run, set the same variable names in the environment. An environment value overrides the baked file.

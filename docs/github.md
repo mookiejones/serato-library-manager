@@ -29,13 +29,14 @@ The test job is a matrix:
 
 There is no macOS test job. The suite mocks platform paths, and a macOS runner costs ten times a Linux minute. Windows stays in the matrix because the app ships a Windows build.
 
-On your machine the command is:
+The test job installs `requirements.txt`, then runs the suite. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s tests -t . -v
 ```
 
-Runners use `python` with the same arguments. The suite builds a temporary database. It does not open the live Serato library.
+Runners use `python -m pip install -r requirements.txt` and then `python` with the same unittest arguments. The suite builds a temporary database. It does not open the live Serato library. Settings and logs for the run stay in a temporary directory.
 
 The `dependency audit` job installs `pip-audit==2.10.1` on Ubuntu with Python 3.12 and runs:
 
@@ -55,13 +56,15 @@ The job name is `review dependency changes`. It needs only `contents: read`. A p
 
 ### Release
 
-`macos-latest` builds `Serato-Library-macos.zip`. That runner is Apple Silicon, so the app is arm64. `windows-latest` builds `Serato-Library-windows.zip` for 64-bit Windows. The two builds use Python 3.12 and `requirements-build.txt` (`pywebview==6.2.1` and `pyinstaller==6.22.3`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only.
+`macos-latest` builds `Serato-Library-macos.zip`. That runner is Apple Silicon, so the app is arm64. `windows-latest` builds `Serato-Library-windows.zip` for 64-bit Windows. The two builds use Python 3.12 and `requirements-build.txt` (`pywebview==6.2.1`, `sentry-sdk==2.73.0`, `posthog==7.75.11`, and `pyinstaller==6.22.3`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only.
+
+After the build tools are installed, and before PyInstaller runs, `python scripts/write_build_config.py` writes `_build_config.py` from the `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` Actions secrets. The step prints whether each value was set. It does not print the value. A missing or empty secret writes an empty string, and that service stays off in the zip. Forks do not receive these secrets. The values are client keys and are inside the unsigned zip. The copy of `_build_config.py` in git stays empty. An environment variable of the same name overrides the baked file when someone runs from source. [PRIVACY.md](../PRIVACY.md) describes what a build with keys can send, and that sending stays off until the person opts in.
 
 The tag filter `v*.*.*` is a glob. `scripts/release_bundle.py check-tag` accepts only `vMAJOR.MINOR.PATCH`. `v1.2`, `1.2.3`, and `v1.2.3-rc.1` are refused.
 
 Windows runners default to PowerShell, which does not expand `${GITHUB_REF_NAME}`. Every `run` step that expands `${GITHUB_REF_NAME}` or `${GITHUB_REPOSITORY}`, and the publish script that redirects and globs, sets `shell: bash`. `pack` and `check-zips` are plain `python` commands. The archive is written with Python's `zipfile`, not a shell zip tool, so those steps stay on the runner's default shell.
 
-On a tag push, each build job checks the tag, installs the build file, runs `python -m PyInstaller serato-library.spec`, then `python scripts/release_bundle.py pack`. `pack` checks the tree, zips it, unpacks that zip outside the repository, and launches the frozen executable with `SERATO_LIBRARY_SMOKE`. The smoke path writes `ok\n` and returns before a window, a port, or the library. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the zip the command was writing.
+On a tag push, each build job checks the tag, installs the build file, bakes `_build_config.py`, runs `python -m PyInstaller serato-library.spec`, then `python scripts/release_bundle.py pack`. `pack` checks the tree, zips it, unpacks that zip outside the repository, and launches the frozen executable with `SERATO_LIBRARY_SMOKE`. The smoke path writes `ok\n` and returns before a window, a port, the library, or telemetry. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the zip the command was writing.
 
 The build job then attests the zip with `actions/attest` and uploads it. That job's permissions are `contents: read`, `id-token: write`, and `attestations: write`.
 
@@ -119,4 +122,4 @@ Require `review dependency changes` on pull requests. That check does not run on
 
 ## Where a change has to land
 
-A workflow, release, or GitHub setting change updates this file in the same commit. Behavior, the API, the layout, or the run path also updates [architecture.md](architecture.md). The run command or the layout summary also updates `CLAUDE.md`. The README keeps the local test command and points here for Actions. `SECURITY.md` keeps the attestation commands and the rule that the server stays on `127.0.0.1`. The release footer in `scripts/release-notes-footer.md` is what GitHub appends to the generated notes.
+A workflow, release, or GitHub setting change updates this file in the same commit. Behavior, the API, the layout, or the run path also updates [architecture.md](architecture.md). The run command or the layout summary also updates `CLAUDE.md`. The README keeps the local test command and points here for Actions. `SECURITY.md` keeps the attestation commands and the rule that the server stays on `127.0.0.1`. `PRIVACY.md` keeps what sharing can send. The release footer in `scripts/release-notes-footer.md` is what GitHub appends to the generated notes.

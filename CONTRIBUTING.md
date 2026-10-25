@@ -11,8 +11,11 @@ Quit Serato DJ Pro before a write against a live library. The tests never open t
 From the repository root:
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s tests -t . -v
 ```
+
+The install step is required because the suite imports `sentry-sdk` and `posthog`. Sharing stays off without a key and without consent. Do not commit a DSN, a PostHog project key, or a filled-in `_build_config.py`.
 
 GitHub Actions runs the same discovery with `python` on Ubuntu (3.12 and 3.14) and Windows (3.12). [docs/github.md](docs/github.md) lists the workflows, the release tags, and the checks to require after they have gone green once.
 
@@ -24,6 +27,7 @@ A desktop build uses `requirements-build.txt` and `python -m PyInstaller serato-
 - `CLAUDE.md` when the run command or the layout summary changes.
 - `docs/github.md` when a workflow, a release check, or a GitHub setting changes.
 - `SECURITY.md` when the threat notes or the attestation commands change.
+- `PRIVACY.md` and the README when sharing, local logs, or telemetry keys change.
 
 The pull request template asks for the same list. There is no separate linter. The suite is `unittest`.
 

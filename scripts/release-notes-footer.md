@@ -6,6 +6,8 @@ The macOS download is an Apple Silicon (arm64) app. The Windows download is 64-b
 
 Quit Serato DJ Pro before you edit the library. The window serves `127.0.0.1` only. This is not a website, and the release does not contain your library.
 
+Sharing of anonymous usage stats and crash reports stays off until you turn it on in the app. Logs stay on your machine.
+
 Confirm a download was built by this repository:
 
 ```bash

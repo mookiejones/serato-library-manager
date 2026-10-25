@@ -345,6 +345,7 @@ class WorkflowTests(unittest.TestCase):
             None. The test fails if the workflow command drifts from the docs.
         """
         text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("python -m pip install -r requirements.txt", text)
         self.assertIn("python -m unittest discover -s tests -t . -v", text)
         self.assertIn("branches: [main]", text)
         self.assertIn("pull_request:", text)
@@ -366,6 +367,10 @@ class WorkflowTests(unittest.TestCase):
         text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         self.assertIn("cancel-in-progress: false", text)
         self.assertIn("requirements-build.txt", text)
+        self.assertIn("run: python scripts/write_build_config.py", text)
+        self.assertIn("secrets.SENTRY_DSN", text)
+        self.assertIn("secrets.POSTHOG_KEY", text)
+        self.assertIn("secrets.POSTHOG_HOST", text)
         self.assertIn("scripts/release_bundle.py pack", text)
         self.assertIn("scripts/release_bundle.py check-zips", text)
         self.assertIn("gh attestation verify", text)

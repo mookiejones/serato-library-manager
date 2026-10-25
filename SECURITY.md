@@ -4,6 +4,8 @@ The library browser is a local program. `server.py` binds `127.0.0.1` port `8765
 
 Do not send `master.sqlite`, `root.sqlite`, or audio files with a report. Cue data lives in the audio file. The database lives outside this repository.
 
+Anonymous usage counts and crash reports are off until the person opts in from the page. They never include track titles, crate names, file paths, or library rows. A missing `SENTRY_DSN` or `POSTHOG_KEY` disables that service. Release builds bake those client keys from Actions secrets of the same names. Do not commit a DSN or a project key. The copy of `_build_config.py` in git stays empty. [PRIVACY.md](PRIVACY.md) is the full note.
+
 Release builds are unsigned. Check the attestation before you open a download:
 
 ```bash

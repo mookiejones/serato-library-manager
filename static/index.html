@@ -61,6 +61,9 @@
         <button id="crate-color" type="button">Color</button>
         <button id="crate-delete" type="button">Delete</button>
       </div>
+      <div class="rail-foot">
+        <button id="open-settings" type="button" aria-haspopup="dialog">Settings</button>
+      </div>
     </aside>
 
     <main class="sheet">
@@ -92,6 +95,30 @@
       </section>
     </main>
   </div>
+  <dialog id="consent-dialog" aria-labelledby="consent-title" aria-describedby="consent-body">
+    <h2 id="consent-title">Share anonymous usage stats and crash reports?</h2>
+    <p id="consent-body">Counts and actions only, plus the app version and operating system. Track titles, crate names, file paths, and library contents stay on this computer. Sharing stays off unless you turn it on.</p>
+    <div class="dialog-actions">
+      <button id="consent-decline" type="button" autofocus>Don't share</button>
+      <button id="consent-accept" type="button">Share</button>
+    </div>
+    <p id="consent-status" class="dialog-status" role="status" aria-live="polite"></p>
+  </dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <h2 id="settings-title">Settings</h2>
+    <label class="check">
+      <input id="telemetry-toggle" type="checkbox">
+      Share anonymous usage stats and crash reports
+    </label>
+    <p id="telemetry-note" class="dialog-note"></p>
+    <div class="dialog-actions">
+      <button id="open-logs" type="button">Open logs folder</button>
+      <button id="copy-logs" type="button">Copy logs</button>
+      <button id="settings-close" type="button">Close</button>
+    </div>
+    <p id="settings-status" class="dialog-status" role="status" aria-live="polite"></p>
+    <textarea id="log-fallback" class="log-fallback" readonly hidden aria-label="Log text"></textarea>
+  </dialog>
   <script src="/app.js"></script>
 </body>
 </html>
