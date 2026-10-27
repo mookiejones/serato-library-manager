@@ -75,8 +75,8 @@ Notes such as `blend out of` and `acapella over` are ordinary text. The file doe
 
 ## Resolving a track
 
-1. Canonicalize the path. Expand a leading `~`. Use an absolute path as given. For a relative Serato `portable_id`, use the file under the home directory when it exists, otherwise the file at the filesystem root when that exists, otherwise the home-directory candidate. Then resolve `.` and `..`.
-2. Select `track` where `path` equals that canonical path.
+1. Canonicalize the path without reading the file. Expand a leading `~`. Collapse `.` and `..`. Keep an absolute path absolute. Join a relative path to the home directory. Do not follow symlinks.
+2. Select `track` where `path` equals that canonical path. When the path is a Serato `portable_id` for a track in the open library, also try the absolute path that library already resolved: the file under the home directory when it exists, otherwise the file at the filesystem root when that exists, otherwise the home-directory candidate. The app stores that resolved path.
 3. If that misses, and the title and the artist are both non-blank, and `length_ms` is not NULL, select rows whose title and artist match case-insensitively and whose `length_ms / 1000` (integer division) equals the requested length in whole seconds.
 4. Use that fallback only when exactly one row matches. Zero rows and two or more rows are not a match. Do not pick one of an ambiguous pair.
 5. Do not treat that row as the same file when its stored path is still a different track in the open library. That is a second copy, not a move.

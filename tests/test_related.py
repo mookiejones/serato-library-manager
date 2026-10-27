@@ -248,6 +248,37 @@ class SidecarTests(unittest.TestCase):
         self.assertIn("third shared crate", doc)
         self.assertIn("related.update_path", doc)
         self.assertIn("library.update_related_path", doc)
+        self.assertIn("Do not follow symlinks", doc)
+
+    def test_identity_path_does_not_stat_the_request(self) -> None:
+        """Normalize a request path without reading the filesystem.
+
+        A relative id joins the home directory. ``..`` is collapsed.
+        ``os.path.exists`` is not called.
+
+        Returns:
+            None. The test fails if the key is wrong or a stat runs.
+        """
+        with mock.patch("os.path.exists", side_effect=AssertionError("exists")):
+            key = related.identity_path("Music/../Music/track.mp3")
+        self.assertEqual(
+            key,
+            os.path.normpath(os.path.join(str(Path.home()), "Music", "track.mp3")),
+        )
+
+    def test_library_resolved_path_is_the_stored_key(self) -> None:
+        """Store the path the library already resolved for a portable id.
+
+        The request stays relative. The sidecar key is the absolute path
+        returned by the library resolver.
+
+        Returns:
+            None. The test fails if the overview path is only the home join.
+        """
+        resolved = os.path.abspath(os.path.join(os.sep, "Volumes", "Music", "same-a.mp3"))
+        with mock.patch.object(library, "_resolved", return_value=resolved):
+            view = related.overview("Music/same-a.mp3")
+        self.assertEqual(view["path"], resolved)
 
     def test_one_way_link_is_hidden_from_the_target(self) -> None:
         """Show a one-way link only on the source track.

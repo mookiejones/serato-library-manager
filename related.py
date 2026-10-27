@@ -16,6 +16,7 @@ Suggestions are computed when the page asks. They are not stored.
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 from collections.abc import Sequence
@@ -165,13 +166,19 @@ def related_db_path() -> Path:
 def identity_path(value: str) -> str:
     """Return the canonical path used as a track's key.
 
+    The result is a normalized absolute path. This function does not read
+    the filesystem, so a request path cannot probe whether a file exists
+    or where a symlink points. A track that is in the open library is
+    stored under the path the library already resolved. See
+    :func:`load_catalog`.
+
     Args:
         value: An absolute path, a home-relative Serato ``portable_id``,
             or a path starting with ``~``.
 
     Returns:
-        The absolute path. An existing file wins. A relative id that is
-        not on disk is resolved under the home directory.
+        The absolute path. A relative id is joined to the home directory.
+        ``.`` and ``..`` are collapsed. Symlinks are not followed.
 
     Raises:
         LibraryError: If the value is empty or longer than 4096 characters.
@@ -183,25 +190,10 @@ def identity_path(value: str) -> str:
         raise library.LibraryError("A track path is required.")
     if len(text) > PATH_LIMIT:
         raise library.LibraryError("That track path is too long.")
-    expanded = Path(text).expanduser()
-    if expanded.is_absolute():
-        chosen = expanded
-    else:
-        home_candidate = Path.home() / expanded
-        root_candidate = Path("/") / expanded
-        chosen = home_candidate
-        for candidate in (home_candidate, root_candidate):
-            try:
-                if candidate.exists():
-                    chosen = candidate
-                    break
-            except OSError:
-                continue
-    try:
-        resolved = chosen.resolve(strict=False)
-    except OSError:
-        resolved = chosen
-    return str(resolved)
+    expanded = os.path.expanduser(text)
+    if os.path.isabs(expanded):
+        return os.path.normpath(expanded)
+    return os.path.normpath(os.path.join(str(Path.home()), expanded))
 
 
 def crate_name(title: str, path: str) -> str:
@@ -216,7 +208,7 @@ def crate_name(title: str, path: str) -> str:
     """
     label = _crate_label(title)
     if not label:
-        label = _crate_label(Path(path).stem if path else "")
+        label = _crate_label(os.path.splitext(os.path.basename(path))[0] if path else "")
     if not label:
         label = "Untitled"
     name = f"{RELATED_CRATE_PREFIX}{label}"
@@ -516,7 +508,10 @@ def load_catalog(space: str) -> list[CatalogTrack]:
         path = ""
         if portable.strip():
             try:
-                path = identity_path(portable)
+                # Use the path the library already resolved, then normalize
+                # it. The caller's path is not used to test the filesystem.
+                resolved = library._resolved(portable)
+                path = identity_path(resolved) if resolved else ""
             except library.LibraryError:
                 path = ""
         tracks.append(
@@ -773,6 +768,8 @@ def overview(
     canonical = identity_path(path)
     catalog = load_catalog(space)
     anchor = match_catalog(catalog, path)
+    if anchor is not None and anchor.path:
+        canonical = anchor.path
     query_title = _label(title)
     query_artist = _label(artist)
     query_length = clean_length(length_ms)
