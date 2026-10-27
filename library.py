@@ -8,8 +8,10 @@ write in a process copies the database into Library/Backups first.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -19,7 +21,7 @@ from collections.abc import Callable, Mapping
 from contextlib import closing
 from pathlib import Path
 from typing import cast
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import telemetry
 from tags import SeratoTags, read_serato_tags
@@ -2237,6 +2239,1527 @@ def duplicate_groups(space: str = LIBRARY_SPACE) -> list[dict[str, object]]:
             }
         )
     return groups
+
+
+# Text copied onto the kept track only when that field is empty. These describe
+# the recording. File identity (path, size, bitrate, length) is never copied.
+_MERGE_TEXT_FIELDS = (
+    "album",
+    "genre",
+    "year",
+    "composer",
+    "remixer",
+    "label",
+    "grouping",
+    "comments",
+    "key",
+    "emoji",
+    "part_of_set",
+    "track_number",
+    "comment_language",
+    "comment_descriptor",
+)
+_MERGE_FIELD_LABELS = {
+    "album": "Album",
+    "genre": "Genre",
+    "year": "Year",
+    "composer": "Composer",
+    "remixer": "Remixer",
+    "label": "Label",
+    "grouping": "Grouping",
+    "comments": "Comments",
+    "key": "Key",
+    "emoji": "Emoji",
+    "part_of_set": "Disc",
+    "track_number": "Track number",
+    "comment_language": "Comment language",
+    "comment_descriptor": "Comment descriptor",
+    "bpm": "BPM",
+    "color": "Color",
+    "rating": "Rating",
+    "dj_play_count": "Play count",
+    "time_added": "Date added",
+    "dj_recently_played": "Recently played",
+}
+_NO_COLOR = 0xFFFFFF
+_SQL_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CUE_WARNING_TAIL = (
+    "Those markers stay in the other audio file. "
+    "This app does not copy them, because rewriting an ID3 tag can drop Serato's frames. "
+    "Keep that copy instead if you need its cues."
+)
+_PUBLIC_FILE_KEYS = ("id", "file", "on_disk", "blocks_trash", "reason")
+
+
+def _optional_bool(value: object, default: bool = False) -> bool:
+    """Return a JSON boolean, rejecting other types.
+
+    Args:
+        value: A payload field. None uses the default.
+        default: Value when the field was omitted.
+
+    Returns:
+        The boolean.
+
+    Raises:
+        LibraryError: If the value is present and is not a boolean.
+    """
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise LibraryError("That request is not valid.")
+    return value
+
+
+def _blank_text(value: object) -> bool:
+    """Return whether a library text field has nothing to copy.
+
+    Args:
+        value: A column value.
+
+    Returns:
+        True for None or whitespace.
+    """
+    return value is None or (isinstance(value, str) and value.strip() == "")
+
+
+def _sql_name(name: str) -> str:
+    """Return a schema identifier that is safe to interpolate.
+
+    Args:
+        name: Table name read from sqlite_master.
+
+    Returns:
+        The same name when it is a plain identifier.
+
+    Raises:
+        LibraryError: If the name is not a simple identifier.
+    """
+    if not _SQL_IDENT.match(name):
+        raise LibraryError("The library schema could not be updated.")
+    return name
+
+
+def _row_values(row: sqlite3.Row) -> dict[str, object]:
+    """Copy one SQLite row into a plain dict.
+
+    Args:
+        row: Row from a query.
+
+    Returns:
+        Column names and values. The dict outlives the connection.
+    """
+    return {key: row[key] for key in row.keys()}
+
+
+def _history_count(conn: sqlite3.Connection, asset_ids: list[int]) -> int | None:
+    """Count history rows that point at these assets.
+
+    Args:
+        conn: Open connection.
+        asset_ids: Asset ids to look up.
+
+    Returns:
+        The count, or None when history_entry has no asset id column.
+    """
+    if "history_entry" not in _tables(conn):
+        return None
+    if "asset_id" not in _columns(conn, "history_entry"):
+        return None
+    if not asset_ids:
+        return 0
+    marks = ",".join("?" * len(asset_ids))
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM history_entry WHERE asset_id IN ({marks})",
+        asset_ids,
+    ).fetchone()
+    return int(row[0])
+
+
+def _repoint_history(conn: sqlite3.Connection, keep_id: int, remove_ids: list[int]) -> int | None:
+    """Point history rows at the kept asset without rewriting the played snapshot.
+
+    The name, artist, and file name on the history row stay as they were
+    when the track was played. Only asset_id changes, and only when that
+    column exists.
+
+    Args:
+        conn: Open write connection.
+        keep_id: Asset id that remains.
+        remove_ids: Asset ids being removed.
+
+    Returns:
+        The number of rows updated, or None when the column is absent.
+    """
+    count = _history_count(conn, remove_ids)
+    if not count:
+        return count
+    marks = ",".join("?" * len(remove_ids))
+    conn.execute(
+        f"UPDATE history_entry SET asset_id = ? WHERE asset_id IN ({marks})",
+        [keep_id, *remove_ids],
+    )
+    return count
+
+
+def _delete_asset_refs(conn: sqlite3.Connection, asset_id: int) -> None:
+    """Delete rows that point at an asset, leaving history and the asset row.
+
+    Args:
+        conn: Open write connection.
+        asset_id: Asset id being removed.
+
+    Raises:
+        LibraryError: If a table name from the schema is not a plain identifier.
+    """
+    for name in sorted(_tables(conn)):
+        if name == "asset" or name.startswith("history") or name.startswith("sqlite_"):
+            continue
+        if not _SQL_IDENT.match(name):
+            raise LibraryError("The library schema could not be updated.")
+        if "asset_id" not in _columns(conn, name):
+            continue
+        conn.execute(f"DELETE FROM {_sql_name(name)} WHERE asset_id = ?", (asset_id,))
+
+
+def _asset_spaces(conn: sqlite3.Connection, asset_id: int) -> list[str]:
+    """List space names that contain one asset.
+
+    Args:
+        conn: Open connection.
+        asset_id: Asset id.
+
+    Returns:
+        Space names in alphabetical order.
+    """
+    rows = conn.execute(
+        """
+        SELECT s.name FROM space_asset sa
+        JOIN space s ON s.id = sa.space_id
+        WHERE sa.asset_id = ?
+        ORDER BY s.name
+        """,
+        (asset_id,),
+    ).fetchall()
+    return [str(row[0]) for row in rows if isinstance(row[0], str)]
+
+
+def _asset_crates(conn: sqlite3.Connection, asset_id: int) -> list[dict[str, object]]:
+    """List crate memberships for one asset.
+
+    Args:
+        conn: Open connection.
+        asset_id: Asset id.
+
+    Returns:
+        Dicts with crate_id, name, type, space, and list_order. Smart crates
+        and the space root are included so the caller can skip them.
+    """
+    columns = _columns(conn, "container_asset")
+    if "location_container_id" in columns and "location_container" in _tables(conn):
+        rows = conn.execute(
+            """
+            SELECT c.id AS crate_id, c.name AS name, c.type AS type,
+                   s.name AS space_name, ca.list_order AS list_order
+            FROM container_asset ca
+            JOIN location_container lc ON lc.id = ca.location_container_id
+            JOIN container c ON c.id = lc.container_id
+            JOIN space s ON s.id = c.space_id
+            WHERE ca.asset_id = ?
+            ORDER BY ca.list_order, c.id
+            """,
+            (asset_id,),
+        ).fetchall()
+    elif "container_id" in columns:
+        rows = conn.execute(
+            """
+            SELECT c.id AS crate_id, c.name AS name, c.type AS type,
+                   s.name AS space_name, ca.list_order AS list_order
+            FROM container_asset ca
+            JOIN container c ON c.id = ca.container_id
+            JOIN space s ON s.id = c.space_id
+            WHERE ca.asset_id = ?
+            ORDER BY ca.list_order, c.id
+            """,
+            (asset_id,),
+        ).fetchall()
+    else:
+        return []
+    found: list[dict[str, object]] = []
+    for row in rows:
+        stored = row["name"] if isinstance(row["name"], str) else ""
+        order = row["list_order"]
+        found.append(
+            {
+                "crate_id": int(row["crate_id"]),
+                "name": display_name(stored),
+                "type": int(row["type"] or 0),
+                "space": str(row["space_name"] or ""),
+                "list_order": int(order) if order is not None else None,
+            }
+        )
+    return found
+
+
+def _ensure_space_member(conn: sqlite3.Connection, asset_id: int, space: str) -> int:
+    """Return the space_asset id, inserting the kept track when it is missing.
+
+    Merge may place the kept track in a space the page does not browse, when
+    a duplicate was already there. The space name still has to exist.
+
+    Args:
+        conn: Open write connection.
+        asset_id: Asset id that is being kept.
+        space: Space name.
+
+    Returns:
+        The space_asset id.
+
+    Raises:
+        LibraryError: If the space is not in this library.
+    """
+    row = conn.execute(
+        """
+        SELECT sa.id FROM space_asset sa
+        JOIN space s ON s.id = sa.space_id
+        WHERE sa.asset_id = ? AND s.name = ?
+        """,
+        (asset_id, space),
+    ).fetchone()
+    if row is not None:
+        return int(row[0])
+    space_row = conn.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
+    if space_row is None:
+        raise LibraryError(f"{space} is not in this library.", 404)
+    conn.execute(
+        "INSERT INTO space_asset (asset_id, space_id) VALUES (?, ?)",
+        (asset_id, int(space_row[0])),
+    )
+    return int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+
+def _insert_at_order(
+    conn: sqlite3.Connection,
+    crate_id: int,
+    asset_id: int,
+    space: str,
+    list_order: int | None,
+) -> None:
+    """Add the kept track to a crate at a chosen position.
+
+    Args:
+        conn: Open master write connection.
+        crate_id: Container id.
+        asset_id: Asset id that is being kept.
+        space: Space that owns the crate.
+        list_order: Position taken from the earliest duplicate. None appends.
+
+    Raises:
+        LibraryError: If this database cannot store crate membership.
+    """
+    needed = {"asset_id", "location_container_id", "space_asset_id", "list_order"}
+    if not needed <= _columns(conn, "container_asset"):
+        raise LibraryError("This library's crate list cannot be updated.")
+    asset = _asset_location(conn, asset_id)
+    space_asset_id = _ensure_space_member(conn, asset_id, space)
+    location_id = int(asset["location_id"] or 0)
+    location_container_id = _ensure_location_container(conn, crate_id, location_id)
+    if list_order is None:
+        list_order = int(
+            conn.execute(
+                """
+                SELECT COALESCE(MAX(list_order), 0) + 1 FROM container_asset
+                WHERE location_container_id IN (
+                    SELECT id FROM location_container WHERE container_id = ?
+                )
+                """,
+                (crate_id,),
+            ).fetchone()[0]
+        )
+    conn.execute(
+        """
+        INSERT INTO container_asset
+            (asset_id, location_container_id, space_asset_id, external_container_asset_id, list_order, time_added)
+        VALUES (?, ?, ?, NULL, ?, ?)
+        """,
+        (asset_id, location_container_id, space_asset_id, list_order, int(time.time())),
+    )
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    """Return whether two paths name the same directory entry.
+
+    Args:
+        left: First path.
+        right: Second path.
+
+    Returns:
+        True when both exist and share a device and inode. A missing path
+        is not the same file.
+    """
+    try:
+        left_stat = left.stat()
+        right_stat = right.stat()
+    except OSError:
+        return False
+    return left_stat.st_dev == right_stat.st_dev and left_stat.st_ino == right_stat.st_ino
+
+
+def _protected_library_path(path: Path) -> bool:
+    """Return whether a path is the library database or lives inside its folder.
+
+    The check uses the resolved path and its parents. A sibling directory
+    whose name only starts with the library folder name is not protected.
+
+    Args:
+        path: Candidate audio path. Symlinks are classified by the caller.
+
+    Returns:
+        True when the file must not be moved to the Trash.
+    """
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return True
+    master = Path(MASTER).resolve()
+    library_dir = master.parent
+    root = library_dir / "root.sqlite"
+    if _same_file(path, master) or (root.is_file() and _same_file(path, root)):
+        return True
+    if resolved == library_dir or library_dir in resolved.parents:
+        return True
+    return resolved.name in {"master.sqlite", "root.sqlite"}
+
+
+def _classify_audio(
+    portable_id: object,
+    file_name: object,
+    asset_id: int,
+    kept_path: Path | None,
+) -> dict[str, object]:
+    """Decide whether one duplicate file may move to the Trash.
+
+    Args:
+        portable_id: Stored path.
+        file_name: Display name stored on the asset.
+        asset_id: Asset id.
+        kept_path: Resolved path of the copy being kept, or None.
+
+    Returns:
+        A file dict. ``path`` is private and is removed before the response
+        is sent. ``blocks_trash`` is true when moving the file would be unsafe.
+    """
+    label = file_name if isinstance(file_name, str) and file_name else f"Track {asset_id}"
+    info: dict[str, object] = {
+        "id": asset_id,
+        "file": label,
+        "on_disk": False,
+        "blocks_trash": False,
+        "reason": "This file is already absent.",
+        "path": None,
+    }
+    raw = _resolved(portable_id if isinstance(portable_id, str) else None)
+    if not raw:
+        info["reason"] = "This copy has no file path."
+        return info
+    path = Path(raw)
+    info["path"] = path
+    if path.is_symlink():
+        info["blocks_trash"] = True
+        info["reason"] = "This copy is a shortcut. The file was not moved."
+        return info
+    if path.is_dir():
+        info["blocks_trash"] = True
+        info["reason"] = "This path is a folder. The folder was not moved."
+        return info
+    if not path.is_file():
+        info["reason"] = "This file is already absent."
+        return info
+    if _protected_library_path(path):
+        info["on_disk"] = True
+        info["blocks_trash"] = True
+        info["reason"] = "This file is inside the library database folder. It was not moved."
+        return info
+    if kept_path is not None and _same_file(path, kept_path):
+        info["on_disk"] = True
+        info["blocks_trash"] = True
+        info["reason"] = (
+            "This copy points at the same file as the copy you are keeping. That file was not moved."
+        )
+        return info
+    info["on_disk"] = True
+    info["reason"] = ""
+    return info
+
+
+def _markers_present(portable_id: object) -> bool:
+    """Return whether an audio file has Serato cues, loops, flips, or a beatgrid.
+
+    The read uses tags.read_serato_tags. It does not rewrite the file and it
+    does not record telemetry.
+
+    Args:
+        portable_id: Stored path.
+
+    Returns:
+        True when a marker list is non-empty.
+    """
+    raw = _resolved(portable_id if isinstance(portable_id, str) else None)
+    if not raw:
+        return False
+    path = Path(raw)
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+    except OSError:
+        return False
+    parsed = read_serato_tags(str(path))
+    return bool(parsed["cues"] or parsed["loops"] or parsed["flips"] or parsed["beatgrid"])
+
+
+def _cue_warning(kept: Mapping[str, object], removes: list[dict[str, object]]) -> str | None:
+    """Warn when the kept file has no cues and a duplicate file does.
+
+    Copying the frames would mean rewriting the ID3 tag. That can drop
+    Markers2 and BeatGrid, so the markers are left where they are.
+
+    Args:
+        kept: Kept asset columns.
+        removes: Duplicate asset columns, in id order.
+
+    Returns:
+        A warning for the preview, or None when there is nothing to warn about.
+    """
+    if _markers_present(kept.get("portable_id")):
+        return None
+    names = [
+        str(row.get("file_name") or f"Track {row.get('id')}")
+        for row in removes
+        if _markers_present(row.get("portable_id"))
+    ]
+    if not names:
+        return None
+    if len(names) == 1:
+        head = f"{names[0]} has Serato cues, loops, flips, or a beatgrid."
+    else:
+        head = f"{', '.join(names[:-1])} and {names[-1]} have Serato cues, loops, flips, or a beatgrid."
+    return f"{head} The copy you are keeping does not. {_CUE_WARNING_TAIL}"
+
+
+def _color_text(value: object) -> str:
+    """Format a Serato color for the merge preview.
+
+    Args:
+        value: Color integer, or None.
+
+    Returns:
+        ``none`` for white or a missing color, otherwise ``#RRGGBB``.
+    """
+    if value is None:
+        return "none"
+    try:
+        number = int(cast(int, value))
+    except (TypeError, ValueError):
+        return "none"
+    if number == _NO_COLOR:
+        return "none"
+    return f"#{number:06X}"
+
+
+def _preview_change(field: str, before: object, after: object) -> dict[str, object]:
+    """Build one preview row for a field that will change.
+
+    Args:
+        field: Column name.
+        before: Current value on the kept track.
+        after: Value after the merge.
+
+    Returns:
+        A dict with field, label, before, and after.
+    """
+    return {
+        "field": field,
+        "label": _MERGE_FIELD_LABELS.get(field, field),
+        "before": before,
+        "after": after,
+    }
+
+
+def _merge_field_updates(
+    kept: Mapping[str, object],
+    removes: list[dict[str, object]],
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Choose metadata to copy onto the kept track.
+
+    Empty text and an empty BPM are filled from the first duplicate, in
+    asset-id order, that has a value. Play count and rating keep the
+    highest number. A white color is filled from the first real color.
+    Date added keeps the earliest timestamp. Recently played is set when
+    any copy was recently played.
+
+    File fields are not copied. ``is_beatgrid_locked`` is not copied,
+    because that flag belongs to the audio file's own beatgrid.
+
+    Args:
+        kept: Kept asset columns.
+        removes: Duplicate columns, in id order.
+
+    Returns:
+        The column updates, and the preview rows for values that change.
+        ``key_value`` is updated when the key is filled and is omitted
+        from the preview.
+    """
+    updates: dict[str, object] = {}
+    preview: list[dict[str, object]] = []
+    for field in _MERGE_TEXT_FIELDS:
+        if field not in kept or not _blank_text(kept.get(field)):
+            continue
+        limit = 16 if field == "emoji" else 4000
+        for other in removes:
+            candidate = other.get(field)
+            if not isinstance(candidate, str) or candidate.strip() == "":
+                continue
+            if len(candidate) > limit:
+                continue
+            updates[field] = candidate
+            preview.append(_preview_change(field, "", candidate))
+            break
+    if "key" in updates and "key_value" in kept:
+        updates["key_value"] = serato_key_type(updates["key"])
+    if "bpm" in kept and kept.get("bpm") is None:
+        for other in removes:
+            candidate = other.get("bpm")
+            if candidate is None:
+                continue
+            updates["bpm"] = candidate
+            preview.append(_preview_change("bpm", None, candidate))
+            break
+    for field in ("rating", "dj_play_count"):
+        if field not in kept:
+            continue
+        best = kept.get(field)
+        for other in removes:
+            candidate = other.get(field)
+            if candidate is None:
+                continue
+            if best is None or float(cast(float, candidate)) > float(cast(float, best)):
+                best = candidate
+        if best != kept.get(field):
+            updates[field] = best
+            preview.append(_preview_change(field, kept.get(field), best))
+    if "color" in kept:
+        current = kept.get("color")
+        current_missing = current is None or int(cast(int, current)) == _NO_COLOR
+        if current_missing:
+            for other in removes:
+                candidate = other.get("color")
+                if candidate is None or int(cast(int, candidate)) == _NO_COLOR:
+                    continue
+                updates["color"] = int(cast(int, candidate))
+                preview.append(_preview_change("color", _color_text(current), _color_text(candidate)))
+                break
+    if "time_added" in kept:
+        stamps = [kept.get("time_added"), *[row.get("time_added") for row in removes]]
+        numbers = [int(cast(int, stamp)) for stamp in stamps if stamp is not None]
+        current = kept.get("time_added")
+        if numbers and (current is None or min(numbers) < int(cast(int, current))):
+            earliest = min(numbers)
+            updates["time_added"] = earliest
+            preview.append(_preview_change("time_added", current, earliest))
+    if "dj_recently_played" in kept:
+        current = int(kept.get("dj_recently_played") or 0)
+        if current == 0 and any(int(row.get("dj_recently_played") or 0) for row in removes):
+            updates["dj_recently_played"] = 1
+            preview.append(_preview_change("dj_recently_played", 0, 1))
+    return updates, preview
+
+
+def _group_members(
+    conn: sqlite3.Connection, space: str, keep_id: int
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Load the duplicate group that contains the kept track.
+
+    The group is the same set ``duplicate_groups`` would return: one space,
+    exact title, exact artist, and length in whole seconds.
+
+    Args:
+        conn: Open connection.
+        space: Space name.
+        keep_id: Asset id to keep.
+
+    Returns:
+        The kept row and the other rows, in asset-id order.
+
+    Raises:
+        LibraryError: If the track is missing, or it is not in a duplicate group.
+    """
+    if space not in ALLOWED_SPACES:
+        raise LibraryError("That space is not available here.")
+    row = conn.execute(
+        """
+        SELECT a.* FROM asset a
+        JOIN space_asset sa ON sa.asset_id = a.id
+        JOIN space s ON s.id = sa.space_id
+        WHERE a.id = ? AND s.name = ?
+        """,
+        (keep_id, space),
+    ).fetchone()
+    if row is None:
+        raise LibraryError("That track is not in this space.", 404)
+    kept = _row_values(row)
+    name = kept.get("name")
+    artist = kept.get("artist")
+    length = kept.get("length_ms")
+    if not isinstance(name, str) or not isinstance(artist, str) or _blank_text(name) or _blank_text(artist):
+        raise LibraryError("That track is not in a duplicate group.")
+    if length is None:
+        raise LibraryError("That track is not in a duplicate group.")
+    rows = conn.execute(
+        """
+        SELECT a.* FROM asset a
+        JOIN space_asset sa ON sa.asset_id = a.id
+        JOIN space s ON s.id = sa.space_id
+        WHERE s.name = ?
+          AND a.name = ?
+          AND a.artist = ?
+          AND a.length_ms IS NOT NULL
+          AND CAST(a.length_ms / 1000 AS INTEGER) = CAST(? / 1000 AS INTEGER)
+        ORDER BY a.id
+        """,
+        (space, name, artist, int(cast(int, length))),
+    ).fetchall()
+    members = [_row_values(item) for item in rows]
+    if len(members) < 2 or not any(int(cast(int, item["id"])) == keep_id for item in members):
+        raise LibraryError("That track is not in a duplicate group.")
+    removes = [item for item in members if int(cast(int, item["id"])) != keep_id]
+    kept = next(item for item in members if int(cast(int, item["id"])) == keep_id)
+    return kept, removes
+
+
+def _build_merge_plan(conn: sqlite3.Connection, space: str, keep_id: int) -> dict[str, object]:
+    """Describe a merge without writing.
+
+    Args:
+        conn: Open connection. A read-only connection is enough.
+        space: Space the duplicate group belongs to.
+        keep_id: Asset id to keep.
+
+    Returns:
+        The plan, including private paths and column updates.
+
+    Raises:
+        LibraryError: If the track is not in a duplicate group in that space.
+    """
+    kept, removes = _group_members(conn, space, keep_id)
+    kept_raw = _resolved(kept.get("portable_id") if isinstance(kept.get("portable_id"), str) else None)
+    kept_path = Path(kept_raw) if kept_raw else None
+    if kept_path is not None and (kept_path.is_symlink() or not kept_path.is_file()):
+        kept_path = None
+    files = [
+        _classify_audio(row.get("portable_id"), row.get("file_name"), int(cast(int, row["id"])), kept_path)
+        for row in removes
+    ]
+    kept_spaces = set(_asset_spaces(conn, keep_id))
+    kept_crate_ids = {
+        int(cast(int, crate["crate_id"]))
+        for crate in _asset_crates(conn, keep_id)
+        if int(cast(int, crate["type"])) not in (0, 2)
+    }
+    placements: dict[int, dict[str, object]] = {}
+    spaces: set[str] = set()
+    for row in removes:
+        asset_id = int(cast(int, row["id"]))
+        spaces.update(_asset_spaces(conn, asset_id))
+        for crate in _asset_crates(conn, asset_id):
+            if int(cast(int, crate["type"])) in (0, 2):
+                continue
+            crate_id = int(cast(int, crate["crate_id"]))
+            order = crate["list_order"]
+            current = placements.get(crate_id)
+            if current is None or (
+                order is not None
+                and (current["list_order"] is None or int(cast(int, order)) < int(cast(int, current["list_order"])))
+            ):
+                placements[crate_id] = {
+                    "crate_id": crate_id,
+                    "name": crate["name"],
+                    "space": crate["space"],
+                    "list_order": order,
+                }
+    crates_added = []
+    crates_kept = []
+    new_placements = []
+    for crate_id, crate in sorted(placements.items()):
+        summary = {
+            "id": crate_id,
+            "name": crate["name"],
+            "space": crate["space"],
+            "list_order": crate["list_order"],
+        }
+        if crate_id in kept_crate_ids:
+            crates_kept.append({"id": crate_id, "name": crate["name"], "space": crate["space"]})
+        else:
+            crates_added.append(summary)
+            new_placements.append(crate)
+    updates, fields = _merge_field_updates(kept, removes)
+    history = _history_count(conn, [int(cast(int, row["id"])) for row in removes])
+    drops = []
+    for row in removes:
+        drops.append(
+            {
+                "external_id": row.get("external_id"),
+                "location_id": int(row.get("location_id") or 0),
+            }
+        )
+    file_label = kept.get("file_name") if isinstance(kept.get("file_name"), str) else ""
+    return {
+        "keep_id": keep_id,
+        "remove_ids": [int(cast(int, row["id"])) for row in removes],
+        "space": space,
+        "kept": {
+            "id": keep_id,
+            "file": file_label,
+            "name": kept.get("name") or "",
+            "artist": kept.get("artist") or "",
+        },
+        "removed": [
+            {
+                "id": int(cast(int, row["id"])),
+                "file": row.get("file_name") if isinstance(row.get("file_name"), str) else "",
+            }
+            for row in removes
+        ],
+        "crates_added": crates_added,
+        "crates_kept": crates_kept,
+        "spaces_added": sorted(spaces - kept_spaces),
+        "fields": fields,
+        "history_entries": 0 if history is None else history,
+        "history_repointed": history is not None,
+        "cue_warning": _cue_warning(kept, removes),
+        "files": files,
+        "_updates": updates,
+        "_placements": new_placements,
+        "_drops": drops,
+        "_keep_external": kept.get("external_id"),
+        "_keep_location": int(kept.get("location_id") or 0),
+    }
+
+
+def _apply_merge(conn: sqlite3.Connection, plan: Mapping[str, object]) -> None:
+    """Write one merge into the open master transaction.
+
+    Args:
+        conn: Connection inside BEGIN IMMEDIATE.
+        plan: Plan built on this same connection.
+
+    Raises:
+        LibraryError: If the crate schema cannot store the membership.
+    """
+    keep_id = int(cast(int, plan["keep_id"]))
+    remove_ids = [int(item) for item in cast(list[int], plan["remove_ids"])]
+    if keep_id in remove_ids or not remove_ids:
+        raise LibraryError("That track is not in a duplicate group.")
+    updates = dict(cast(dict[str, object], plan["_updates"]))
+    if "time_modified" in _columns(conn, "asset"):
+        updates["time_modified"] = int(time.time())
+    if updates:
+        _assign(conn, "asset", updates, "id = ?", keep_id)
+    for space in cast(list[str], plan["spaces_added"]):
+        _ensure_space_member(conn, keep_id, space)
+    for crate in cast(list[dict[str, object]], plan["_placements"]):
+        order = crate["list_order"]
+        _insert_at_order(
+            conn,
+            int(cast(int, crate["crate_id"])),
+            keep_id,
+            str(crate["space"]),
+            None if order is None else int(cast(int, order)),
+        )
+    if plan["history_repointed"]:
+        _repoint_history(conn, keep_id, remove_ids)
+    for asset_id in remove_ids:
+        _delete_asset_refs(conn, asset_id)
+        conn.execute("DELETE FROM asset WHERE id = ?", (asset_id,))
+
+
+def _mirror_space_member(conn: sqlite3.Connection, asset_id: int, space: str) -> str | None:
+    """Mirror a new space membership into the location database.
+
+    Args:
+        conn: Open master connection.
+        asset_id: Kept asset id.
+        space: Space name.
+
+    Returns:
+        None, or a warning when the drive database is left unchanged.
+    """
+    asset = _asset_location(conn, asset_id)
+    if int(asset["location_id"] or 0) != 3 or asset["external_id"] is None:
+        return "Saved in the main library. The other drive's database was not changed."
+    root_path = _location_paths(conn).get(3)
+    if root_path is None:
+        return "Saved in the main library. That track's drive is not connected, so Serato may reconcile the edit when the drive returns."
+
+    def apply(root: sqlite3.Connection) -> str | None:
+        """Insert the space membership inside the location transaction.
+
+        Args:
+            root: Location database connection.
+
+        Returns:
+            None, or a warning when the space is missing there.
+        """
+        space_row = root.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
+        if space_row is None:
+            return "Saved in the main library. This space is not in the drive database."
+        found = root.execute(
+            "SELECT id FROM space_asset WHERE asset_id = ? AND space_id = ?",
+            (int(asset["external_id"]), int(space_row[0])),
+        ).fetchone()
+        if found is None:
+            revision = _next_revision(root)
+            columns = _columns(root, "space_asset")
+            if "revision" in columns:
+                root.execute(
+                    "INSERT INTO space_asset (asset_id, space_id, revision) VALUES (?, ?, ?)",
+                    (int(asset["external_id"]), int(space_row[0]), revision),
+                )
+            else:
+                root.execute(
+                    "INSERT INTO space_asset (asset_id, space_id) VALUES (?, ?)",
+                    (int(asset["external_id"]), int(space_row[0])),
+                )
+        return None
+
+    return _with_location(root_path, apply)
+
+
+def _mirror_placed_membership(
+    conn: sqlite3.Connection,
+    crate_id: int,
+    asset_id: int,
+    space: str,
+    list_order: int | None,
+) -> str | None:
+    """Mirror a crate add, keeping the chosen position when the column exists.
+
+    The guards match ``_mirror_membership``. A track that already sits in the
+    drive crate is left at its current position.
+
+    Args:
+        conn: Open master connection.
+        crate_id: Master container id.
+        asset_id: Kept asset id.
+        space: Space name.
+        list_order: Position used on the master crate. None appends.
+
+    Returns:
+        None, or a warning when the drive database is left unchanged.
+    """
+    external = _external_ids(conn, [crate_id])
+    asset = _asset_location(conn, asset_id)
+    root_path = _location_paths(conn).get(int(asset["location_id"] or 0))
+    if int(asset["location_id"] or 0) != 3:
+        root_path = _location_paths(conn).get(3) if external else None
+    if not external or asset["external_id"] is None or root_path is None:
+        return "Saved in the main library. This track's drive is not connected, so the crate membership may be reconciled later."
+    if int(asset["location_id"] or 0) != 3 and root_path == _location_paths(conn).get(3):
+        return "Saved in the main library. This track lives on another drive, so that drive's database was not changed."
+
+    def apply(root: sqlite3.Connection) -> str | None:
+        """Insert the mirrored membership inside the location transaction.
+
+        Args:
+            root: Location database connection.
+
+        Returns:
+            None, or a warning when the space is missing from that database.
+        """
+        space_row = root.execute("SELECT id FROM space WHERE name = ?", (space,)).fetchone()
+        if space_row is None:
+            return "Saved in the main library. This space is not in the drive database."
+        asset_row = root.execute(
+            "SELECT id FROM space_asset WHERE asset_id = ? AND space_id = ?",
+            (int(asset["external_id"]), int(space_row[0])),
+        ).fetchone()
+        revision = _next_revision(root)
+        if asset_row is None:
+            root.execute(
+                "INSERT INTO space_asset (asset_id, space_id, revision) VALUES (?, ?, ?)",
+                (int(asset["external_id"]), int(space_row[0]), revision),
+            )
+            space_asset_id = int(root.execute("SELECT last_insert_rowid()").fetchone()[0])
+        else:
+            space_asset_id = int(asset_row[0])
+        found = root.execute(
+            "SELECT id FROM container_asset WHERE container_id = ? AND space_asset_id = ?",
+            (external[0], space_asset_id),
+        ).fetchone()
+        if found is not None:
+            return None
+        columns = _columns(root, "container_asset")
+        order = list_order
+        if order is None or "list_order" not in columns:
+            order = root.execute(
+                "SELECT COALESCE(MAX(list_order), 0) + 1 FROM container_asset WHERE container_id = ?",
+                (external[0],),
+            ).fetchone()[0]
+        if "revision" in columns and "list_order" in columns:
+            root.execute(
+                """
+                INSERT INTO container_asset (revision, container_id, space_asset_id, list_order, time_added)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (revision, external[0], space_asset_id, order, int(time.time())),
+            )
+        elif "list_order" in columns:
+            root.execute(
+                """
+                INSERT INTO container_asset (container_id, space_asset_id, list_order, time_added)
+                VALUES (?, ?, ?, ?)
+                """,
+                (external[0], space_asset_id, order, int(time.time())),
+            )
+        else:
+            root.execute(
+                "INSERT INTO container_asset (container_id, space_asset_id) VALUES (?, ?)",
+                (external[0], space_asset_id),
+            )
+        return None
+
+    return _with_location(root_path, apply)
+
+
+def _mirror_drop_asset(
+    conn: sqlite3.Connection,
+    external_id: object,
+    location_id: int,
+    keep_external: object,
+) -> str | None:
+    """Remove a duplicate from the location database.
+
+    Space and crate rows are removed the way ``_remove_from_space`` removes
+    them. The location asset row is removed in the same transaction so Serato
+    does not recreate the duplicate from the drive database. History rows in
+    that database are repointed when they have an asset id.
+
+    Args:
+        conn: Open master connection.
+        external_id: Location asset id, or None.
+        location_id: Master location id.
+        keep_external: Location id of the kept asset, used to avoid deleting it.
+
+    Returns:
+        None, or a warning when the drive database is left unchanged.
+    """
+    if (
+        keep_external is not None
+        and external_id is not None
+        and int(cast(int, external_id)) == int(cast(int, keep_external))
+    ):
+        return (
+            "A duplicate shares the drive record of the copy you are keeping, "
+            "so that drive record was left in place."
+        )
+    if location_id != 3 or external_id is None:
+        return "Removed from the main library. The other drive's database was not changed."
+    root_path = _location_paths(conn).get(3)
+    if root_path is None:
+        return (
+            "Removed from the main library. That track's drive is not connected, "
+            "so Serato may reconcile the duplicate when the drive returns."
+        )
+    external = int(cast(int, external_id))
+    kept = int(cast(int, keep_external)) if keep_external is not None else None
+
+    def apply(root: sqlite3.Connection) -> None:
+        """Delete the mirrored asset inside the location transaction.
+
+        Args:
+            root: Location database connection.
+        """
+        if kept is not None:
+            _repoint_history(root, kept, [external])
+        if "space_asset" in _tables(root) and "asset_id" in _columns(root, "space_asset"):
+            rows = root.execute("SELECT id FROM space_asset WHERE asset_id = ?", (external,)).fetchall()
+            ids = [int(row[0]) for row in rows]
+            if ids and "container_asset" in _tables(root) and "space_asset_id" in _columns(root, "container_asset"):
+                marks = ",".join("?" * len(ids))
+                root.execute(f"DELETE FROM container_asset WHERE space_asset_id IN ({marks})", ids)
+        _delete_asset_refs(root, external)
+        if "asset" in _tables(root):
+            root.execute("DELETE FROM asset WHERE id = ?", (external,))
+        _next_revision(root)
+
+    return _with_location(root_path, apply)
+
+
+def _mirror_merge(conn: sqlite3.Connection, plan: Mapping[str, object]) -> list[str]:
+    """Mirror a committed-in-memory merge into the location database.
+
+    Args:
+        conn: Open master connection, before commit.
+        plan: Plan whose master rows are already updated.
+
+    Returns:
+        Warning strings. Duplicate warnings are omitted.
+    """
+    warnings: list[str] = []
+    keep_id = int(cast(int, plan["keep_id"]))
+    updates = dict(cast(dict[str, object], plan["_updates"]))
+    if "time_modified" in _columns(conn, "asset"):
+        updates["time_modified"] = int(time.time())
+    if updates:
+        warning = _mirror_asset(conn, keep_id, updates)
+        if warning:
+            warnings.append(warning)
+    for space in cast(list[str], plan["spaces_added"]):
+        warning = _mirror_space_member(conn, keep_id, space)
+        if warning and warning not in warnings:
+            warnings.append(warning)
+    for crate in cast(list[dict[str, object]], plan["_placements"]):
+        order = crate["list_order"]
+        warning = _mirror_placed_membership(
+            conn,
+            int(cast(int, crate["crate_id"])),
+            keep_id,
+            str(crate["space"]),
+            None if order is None else int(cast(int, order)),
+        )
+        if warning and warning not in warnings:
+            warnings.append(warning)
+    for drop in cast(list[dict[str, object]], plan["_drops"]):
+        warning = _mirror_drop_asset(
+            conn,
+            drop.get("external_id"),
+            int(cast(int, drop.get("location_id") or 0)),
+            plan.get("_keep_external"),
+        )
+        if warning and warning not in warnings:
+            warnings.append(warning)
+    return warnings
+
+
+def _refuse_unsafe_trash(plan: Mapping[str, object]) -> None:
+    """Refuse a file move that could hit the wrong file.
+
+    Args:
+        plan: Merge plan.
+
+    Raises:
+        LibraryError: If any duplicate file is unsafe to move. Nothing is written.
+    """
+    for item in cast(list[dict[str, object]], plan["files"]):
+        if item.get("blocks_trash"):
+            reason = str(item.get("reason") or "The file was not moved.")
+            raise LibraryError(f"{reason} Leave the Trash option off to merge the library rows.")
+
+
+def _public_merge(plan: Mapping[str, object], **extra: object) -> dict[str, object]:
+    """Copy the plan fields the page is allowed to see.
+
+    Args:
+        plan: Merge plan. Private paths and column maps are dropped.
+        **extra: Response fields such as preview and warning.
+
+    Returns:
+        The JSON object for the page.
+    """
+    files = []
+    for item in cast(list[dict[str, object]], plan["files"]):
+        files.append({key: item[key] for key in _PUBLIC_FILE_KEYS})
+    body: dict[str, object] = {
+        "ok": True,
+        "keep_id": plan["keep_id"],
+        "remove_ids": plan["remove_ids"],
+        "space": plan["space"],
+        "kept": plan["kept"],
+        "removed": plan["removed"],
+        "crates_added": plan["crates_added"],
+        "crates_kept": plan["crates_kept"],
+        "spaces_added": plan["spaces_added"],
+        "fields": plan["fields"],
+        "history_entries": plan["history_entries"],
+        "history_repointed": plan["history_repointed"],
+        "cue_warning": plan["cue_warning"],
+        "files": files,
+    }
+    body.update(extra)
+    return body
+
+
+def _xdg_trash_dirs() -> tuple[Path, Path]:
+    """Return the FreeDesktop home trash files and info directories.
+
+    A relative ``XDG_DATA_HOME`` is ignored.
+
+    Returns:
+        ``Trash/files`` and ``Trash/info`` under the data home.
+    """
+    raw = os.environ.get("XDG_DATA_HOME", "")
+    base = Path(raw) if raw and Path(raw).is_absolute() else Path.home() / ".local" / "share"
+    trash = base / "Trash"
+    return trash / "files", trash / "info"
+
+
+def _device_root(path: Path) -> Path:
+    """Return the mount root that contains a file.
+
+    Args:
+        path: Existing file.
+
+    Returns:
+        The highest directory that still sits on the file's device.
+    """
+    device = path.stat().st_dev
+    current = path.resolve().parent
+    while True:
+        parent = current.parent
+        if parent == current:
+            return current
+        try:
+            if parent.stat().st_dev != device:
+                return current
+        except OSError:
+            return current
+        current = parent
+
+
+def _trash_directories(origin: Path) -> tuple[Path, Path]:
+    """Choose the trash directory for one file.
+
+    The home trash is used when it is on the same device. Otherwise the
+    FreeDesktop volume trash is used, so the move stays a rename.
+
+    Args:
+        origin: File that will be moved.
+
+    Returns:
+        The files directory and the info directory.
+
+    Raises:
+        LibraryError: If neither trash directory can be created.
+    """
+    try:
+        files, info = _xdg_trash_dirs()
+        files.mkdir(parents=True, exist_ok=True)
+        info.mkdir(parents=True, exist_ok=True)
+        if files.stat().st_dev == origin.stat().st_dev:
+            return files, info
+    except OSError:
+        pass
+    top = _device_root(origin)
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    shared = top / ".Trash"
+    try:
+        sticky = shared.is_dir() and bool(shared.stat().st_mode & 0o1000)
+    except OSError:
+        sticky = False
+    base = shared / str(uid) if sticky else top / f".Trash-{uid}"
+    files = base / "files"
+    info = base / "info"
+    try:
+        files.mkdir(parents=True, exist_ok=True)
+        info.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise LibraryError("The file could not be moved to the Trash.") from exc
+    return files, info
+
+
+def _trash_freedesktop(path: Path) -> Path:
+    """Move one regular file into a FreeDesktop trash directory.
+
+    Args:
+        path: Existing regular file. The caller has rejected symlinks.
+
+    Returns:
+        The path inside the trash files directory.
+
+    Raises:
+        LibraryError: If the file cannot be renamed into the trash.
+    """
+    files, info = _trash_directories(path)
+    files_root = files.resolve()
+    info_root = info.resolve()
+    stem = path.name
+    if not stem or stem in {".", ".."} or "/" in stem or "\\" in stem:
+        raise LibraryError("The file could not be moved to the Trash.")
+    encoded = quote(path.resolve().as_posix(), safe="/")
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+    body = f"[Trash Info]\nPath={encoded}\nDeletionDate={stamp}\n"
+    for suffix in range(0, 1000):
+        name = stem if suffix == 0 else f"{stem}_{suffix}"
+        dest = files / name
+        info_path = info / f"{name}.trashinfo"
+        if dest.parent.resolve() != files_root or info_path.parent.resolve() != info_root:
+            raise LibraryError("The file could not be moved to the Trash.")
+        try:
+            with info_path.open("x", encoding="utf-8") as handle:
+                handle.write(body)
+        except FileExistsError:
+            continue
+        try:
+            os.rename(path, dest)
+        except OSError as exc:
+            info_path.unlink(missing_ok=True)
+            if exc.errno == errno.EXDEV:
+                raise LibraryError("The file could not be moved to the Trash.") from exc
+            raise LibraryError("The file could not be moved to the Trash.") from exc
+        return dest
+    raise LibraryError("The file could not be moved to the Trash.")
+
+
+def _trash_macos(path: Path) -> None:
+    """Ask Finder to move one file to the Trash.
+
+    Args:
+        path: Existing file. The path is an argument, not part of the script.
+
+    Raises:
+        LibraryError: If Finder does not move the file.
+    """
+    script = 'on run argv\ntell application "Finder" to delete POSIX file (item 1 of argv)\nend run\n'
+    completed = subprocess.run(
+        ["osascript", "-e", script, str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0 or path.exists():
+        raise LibraryError("The file could not be moved to the Trash.")
+
+
+def _trash_windows(path: Path) -> None:
+    """Move one file to the Windows Recycle Bin.
+
+    The path is passed in the environment. It is not interpolated into the
+    PowerShell script.
+
+    Args:
+        path: Existing file.
+
+    Raises:
+        LibraryError: If the Recycle Bin move fails or the file is still there.
+    """
+    script = (
+        "Add-Type -AssemblyName Microsoft.VisualBasic; "
+        "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile("
+        "[string]$env:SERATO_TRASH_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')"
+    )
+    env = os.environ.copy()
+    env["SERATO_TRASH_PATH"] = str(path)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        check=False,
+        capture_output=True,
+        env=env,
+        creationflags=flags,
+    )
+    if completed.returncode != 0 or path.exists():
+        raise LibraryError("The file could not be moved to the Recycle Bin.")
+
+
+def _move_to_trash(path: Path) -> None:
+    """Move one duplicate audio file to the operating-system trash.
+
+    macOS uses Finder, Windows uses the Recycle Bin, and other systems use
+    the FreeDesktop trash specification. The file is not unlinked.
+
+    Args:
+        path: File chosen from a duplicate's stored path.
+
+    Raises:
+        LibraryError: If the path is a symlink, a directory, a library
+            database file, or the trash move fails. The original file is
+            left in place when the move fails.
+    """
+    if path.is_symlink() or path.is_dir() or not path.is_file() or _protected_library_path(path):
+        raise LibraryError("The file could not be moved to the Trash.")
+    if sys.platform == "win32":
+        _trash_windows(path)
+        return
+    if sys.platform == "darwin":
+        _trash_macos(path)
+        return
+    _trash_freedesktop(path)
+
+
+def _trash_plan_files(plan: Mapping[str, object]) -> tuple[list[str], str | None]:
+    """Move the duplicate files named by a plan.
+
+    The library rows are already committed. A failure leaves that file on
+    disk and is reported as a warning.
+
+    Args:
+        plan: Applied merge plan.
+
+    Returns:
+        File names that moved, and a warning when one stayed on disk.
+    """
+    trashed: list[str] = []
+    failed: list[str] = []
+    for item in cast(list[dict[str, object]], plan["files"]):
+        raw = item.get("path")
+        if not item.get("on_disk") or item.get("blocks_trash") or not isinstance(raw, Path):
+            continue
+        try:
+            _move_to_trash(raw)
+        except (LibraryError, OSError):
+            failed.append(str(item.get("file") or "file"))
+            continue
+        trashed.append(str(item.get("file") or "file"))
+    if not failed:
+        return trashed, None
+    names = ", ".join(failed)
+    return trashed, f"Could not move these files to the Trash: {names}. They are still on disk."
+
+
+def _join_merge_warnings(warnings: list[str]) -> str | None:
+    """Collapse repeated drive-offline notes into one sentence.
+
+    A merge mirrors the kept asset, each new space, each new crate, and
+    each removed asset. When the drive database is not the connected
+    location, every one of those steps returns its own sentence. The page
+    shows that fact once. A warning about a shared drive record, or about
+    a file that stayed on disk, is kept as written.
+
+    Args:
+        warnings: Messages from the location mirrors and the trash move.
+
+    Returns:
+        One warning string, or None when there is nothing to report.
+    """
+    offline = False
+    rest: list[str] = []
+    for warning in warnings:
+        if not warning or warning in rest:
+            continue
+        if (
+            "was not changed" in warning
+            or "drive is not connected" in warning
+            or "another drive" in warning
+        ):
+            offline = True
+            continue
+        rest.append(warning)
+    parts: list[str] = []
+    if offline:
+        parts.append(
+            "Saved in the main library. The other drive's database was not changed, "
+            "so Serato may reconcile this when that drive is connected."
+        )
+    parts.extend(rest)
+    if not parts:
+        return None
+    return " ".join(parts)
+
+
+def merge_duplicates(payload: Mapping[str, object]) -> dict[str, object]:
+    """Fold a duplicate group into the copy the user keeps.
+
+    The group matches ``duplicate_groups``: same space, title, artist, and
+    length in whole seconds. The kept track is added to every normal crate
+    any duplicate was in. When the kept track is already in a crate, it stays
+    at its current position. Otherwise it takes the earliest duplicate's
+    position in that crate. Smart crates are left to their rules.
+
+    Empty text fields and an empty BPM are filled from the first duplicate
+    that has a value. Play count and rating keep the highest value. White
+    (no color) is filled from the first colored copy. Date added keeps the
+    earliest time. A beatgrid lock is not copied. Path, file size, bitrate,
+    sample rate, and length stay with the file that was kept.
+
+    History rows are repointed when ``history_entry.asset_id`` exists. The
+    played name and file name on those rows are left as a snapshot.
+
+    Cue points live in the audio file. This function reads them and, when
+    the kept file has none and a duplicate has some, returns ``cue_warning``.
+    It does not rewrite ID3 frames.
+
+    ``preview`` true returns the plan and does not write. A real merge
+    requires ``confirm`` true. ``delete_files`` true also requires
+    ``confirm_delete_files`` true, and it is refused before any write when a
+    duplicate path is a symlink, a directory, the same file as the kept copy,
+    or anything inside the library database folder. Files that do move go to
+    the operating-system trash after the database commit. The master changes
+    are one transaction. Each location database is mirrored in its own
+    transaction, the same way other writes are.
+
+    Args:
+        payload: JSON object with ``keep_id`` and ``space``. ``preview``,
+            ``confirm``, ``delete_files``, and ``confirm_delete_files`` are
+            booleans.
+
+    Returns:
+        The plan. ``preview`` is true when nothing was written. ``warning``
+        is set when a drive database or a trash move was skipped.
+
+    Raises:
+        LibraryError: If the request is invalid, the track is not a duplicate,
+            or a requested file move is unsafe.
+        SeratoOpen: If Serato still has the library open.
+    """
+    space = cast(str, payload.get("space") or LIBRARY_SPACE)
+    if "keep_id" not in payload or isinstance(payload.get("keep_id"), bool):
+        raise LibraryError("Choose the copy to keep.")
+    try:
+        keep_id = _as_int(payload["keep_id"])
+    except (TypeError, ValueError):
+        raise LibraryError("Choose the copy to keep.") from None
+    if keep_id <= 0:
+        raise LibraryError("Choose the copy to keep.")
+    preview = _optional_bool(payload.get("preview"), False)
+    confirm = _optional_bool(payload.get("confirm"), False)
+    delete_files = _optional_bool(payload.get("delete_files"), False)
+    confirm_delete = _optional_bool(payload.get("confirm_delete_files"), False)
+    if preview:
+        with closing(read_conn()) as conn:
+            plan = _build_merge_plan(conn, space, keep_id)
+        info = status()
+        return _public_merge(
+            plan,
+            preview=True,
+            delete_files=False,
+            writable=bool(info.get("writable")),
+            warning=None,
+        )
+    if not confirm:
+        raise LibraryError("Confirm the merge before it runs.")
+    if delete_files and not confirm_delete:
+        raise LibraryError("Moving audio files to the Trash needs a separate confirmation.")
+    with closing(read_conn()) as conn:
+        early = _build_merge_plan(conn, space, keep_id)
+    if delete_files:
+        _refuse_unsafe_trash(early)
+    conn = begin_write()
+    try:
+        plan = _build_merge_plan(conn, space, keep_id)
+        if delete_files:
+            _refuse_unsafe_trash(plan)
+        _apply_merge(conn, plan)
+        warnings = _mirror_merge(conn, plan)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    trashed: list[str] = []
+    trash_warning = None
+    if delete_files:
+        trashed, trash_warning = _trash_plan_files(plan)
+    if trash_warning:
+        warnings.append(trash_warning)
+    warning = _join_merge_warnings(warnings)
+    return _public_merge(
+        plan,
+        preview=False,
+        delete_files=delete_files,
+        trashed=trashed,
+        writable=True,
+        warning=warning,
+    )
 
 
 def _resolved(portable_id: str | None) -> str | None:

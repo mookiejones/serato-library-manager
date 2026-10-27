@@ -240,6 +240,49 @@ class ApiTests(unittest.TestCase):
         self.assertIn("#EXTM3U", playlist)
         self.assertIn("same-a.mp3", playlist)
 
+    def test_merge_preview_and_confirm(self) -> None:
+        """Preview a duplicate merge, then confirm it over HTTP.
+
+        The preview leaves both fixture rows in place. A body without
+        ``confirm`` returns 400. The confirmed merge removes asset 2.
+        The page script reads the plan fields this route returns.
+
+        Returns:
+            None. The test fails if the preview writes or the merge keeps the duplicate.
+        """
+        status, preview = self.request(
+            "/api/duplicates/merge",
+            {"keep_id": 1, "space": "Serato Library", "preview": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(preview["preview"])
+        self.assertEqual(preview["remove_ids"], [2])
+        with open_database(library.MASTER) as conn:
+            before = conn.execute("SELECT COUNT(*) FROM asset WHERE id = 2").fetchone()[0]
+        status, rejected = self.request(
+            "/api/duplicates/merge",
+            {"keep_id": 1, "delete_files": True},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("error", rejected)
+        status, merged = self.request(
+            "/api/duplicates/merge",
+            {"keep_id": 1, "confirm": True, "delete_files": False, "confirm_delete_files": False},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(merged["ok"])
+        self.assertFalse(merged["preview"])
+        with open_database(library.MASTER) as conn:
+            after = conn.execute("SELECT COUNT(*) FROM asset WHERE id = 2").fetchone()[0]
+        self.assertEqual(before, 1)
+        self.assertEqual(after, 0)
+        script = Path(__file__).resolve().parents[1].joinpath("static", "app.js").read_text(encoding="utf-8")
+        page = Path(__file__).resolve().parents[1].joinpath("static", "index.html").read_text(encoding="utf-8")
+        for field in ("/api/duplicates/merge", "confirm_delete_files", "cue_warning", "crates_added", "history_entries"):
+            self.assertIn(field, script)
+        self.assertIn("merge-dialog", page)
+        self.assertIn("Merge copies", page)
+
     def test_locked_library_returns_409(self) -> None:
         """Return 409 when a write finds Serato holding the lock.
 

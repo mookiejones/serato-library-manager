@@ -3,11 +3,12 @@
  *
  * Loads crates, history, missing tracks, duplicates, and stems from the
  * local server on 127.0.0.1 port 8765. Track and crate edits are POST
- * requests to /api/track, /api/crate, /api/import.m3u, and /api/reveal.
- * Related tracks use /api/related. The track list is virtualized: only
- * rows near the scroll window are in the DOM. Sharing settings and local
- * logs use /api/settings and /api/logs. This file does not open
- * master.sqlite itself, and it does not send library rows anywhere.
+ * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
+ * /api/duplicates/merge. Related tracks use /api/related. The track list
+ * is virtualized: only rows near the scroll window are in the DOM.
+ * Sharing settings and local logs use /api/settings and /api/logs. This
+ * file does not open master.sqlite itself, and it does not send library
+ * rows anywhere.
  */
 
 // Row height in pixels. It matches --row in app.css. The painter divides
@@ -59,6 +60,7 @@ const state = {
   historyId: null,
   entries: [],
   duplicateIds: null,
+  duplicateGroups: [],
   duplicateSpace: "",
   telemetryConsent: null,
   telemetryConfigured: false,
@@ -679,7 +681,9 @@ function renderShell() {
   sessionList.hidden = !historyMode;
   modeNote.hidden = cratesMode || historyMode;
   if (state.mode === "missing") modeNote.textContent = "Tracks Serato has marked missing in this space.";
-  if (state.mode === "duplicates") modeNote.textContent = "Same title, artist, and length. Open a track to see the other copies.";
+  if (state.mode === "duplicates") {
+    modeNote.textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
+  }
   if (state.mode === "stems") modeNote.textContent = "Tracks with a stems analysis state.";
   for (const button of document.querySelectorAll("#views button")) {
     button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
@@ -692,6 +696,7 @@ function renderShell() {
   document.getElementById("crate-rename").disabled = !state.writable || !crateChosen;
   document.getElementById("crate-color").disabled = !state.writable || !crateChosen;
   document.getElementById("crate-delete").disabled = !state.writable || !crateChosen;
+  syncMergeButton();
   const pool = state.mode === "history" ? state.entries : footerTracks();
   const bytes = pool.reduce((sum, track) => sum + (Number(track.file_size) || 0), 0);
   const ms = pool.reduce((sum, track) => sum + (Number(track.length_ms) || 0), 0);
@@ -915,6 +920,7 @@ function focusCrateItem(item) {
  */
 async function selectTrack(id) {
   state.selectedId = id;
+  syncMergeButton();
   paintRows();
   const token = ++state.request;
   const pending = document.createElement("p");
@@ -1185,6 +1191,16 @@ function renderDetail(track) {
   remove.disabled = !writable;
   remove.addEventListener("click", () => removeTrack(track.id));
   actions.append(reveal, prepare, relocate, remove);
+  if (state.mode === "duplicates" && selectedDuplicateGroup()) {
+    const merge = document.createElement("button");
+    merge.type = "button";
+    merge.textContent = "Merge copies";
+    merge.disabled = !writable;
+    merge.addEventListener("click", () => {
+      openMergeDialog().catch((error) => setNotice(error.message));
+    });
+    actions.append(merge);
+  }
   body.append(actions);
 
   body.append(relatedSection(track, writable));
@@ -2359,11 +2375,13 @@ async function openSession(id) {
  */
 async function loadDuplicates() {
   state.duplicateIds = null;
+  state.duplicateGroups = [];
   const response = await fetch(`/api/duplicates?space=${encodeURIComponent(state.space)}`);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Could not read duplicates.");
   const ids = new Set();
-  for (const group of payload.groups || []) for (const id of group.ids) ids.add(id);
+  state.duplicateGroups = payload.groups || [];
+  for (const group of state.duplicateGroups) for (const id of group.ids) ids.add(id);
   state.duplicateIds = ids;
   state.duplicateSpace = state.space;
   if (state.mode === "duplicates") renderList();
@@ -2412,7 +2430,10 @@ async function loadLibrary() {
   state.expanded = new Set(library.crates.filter((crate) => crate.expanded).map((crate) => crate.id));
   state.activeCrate = active === "all" || library.crates.some((crate) => crate.id === active) ? active : "all";
   state.selectedId = selected;
-  if (state.duplicateSpace !== state.space) state.duplicateIds = null;
+  if (state.duplicateSpace !== state.space) {
+    state.duplicateIds = null;
+    state.duplicateGroups = [];
+  }
   applyStatus(library.serato);
   renderList();
 }
@@ -2492,6 +2513,7 @@ spaceSelect.addEventListener("change", () => {
   state.activeCrate = "all";
   state.selectedId = null;
   state.duplicateIds = null;
+  state.duplicateGroups = [];
   loadLibrary().then(() => {
     if (state.mode === "duplicates") return loadDuplicates();
     return null;
@@ -2515,6 +2537,14 @@ document.getElementById("crate-new").addEventListener("click", () => createCrate
 document.getElementById("crate-rename").addEventListener("click", () => renameCrate().catch((error) => setNotice(error.message)));
 document.getElementById("crate-color").addEventListener("click", () => colorCrate().catch((error) => setNotice(error.message)));
 document.getElementById("crate-delete").addEventListener("click", () => deleteCrate().catch((error) => setNotice(error.message)));
+document.getElementById("merge-duplicates").addEventListener("click", () => {
+  openMergeDialog().catch((error) => setNotice(error.message));
+});
+document.getElementById("merge-cancel").addEventListener("click", () => mergeDialog.close());
+document.getElementById("merge-confirm").addEventListener("click", () => {
+  confirmMerge().catch((error) => setNotice(error.message));
+});
+document.getElementById("merge-trash").addEventListener("change", () => syncTrashChoice());
 
 document.querySelector(".columns").addEventListener("click", (event) => {
   const button = event.target.closest("button");
@@ -2593,6 +2623,348 @@ function showFailure(error) {
   failure.className = "detail-error";
   failure.textContent = error.message;
   detail.replaceChildren(failure);
+}
+
+/**
+ * Return the duplicate group that contains the selected track.
+ *
+ * Groups come from GET /api/duplicates. A track outside that view, or a
+ * track that is not in a group, returns null. Does not fetch.
+ *
+ * @returns {object|null} The group, with an ids array, or null.
+ */
+function selectedDuplicateGroup() {
+  if (state.mode !== "duplicates" || state.selectedId == null) return null;
+  return (state.duplicateGroups || []).find((group) => (group.ids || []).includes(state.selectedId)) || null;
+}
+
+/**
+ * Enable Merge copies when a duplicate group is selected and Serato is quit.
+ *
+ * The button lives in the duplicates rail. Other views hide it. Does not fetch.
+ *
+ * @returns {void}
+ */
+function syncMergeButton() {
+  const wrap = document.getElementById("duplicate-actions");
+  const button = document.getElementById("merge-duplicates");
+  if (!wrap || !button) return;
+  const show = state.mode === "duplicates";
+  wrap.hidden = !show;
+  button.disabled = !show || !state.writable || !selectedDuplicateGroup();
+}
+
+/**
+ * List normal-crate names that contain one asset.
+ *
+ * Smart crates are omitted. The names come from the loaded library.
+ *
+ * @param {number} assetId Asset id.
+ * @returns {string[]} Crate names.
+ */
+function crateNamesFor(assetId) {
+  return state.crates
+    .filter((crate) => !crate.smart && (crate.tracks || []).includes(assetId))
+    .map((crate) => crate.name);
+}
+
+const mergeDialog = document.getElementById("merge-dialog");
+const mergeChoices = document.getElementById("merge-choices");
+const mergePreviewBox = document.getElementById("merge-preview");
+const mergeStatus = document.getElementById("merge-status");
+const mergeTrash = document.getElementById("merge-trash");
+const mergeConfirm = document.getElementById("merge-confirm");
+let mergePreview = null;
+let mergeToken = 0;
+let mergeLoading = false;
+
+/**
+ * Read the keep-copy radio the dialog currently has selected.
+ *
+ * Falls back to the track selected in the list. Does not fetch.
+ *
+ * @returns {number|null} Asset id, or null when no radio is checked.
+ */
+function selectedMergeKeepId() {
+  const checked = mergeChoices.querySelector("input:checked");
+  if (checked) return Number(checked.value);
+  return state.selectedId;
+}
+
+/**
+ * Format one merge-preview value for the dialog.
+ *
+ * Empty values read as "empty". A date added includes the year and the
+ * seconds, so two copies added in the same minute still look different.
+ * Other values stay as the server sent them. Does not fetch.
+ *
+ * @param {string} field Column name.
+ * @param {unknown} value Value from the plan.
+ * @returns {string} Text for one side of a change.
+ */
+function previewFieldValue(field, value) {
+  if (value == null || value === "") return "empty";
+  if (field === "time_added") {
+    const date = new Date(Number(value) * 1000);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    }
+  }
+  return String(value);
+}
+
+/**
+ * Show one merge plan in the dialog.
+ *
+ * The list is built with text nodes. File paths from the server are not
+ * part of this payload. Does not fetch.
+ *
+ * @param {object|null} preview Plan from POST /api/duplicates/merge, or null while it loads.
+ * @returns {void}
+ */
+function renderMergePreview(preview) {
+  mergePreviewBox.replaceChildren();
+  if (!preview) {
+    const pending = document.createElement("p");
+    pending.textContent = "Reading the preview…";
+    mergePreviewBox.append(pending);
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "merge-preview";
+  const added = preview.crates_added || [];
+  const item = (text) => {
+    const line = document.createElement("li");
+    line.textContent = text;
+    list.append(line);
+  };
+  if (added.length) {
+    const names = added.map((crate) => (
+      crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name
+    ));
+    item(`Add the kept copy to ${names.join(", ")}.`);
+  } else if ((preview.crates_kept || []).length) {
+    item("The kept copy is already in every crate the others use. It stays where it is.");
+  } else {
+    item("None of the copies are in a crate.");
+  }
+  for (const space of preview.spaces_added || []) item(`Add the kept copy to the ${space} space.`);
+  if ((preview.fields || []).length) {
+    for (const field of preview.fields) {
+      const before = previewFieldValue(field.field, field.before);
+      const after = previewFieldValue(field.field, field.after);
+      item(`${field.label} changes from ${before} to ${after}.`);
+    }
+  } else {
+    item("No empty fields or higher play count to copy.");
+  }
+  if (preview.history_repointed) {
+    const count = Number(preview.history_entries) || 0;
+    item(count
+      ? `Point ${count} history ${count === 1 ? "entry" : "entries"} at the kept copy.`
+      : "No history entries point at the other copies.");
+  } else {
+    item("This library has no history track id to repoint.");
+  }
+  const removed = (preview.removed || []).length;
+  item(`Remove ${removed} ${removed === 1 ? "copy" : "copies"} from the library.`);
+  for (const file of preview.files || []) {
+    if (file.reason) item(`${file.file}: ${file.reason}`);
+  }
+  mergePreviewBox.append(list);
+  if (preview.cue_warning) {
+    const warning = document.createElement("p");
+    warning.className = "merge-warning";
+    warning.textContent = preview.cue_warning;
+    mergePreviewBox.append(warning);
+  }
+  const files = document.createElement("p");
+  files.id = "merge-file-note";
+  files.className = "dialog-note";
+  mergePreviewBox.append(files);
+}
+
+/**
+ * Match the Trash checkbox and the confirm button to the current plan.
+ *
+ * The checkbox stays off, and stays disabled, unless a duplicate file can
+ * be moved safely. Does not fetch.
+ *
+ * @returns {void}
+ */
+function syncTrashChoice() {
+  const files = mergePreview?.files || [];
+  const trashable = files.filter((file) => file.on_disk && !file.blocks_trash);
+  const blocked = files.some((file) => file.blocks_trash);
+  mergeTrash.disabled = !mergePreview || mergeLoading || blocked || trashable.length === 0;
+  if (mergeTrash.disabled) mergeTrash.checked = false;
+  const danger = mergeTrash.checked;
+  mergeConfirm.classList.toggle("danger", danger);
+  mergeConfirm.textContent = mergeLoading ? "Merging…" : (danger ? "Merge and move files to Trash" : "Merge copies");
+  mergeConfirm.disabled = mergeLoading || !mergePreview || mergePreview.writable === false;
+  const note = document.getElementById("merge-file-note");
+  if (!note) return;
+  if (danger) note.textContent = `Move ${trashable.map((file) => file.file).join(", ")} to the Trash.`;
+  else note.textContent = "Audio files stay on disk.";
+}
+
+/**
+ * Ask for a merge plan for the selected keep copy.
+ *
+ * POST /api/duplicates/merge with preview true. A slow reply is ignored
+ * when a newer choice has already been made. The dialog shows the error
+ * and leaves the library unchanged.
+ *
+ * @returns {Promise<void>}
+ */
+async function refreshMergePreview() {
+  const keepId = selectedMergeKeepId();
+  const token = ++mergeToken;
+  mergeLoading = false;
+  mergePreview = null;
+  mergeStatus.textContent = "";
+  renderMergePreview(null);
+  syncTrashChoice();
+  mergeConfirm.disabled = true;
+  try {
+    const preview = await postJSON("/api/duplicates/merge", {
+      space: state.space,
+      keep_id: keepId,
+      preview: true,
+    });
+    if (token !== mergeToken) return;
+    mergePreview = preview;
+    renderMergePreview(preview);
+    if (preview.writable === false) {
+      mergeStatus.textContent = "Quit Serato before merging. The preview shows the plan.";
+    }
+    syncTrashChoice();
+  } catch (error) {
+    if (token !== mergeToken) return;
+    mergePreview = null;
+    mergePreviewBox.replaceChildren();
+    const failed = document.createElement("p");
+    failed.textContent = "The preview could not be read.";
+    mergePreviewBox.append(failed);
+    mergeStatus.textContent = error.message;
+    syncTrashChoice();
+  }
+}
+
+/**
+ * Build the keep-copy radios for the selected duplicate group.
+ *
+ * The selected track starts checked. Changing the radio loads a new plan.
+ * Does not write the library.
+ *
+ * @returns {void}
+ */
+function renderMergeChoices() {
+  const group = selectedDuplicateGroup();
+  mergeChoices.replaceChildren();
+  if (!group) return;
+  for (const id of group.ids) {
+    const track = state.byId.get(id) || { id, file: "", play_count: null, missing: false };
+    const label = document.createElement("label");
+    label.className = "merge-choice";
+    label.htmlFor = `merge-keep-${id}`;
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "merge-keep";
+    input.id = `merge-keep-${id}`;
+    input.value = String(id);
+    input.checked = id === state.selectedId;
+    input.addEventListener("change", () => {
+      if (input.checked) refreshMergePreview().catch((error) => setNotice(error.message));
+    });
+    const text = document.createElement("span");
+    const name = document.createElement("span");
+    name.textContent = track.file || `Track ${id}`;
+    const meta = document.createElement("span");
+    meta.className = "merge-meta";
+    const parts = [];
+    if (track.play_count != null) parts.push(`${track.play_count} plays`);
+    const crates = crateNamesFor(id);
+    if (crates.length) parts.push(crates.join(", "));
+    if (track.missing) parts.push("missing");
+    meta.textContent = parts.join(" · ");
+    text.append(name, meta);
+    label.append(input, text);
+    mergeChoices.append(label);
+  }
+}
+
+/**
+ * Open the merge dialog for the selected duplicate group.
+ *
+ * The Trash option starts off. The plan is loaded before Merge can be
+ * pressed. Cancel closes the dialog without a request that writes.
+ *
+ * @returns {Promise<void>}
+ */
+async function openMergeDialog() {
+  if (!selectedDuplicateGroup() || !state.writable) return;
+  if (typeof mergeDialog.showModal !== "function") return;
+  mergeTrash.checked = false;
+  mergeStatus.textContent = "";
+  renderMergeChoices();
+  if (!mergeDialog.open) mergeDialog.showModal();
+  document.getElementById("merge-cancel").focus();
+  await refreshMergePreview();
+}
+
+/**
+ * Merge the selected group into the chosen copy.
+ *
+ * POST /api/duplicates/merge with confirm true. Moving files also sends
+ * confirm_delete_files. The button stays disabled until the request
+ * finishes. A 409 locks the page and closes the dialog.
+ *
+ * @returns {Promise<void>}
+ */
+async function confirmMerge() {
+  const keepId = selectedMergeKeepId();
+  if (keepId == null || mergeLoading) return;
+  const trash = mergeTrash.checked;
+  mergeLoading = true;
+  syncTrashChoice();
+  mergeStatus.textContent = "";
+  try {
+    const result = await postJSON("/api/duplicates/merge", {
+      space: state.space,
+      keep_id: keepId,
+      confirm: true,
+      delete_files: trash,
+      confirm_delete_files: trash,
+    });
+    mergeDialog.close();
+    const count = (result.removed || []).length;
+    const name = result.kept?.file || "the kept copy";
+    let message = `Merged ${count} ${count === 1 ? "copy" : "copies"} into ${name}.`;
+    if (result.warning) message = `${message} ${result.warning}`;
+    if (result.cue_warning) message = `${message} ${result.cue_warning}`;
+    setNotice(message);
+    state.selectedId = keepId;
+    await loadLibrary();
+    if (state.mode === "duplicates") await loadDuplicates();
+    if (state.byId.has(keepId)) selectTrack(keepId);
+  } catch (error) {
+    mergeStatus.textContent = error.message;
+    if (error.status === 409) {
+      lockDown(error);
+      mergeDialog.close();
+    }
+  } finally {
+    mergeLoading = false;
+    syncTrashChoice();
+  }
 }
 
 const consentDialog = document.getElementById("consent-dialog");

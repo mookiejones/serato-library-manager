@@ -7,13 +7,14 @@ release builds overwrite from GitHub secrets.
 
 Events are an allowlist: ``app_opened``, ``library_scanned``,
 ``crate_created``, ``backup_made``, ``tags_read``, ``related_link_saved``,
-``related_link_removed``, and ``related_crate_written``. Properties are
-the app name ``serato-library-manager``, the app version, the operating
-system, a track-count bucket, and ``link_direction`` (``one_way`` or
-``two_way``) on ``related_link_saved``. Track titles, crate names, file
-paths, and library rows are not properties, and the Sentry
-``before_send`` hook removes paths if one appears in an exception. Crash
-reports carry the tag ``app=serato-library-manager``.
+``related_link_removed``, ``related_crate_written``, and
+``duplicates_merged``. Properties are the app name
+``serato-library-manager``, the app version, the operating system, a
+track-count bucket, and ``link_direction`` (``one_way`` or ``two_way``)
+on ``related_link_saved``. Track titles, crate names, file paths, and
+library rows are not properties, and the Sentry ``before_send`` hook
+removes paths if one appears in an exception. Crash reports carry the
+tag ``app=serato-library-manager``.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ EVENT_TAGS_READ = "tags_read"
 EVENT_RELATED_LINK_SAVED = "related_link_saved"
 EVENT_RELATED_LINK_REMOVED = "related_link_removed"
 EVENT_RELATED_CRATE_WRITTEN = "related_crate_written"
+EVENT_DUPLICATES_MERGED = "duplicates_merged"
 TRACK_COUNT = "track_count"
 TRACK_COUNT_BUCKET = "track_count_bucket"
 LINK_DIRECTION = "link_direction"
@@ -63,6 +65,7 @@ EVENTS: dict[str, frozenset[str]] = {
     EVENT_RELATED_LINK_SAVED: frozenset({LINK_DIRECTION}),
     EVENT_RELATED_LINK_REMOVED: frozenset(),
     EVENT_RELATED_CRATE_WRITTEN: frozenset(),
+    EVENT_DUPLICATES_MERGED: frozenset(),
 }
 BUCKETS = (
     (1, "0"),
