@@ -3,9 +3,10 @@
   Serato library page.
 
   One screen: the space menu, the view switch, the crate or history rail,
-  a virtualized track list, and the detail pane. app.css and app.js are
-  local files. The page talks only to the library server on 127.0.0.1.
-  It does not open master.sqlite itself.
+  a virtualized track list, and the detail pane. The Duplicates view can
+  merge a group into the copy you keep. app.css and app.js are local files.
+  The page talks only to the library server on 127.0.0.1. It does not open
+  master.sqlite itself.
 -->
 <html lang="en">
 <head>
@@ -54,6 +55,9 @@
       <div id="crate-list" class="crates" role="tree" aria-label="Crates"></div>
       <div id="session-list" class="crates" role="listbox" aria-label="History sessions" hidden></div>
       <p id="mode-note" class="mode-note" hidden></p>
+      <div id="duplicate-actions" class="crate-actions" hidden>
+        <button id="merge-duplicates" type="button">Merge copies</button>
+      </div>
       <p id="crate-foot" class="crate-foot"></p>
       <div id="crate-actions" class="crate-actions">
         <button id="crate-new" type="button">New</button>
@@ -118,6 +122,25 @@
     </div>
     <p id="settings-status" class="dialog-status" role="status" aria-live="polite"></p>
     <textarea id="log-fallback" class="log-fallback" readonly hidden aria-label="Log text"></textarea>
+  </dialog>
+  <dialog id="merge-dialog" aria-labelledby="merge-title" aria-describedby="merge-intro">
+    <h2 id="merge-title">Merge copies</h2>
+    <p id="merge-intro">Keep one copy. The others leave the library. Audio files stay on disk unless you move them to the Trash.</p>
+    <fieldset>
+      <legend>Copy to keep</legend>
+      <div id="merge-choices"></div>
+    </fieldset>
+    <div id="merge-preview" aria-live="polite"></div>
+    <label class="check">
+      <input id="merge-trash" type="checkbox" aria-describedby="merge-trash-note">
+      Move the other audio files to the Trash
+    </label>
+    <p id="merge-trash-note" class="dialog-note">Off by default. Files go to the Trash, where you can restore them. They are not permanently deleted.</p>
+    <div class="dialog-actions">
+      <button id="merge-cancel" type="button" autofocus>Cancel</button>
+      <button id="merge-confirm" type="button">Merge copies</button>
+    </div>
+    <p id="merge-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
   <script src="/app.js"></script>
 </body>

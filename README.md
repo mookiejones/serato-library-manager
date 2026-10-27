@@ -10,6 +10,8 @@ A local page for the Serato DJ Pro library on macOS and Windows.
 
 The server uses the Python standard library. On macOS it reads `~/Library/Application Support/Serato/Library/master.sqlite`. On Windows it reads `%LOCALAPPDATA%\Serato\Library\master.sqlite`. Writes wait until Serato has quit. Press Ctrl-C to stop the server.
 
+The Duplicates view can merge copies that share a title, artist, and length. Choose the file to keep. The others leave the library, and the copy you keep is added to the crates they were in. Empty fields are filled from the other copies. Play count and rating keep the higher value. Audio files stay on disk unless you move them to the Trash. Cue points stay in the audio file. The app reads them and does not rewrite them.
+
 The first launch asks "Share anonymous usage stats and crash reports?" Sharing stays off until you choose it. Settings in the sidebar keeps that switch, and can open or copy the local log. [PRIVACY.md](PRIVACY.md) lists what can leave the machine.
 
 Open a track to save related tracks, with a note and a rating, or to keep a one-way link. Suggestions use musical key, tempo, and shared crates. The links are stored in `related.sqlite` next to the app settings, not in Serato's library, so they can be saved while Serato is open. Copying them into a Serato crate named `Related - ` plus the track title is a library write and waits until Serato has quit. The file layout is [docs/related-tracks.md](docs/related-tracks.md).

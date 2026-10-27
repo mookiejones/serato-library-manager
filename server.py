@@ -1403,7 +1403,8 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a JSON POST.
 
         Settings and opening the logs folder return before the library lock.
-        Track, crate, import, and reveal run as before.
+        Track, crate, import, reveal, and duplicate merge run as before.
+        A merge preview does not drop the library cache.
         """
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
@@ -1436,7 +1437,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
             with _lock:
-                invalidate()
+                merging = parsed.path == "/api/duplicates/merge"
+                preview = merging and payload.get("preview") is True
+                if not preview:
+                    invalidate()
                 if parsed.path == "/api/track":
                     result = as_dict(
                         _library_call(
@@ -1461,6 +1465,10 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     )
                     telemetry.capture(telemetry.EVENT_CRATE_CREATED)
+                elif merging:
+                    result = as_dict(_library_call("merge_duplicates", payload))
+                    if not preview:
+                        telemetry.capture(telemetry.EVENT_DUPLICATES_MERGED)
                 else:
                     self.send_json(
                         {"error": "That action is not available."}, status=404

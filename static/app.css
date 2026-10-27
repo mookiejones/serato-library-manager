@@ -3,7 +3,8 @@
 
   The rail holds the space menu, the view switch, and the crate or history
   list. The sheet holds the track list and the detail pane, including
-  related tracks. --row is 36px,
+  related tracks. Dialogs cover sharing, settings, and duplicate merge.
+  --row is 36px,
   the same height app.js uses to decide which rows are inside the scroll
   window. This file does not fetch data or touch the Serato database.
 */
@@ -118,6 +119,8 @@ textarea:focus-visible,
   gap: 4px 10px;
   margin: 0 4px 10px;
 }
+
+.crate-actions[hidden] { display: none; }
 
 .view-switch button,
 .sort-crates button,
@@ -729,6 +732,60 @@ dialog .check {
 dialog .check input {
   width: 20px;
   height: 20px;
+}
+
+#merge-dialog { max-width: 36rem; }
+
+#merge-dialog fieldset {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  margin: 16px 0 0;
+  padding: 8px 12px 12px;
+}
+
+#merge-dialog legend { padding: 0 4px; }
+
+.merge-choice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-height: 44px;
+  padding: 4px 0;
+}
+
+.merge-choice input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+}
+
+.merge-choice span { display: block; }
+
+.merge-meta { color: var(--quiet); }
+
+.merge-preview {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
+.merge-preview li { margin: 4px 0; }
+
+.merge-warning {
+  margin-top: 12px;
+  color: var(--missing);
+}
+
+#merge-cancel {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+}
+
+#merge-confirm.danger {
+  background: var(--missing);
+  color: var(--manila);
+  border: 0;
 }
 
 .log-fallback {

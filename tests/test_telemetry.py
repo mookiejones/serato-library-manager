@@ -18,10 +18,11 @@ from unittest import mock
 
 import app_config
 import app_log
+import library
 import sentry_sdk
 import telemetry
 from posthog import Posthog
-from tests.fixture import TempLibrary
+from tests.fixture import TempLibrary, open_database
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -649,6 +650,53 @@ class ApiPrivacyTests(unittest.TestCase):
         blob = json.dumps(self.fake.events)
         self.assertNotIn("Friday Warmup", blob)
         self.assertNotIn("master.sqlite", blob)
+
+    def test_merge_event_has_no_library_fields(self) -> None:
+        """Record duplicates_merged after opt-in, without titles or paths.
+
+        A preview records nothing. A confirmed merge records the event name
+        only. The fixture title and file name stay out of the properties.
+        With sharing off, the same merge records nothing.
+
+        Returns:
+            None. The test fails if a title or a path is attached.
+        """
+        status, _payload = self._request(
+            "/api/duplicates/merge",
+            {"keep_id": 1, "space": "Serato Library", "confirm": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self.fake.events, [])
+        self._request("/api/settings", {"telemetry_consent": True})
+        self.fake.events.clear()
+        with open_database(library.MASTER) as conn:
+            conn.execute(
+                """
+                INSERT INTO asset
+                    (id, name, artist, album, length_ms, file_name, portable_id, location_id, time_added)
+                VALUES (2, 'Same', 'Artist', 'Album', 180500, 'same-b.mp3', 'Music/same-b.mp3', 1, 11)
+                """
+            )
+            conn.execute("INSERT INTO space_asset (id, asset_id, space_id) VALUES (2, 2, 1)")
+        __import__("server").invalidate()
+        status, preview = self._request(
+            "/api/duplicates/merge",
+            {"keep_id": 1, "preview": True},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(preview["preview"])
+        self.assertEqual(self.fake.events, [])
+        status, _merged = self._request(
+            "/api/duplicates/merge",
+            {"keep_id": 1, "confirm": True},
+        )
+        self.assertEqual(status, 200)
+        names = [event[0] for event in self.fake.events]
+        self.assertIn("duplicates_merged", names)
+        blob = json.dumps(self.fake.events)
+        self.assertNotIn("Same", blob)
+        self.assertNotIn("same-b.mp3", blob)
+        self.assertNotIn("Music", blob)
 
     def test_copy_logs_returns_local_text(self) -> None:
         """Return log text from GET /api/logs and open the folder without a path.
