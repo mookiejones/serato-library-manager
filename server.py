@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 
 import app_log
 import library
+import related
 import telemetry
 
 
@@ -395,6 +396,53 @@ def optional_int(value: object) -> int | None:
     if value is None:
         return None
     return required_int(value)
+
+
+def _related_end(
+    payload: dict[str, object],
+    space: str,
+    asset_key: str,
+    path_key: str,
+    title_key: str,
+    artist_key: str,
+    length_key: str,
+) -> tuple[str, str, str, int | None]:
+    """Resolve one end of a related-track link from a POST body.
+
+    Args:
+        payload: JSON object.
+        space: Space used when the body names an asset id.
+        asset_key: Key holding an asset id. When present, the library
+            supplies the path and the fallback fields.
+        path_key: Key holding a path when there is no asset id.
+        title_key: Key holding a title for a path that is not in the library.
+        artist_key: Key holding an artist for that path.
+        length_key: Key holding a length in milliseconds for that path.
+
+    Returns:
+        Path, title, artist, and length. Title and artist are empty when
+        the body omits them.
+
+    Raises:
+        LibraryError: If both the asset and the path are missing, or a
+            text field is not text.
+        ValueError: If the asset id is not an integer.
+    """
+    if payload.get(asset_key) is not None:
+        return related.identity_for_asset(required_int(payload[asset_key]), space)
+    raw_path = payload.get(path_key)
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise library.LibraryError("A track path is required.")
+    raw_title = payload.get(title_key, "")
+    raw_artist = payload.get(artist_key, "")
+    if raw_title is None:
+        raw_title = ""
+    if raw_artist is None:
+        raw_artist = ""
+    if not isinstance(raw_title, str) or not isinstance(raw_artist, str):
+        raise library.LibraryError("That request is not valid.")
+    length = related.clean_length(payload[length_key]) if length_key in payload else None
+    return raw_path, raw_title, raw_artist, length
 
 
 def query_text(
@@ -1257,8 +1305,8 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a GET request.
 
         Settings and logs are answered before the library routes. Library,
-        status, track, history, duplicate, and M3U paths return data.
-        Every other path is a file under static/.
+        status, track, history, duplicate, related-track, and M3U paths
+        return data. Every other path is a file under static/.
         """
         try:
             self._do_GET()
@@ -1280,6 +1328,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/logs":
                 text, truncated = app_log.read_logs()
                 self.send_json({"text": text, "truncated": truncated})
+                return
+            if parsed.path == "/api/related":
+                self._get_related(query)
                 return
             if parsed.path == "/api/library":
                 self.send_json(load_library(query_text(query, "space")))
@@ -1376,6 +1427,9 @@ class Handler(BaseHTTPRequestHandler):
             self._post_open_logs()
             return
         try:
+            if parsed.path == "/api/related":
+                self._post_related(payload)
+                return
             if parsed.path == "/api/reveal":
                 self.send_json(
                     as_dict(_library_call("reveal", required_int(payload["id"])))
@@ -1456,6 +1510,115 @@ class Handler(BaseHTTPRequestHandler):
                 {"error": "The sharing choice could not be saved."},
                 status=500,
             )
+
+    def _get_related(self, query: dict[str, list[str]]) -> None:
+        """Return saved links and suggestions for one track path.
+
+        Args:
+            query: Parsed query string. ``path`` is required. ``space``,
+                ``title``, ``artist``, and ``length_ms`` are optional.
+
+        The sidecar file is read. A unique title, artist, and length
+        match can update a stored path. ``master.sqlite`` is not written.
+        """
+        raw_length = query_text(query, "length_ms")
+        length_ms = None if raw_length in (None, "") else related.clean_length(raw_length)
+        self.send_json(
+            related.overview(
+                query_text(query, "path", "") or "",
+                space=require_space(query_text(query, "space")),
+                title=query_text(query, "title"),
+                artist=query_text(query, "artist"),
+                length_ms=length_ms,
+            )
+        )
+
+    def _post_related(self, payload: dict[str, object]) -> None:
+        """Save, remove, or copy related tracks into a Serato crate.
+
+        Args:
+            payload: JSON object with ``action`` of ``add``, ``remove``,
+                or ``crate``.
+
+        ``add`` and ``remove`` write only the sidecar file, so they work
+        while Serato is open. ``crate`` writes ``master.sqlite`` and uses
+        the same backup rules as other library writes. Titles and paths
+        are not passed to telemetry.
+        """
+        action = payload.get("action")
+        space = require_space(optional_text(payload.get("space")))
+        if action == "add":
+            source = _related_end(payload, space, "asset", "path", "title", "artist", "length_ms")
+            target = _related_end(
+                payload,
+                space,
+                "target",
+                "target_path",
+                "target_title",
+                "target_artist",
+                "target_length_ms",
+            )
+            mutual = payload.get("mutual")
+            if not isinstance(mutual, bool):
+                raise library.LibraryError("Choose a one-way or two-way link.")
+            result = related.add_link(
+                source[0],
+                target[0],
+                mutual=mutual,
+                note=payload.get("note", ""),
+                rating=payload.get("rating", None),
+                source_title=source[1],
+                source_artist=source[2],
+                source_length_ms=source[3],
+                target_title=target[1],
+                target_artist=target[2],
+                target_length_ms=target[3],
+                space=space,
+            )
+            direction = "two_way" if result["mutual"] else "one_way"
+            telemetry.capture(
+                telemetry.EVENT_RELATED_LINK_SAVED,
+                {telemetry.LINK_DIRECTION: direction},
+            )
+            self.send_json(result)
+            return
+        if action == "remove":
+            result = related.remove_link(required_int(payload["id"]))
+            telemetry.capture(telemetry.EVENT_RELATED_LINK_REMOVED)
+            self.send_json(result)
+            return
+        if action == "crate":
+            if payload.get("asset") is not None:
+                path, title, artist, length_ms = related.identity_for_asset(
+                    required_int(payload["asset"]), space
+                )
+            else:
+                raw_path = payload.get("path")
+                if not isinstance(raw_path, str):
+                    raise library.LibraryError("A track path is required.")
+                path = raw_path
+                raw_title = payload.get("title")
+                raw_artist = payload.get("artist")
+                title = raw_title if isinstance(raw_title, str) else None
+                artist = raw_artist if isinstance(raw_artist, str) else None
+                length_ms = (
+                    related.clean_length(payload.get("length_ms"))
+                    if "length_ms" in payload
+                    else None
+                )
+            with _lock:
+                result = related.refresh_crate(
+                    path,
+                    space=space,
+                    title=title,
+                    artist=artist,
+                    length_ms=length_ms,
+                )
+                invalidate()
+            telemetry.capture(telemetry.EVENT_RELATED_CRATE_WRITTEN)
+            self.send_json(result)
+            return
+        raise library.LibraryError("That related-tracks action is not available.")
 
     def _post_open_logs(self) -> None:
         """Open the local logs folder.

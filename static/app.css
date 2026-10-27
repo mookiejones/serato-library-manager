@@ -2,7 +2,8 @@
   Layout and color for the Serato library page.
 
   The rail holds the space menu, the view switch, and the crate or history
-  list. The sheet holds the track list and the detail pane. --row is 36px,
+  list. The sheet holds the track list and the detail pane, including
+  related tracks. --row is 36px,
   the same height app.js uses to decide which rows are inside the scroll
   window. This file does not fetch data or touch the Serato database.
 */
@@ -590,6 +591,68 @@ button:disabled { cursor: default; }
 }
 
 .copy-row { grid-template-columns: minmax(0, 1.4fr) 72px 48px minmax(0, 1fr); }
+
+.related-list,
+.related-results {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.related-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--rule);
+}
+
+.related-meta,
+.related-note {
+  margin: 2px 0 0;
+  color: var(--quiet);
+  overflow-wrap: anywhere;
+}
+
+.related-search,
+.related-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.related-search input,
+.related-form input,
+.related-form select {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 6px 0;
+}
+
+.related-search label,
+.related-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.related-form .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.related-form .check input { width: auto; }
+
+.related-results {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.related-results li { padding: 4px 0; }
 
 .marker button, .copy-row button { text-align: left; }
 

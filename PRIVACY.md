@@ -10,7 +10,7 @@ Sharing is off until you turn it on. The first time the page opens it asks:
 
 A report leaves the machine only after you opt in, and only when this copy of the app has a key for that service.
 
-Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, and `tags_read`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. Each event includes `app` set to `serato-library-manager`, the app version (`0.1.1`), and the operating system. Crash reports use that same version as the Sentry release. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
+Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, `tags_read`, `related_link_saved`, `related_link_removed`, and `related_crate_written`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. `related_link_saved` includes `link_direction` set to `one_way` or `two_way`. It does not include a note, a rating, a title, or a path. Each event includes `app` set to `serato-library-manager`, the app version (`0.1.1`), and the operating system. Crash reports use that same version as the Sentry release. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
 
 Crash reports go to Sentry. A report is the exception type and a stack trace. The tag `app` is `serato-library-manager`. A file path in that report is replaced with `[path]`. A Python file is kept as its name only, such as `server.py`. The machine hostname is not sent. Request bodies and local variables are not sent.
 
@@ -26,9 +26,11 @@ A missing `SENTRY_DSN` keeps crash reports off even after you opt in. A missing 
 
 | System | Settings | Logs |
 |--------|----------|------|
-| macOS | `~/Library/Application Support/Serato Library/settings.json` | `~/Library/Logs/Serato Library/` |
-| Windows | `%APPDATA%\Serato Library\settings.json` | `%LOCALAPPDATA%\Serato Library\Logs\` |
-| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
+| macOS | `~/Library/Application Support/Serato Library/settings.json` and `related.sqlite` | `~/Library/Logs/Serato Library/` |
+| Windows | `%APPDATA%\Serato Library\settings.json` and `related.sqlite` | `%LOCALAPPDATA%\Serato Library\Logs\` |
+| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json` and `related.sqlite`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
+
+`related.sqlite` stores which tracks you marked as going well together, including file paths, titles, artists, lengths, notes, and ratings. That file stays on this machine. It is not a usage report. The schema is in [docs/related-tracks.md](docs/related-tracks.md).
 
 The log file is `serato-library.log`. It rotates at 1 MiB and keeps three older files. Logs stay on this machine. They can include the path of the library database. They are not uploaded. Settings has **Open logs folder** and **Copy logs**.
 

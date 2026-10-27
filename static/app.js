@@ -4,10 +4,10 @@
  * Loads crates, history, missing tracks, duplicates, and stems from the
  * local server on 127.0.0.1 port 8765. Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, and /api/reveal.
- * The track list is virtualized: only rows near the scroll window are
- * in the DOM. Sharing settings and local logs use /api/settings and
- * /api/logs. This file does not open master.sqlite itself, and it does
- * not send library rows anywhere.
+ * Related tracks use /api/related. The track list is virtualized: only
+ * rows near the scroll window are in the DOM. Sharing settings and local
+ * logs use /api/settings and /api/logs. This file does not open
+ * master.sqlite itself, and it does not send library rows anywhere.
  */
 
 // Row height in pixels. It matches --row in app.css. The painter divides
@@ -1024,7 +1024,8 @@ function fieldInput(name, label, value, wide = false) {
  *
  * The form edits the fields save_track accepts. Controls stay disabled
  * while the library is locked. Reveal, Prepare, relocate, and remove call
- * the matching POST routes. Cue data is shown and is not written back.
+ * the matching POST routes. Related tracks load from /api/related. Cue
+ * data is shown and is not written back.
  *
  * @param {object} track Payload from GET /api/track.
  * @returns {void}
@@ -1186,6 +1187,7 @@ function renderDetail(track) {
   actions.append(reveal, prepare, relocate, remove);
   body.append(actions);
 
+  body.append(relatedSection(track, writable));
   body.append(markerSection(track));
   if (track.copies?.length) body.append(copySection(track.copies));
   body.append(membershipSection(track, writable));
@@ -1361,6 +1363,453 @@ function copySection(copies) {
     section.append(row);
   }
   return section;
+}
+
+/**
+ * Related-track request counter.
+ *
+ * A slow reply must not paint into a track the user has already left.
+ * Incremented by loadRelated. Not sent anywhere.
+ */
+let relatedRequest = 0;
+
+/**
+ * Build the related-tracks section and start its request.
+ *
+ * The section lists saved links, a search box that links another track,
+ * and suggestions. Saving a link writes the sidecar file and does not
+ * require Serato to be quit. The Serato crate button does. Text from the
+ * server is assigned with textContent.
+ *
+ * @param {object} track Track payload from GET /api/track.
+ * @param {boolean} writable False disables the Serato crate button.
+ * @returns {HTMLElement} The section, with a loading line until the reply arrives.
+ */
+function relatedSection(track, writable) {
+  const section = document.createElement("section");
+  section.className = "group";
+  section.dataset.trackId = String(track.id);
+  const heading = document.createElement("h3");
+  heading.id = `related-heading-${track.id}`;
+  heading.textContent = "Related tracks";
+  section.setAttribute("aria-labelledby", heading.id);
+  section.setAttribute("aria-busy", "true");
+  const status = document.createElement("p");
+  status.className = "detail-kicker";
+  status.setAttribute("role", "status");
+  const path = track.resolved_path || track.edit?.portable_id || "";
+  status.textContent = path ? "Loading related tracks" : "This track has no file path, so it cannot be linked.";
+  section.append(heading, status);
+  if (path) loadRelated(track, section, writable, "");
+  return section;
+}
+
+/**
+ * Fetch related tracks for the open track.
+ *
+ * GET /api/related uses the resolved path. A reply for an older selection
+ * is ignored. Does not write the Serato library.
+ *
+ * @param {object} track Track payload.
+ * @param {HTMLElement} section Section built by relatedSection.
+ * @param {boolean} writable False disables the Serato crate button.
+ * @param {string} query Search text to keep after a refresh.
+ * @returns {Promise<void>}
+ */
+async function loadRelated(track, section, writable, query) {
+  const token = ++relatedRequest;
+  const path = track.resolved_path || track.edit?.portable_id || "";
+  const params = new URLSearchParams({ path, space: state.space });
+  try {
+    const response = await fetch(`/api/related?${params}`);
+    const payload = await response.json().catch(() => ({}));
+    if (token !== relatedRequest || !section.isConnected) return;
+    if (!response.ok) throw new Error(payload.error || "Related tracks could not be loaded.");
+    renderRelated(track, section, writable, payload, query);
+  } catch (error) {
+    if (token !== relatedRequest || !section.isConnected) return;
+    section.setAttribute("aria-busy", "false");
+    const status = section.querySelector("[role=status]");
+    if (status) status.textContent = error.message;
+  }
+}
+
+/**
+ * Paint saved links, the link form, and suggestions.
+ *
+ * Replaces the section body except the heading. Notes and titles are
+ * text, not HTML. Does not fetch.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {boolean} writable False disables the Serato crate button.
+ * @param {object} payload GET /api/related body.
+ * @param {string} query Search text to restore.
+ * @returns {void}
+ */
+function renderRelated(track, section, writable, payload, query) {
+  const heading = section.querySelector("h3");
+  section.replaceChildren(heading);
+  section.setAttribute("aria-busy", "false");
+  const saved = Array.isArray(payload.saved) ? payload.saved : [];
+  const suggested = Array.isArray(payload.suggested) ? payload.suggested : [];
+  const status = document.createElement("p");
+  status.className = "detail-kicker";
+  status.setAttribute("role", "status");
+  status.textContent = saved.length
+    ? `${saved.length} saved`
+    : "No saved links yet. Search for a track, or save a suggestion.";
+  section.append(status);
+  if (saved.length) section.append(relatedSavedList(track, section, saved));
+
+  section.append(relatedSearch(track, section, query));
+
+  const suggestHeading = document.createElement("p");
+  suggestHeading.className = "detail-kicker";
+  suggestHeading.textContent = suggested.length
+    ? "Suggested from key, tempo within 6%, and shared crates. Save stores a two-way link."
+    : "No suggestions from key, tempo, or shared crates.";
+  section.append(suggestHeading);
+  if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
+
+  const crate = document.createElement("button");
+  crate.type = "button";
+  crate.className = "text-button";
+  crate.dataset.relatedCrate = "true";
+  const crateName = payload.crate_name || "Related";
+  crate.textContent = "Update Serato crate";
+  crate.disabled = !writable;
+  crate.addEventListener("click", () => refreshRelatedCrate(track, section));
+  const crateNote = document.createElement("p");
+  crateNote.className = "detail-kicker";
+  crateNote.textContent = writable
+    ? `Creates or refreshes the crate “${crateName}”. Serato must be quit.`
+    : "Quit Serato before writing the crate.";
+  section.append(crate, crateNote);
+}
+
+/**
+ * List saved links with a remove button.
+ *
+ * A track that is still in the library opens when its name is clicked.
+ * Does not fetch until the user removes a link.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {object[]} saved Saved link objects.
+ * @returns {HTMLElement} The list.
+ */
+function relatedSavedList(track, section, saved) {
+  const list = document.createElement("ul");
+  list.className = "related-list";
+  for (const link of saved) {
+    const item = document.createElement("li");
+    item.className = "related-row";
+    const main = document.createElement("div");
+    const other = link.track || {};
+    const label = other.title || "Untitled";
+    if (other.asset_id != null && other.in_library) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "text-button";
+      open.textContent = label;
+      open.addEventListener("click", () => selectTrack(other.asset_id));
+      main.append(open);
+    } else {
+      const name = document.createElement("span");
+      name.textContent = label;
+      main.append(name);
+    }
+    const meta = document.createElement("p");
+    meta.className = "related-meta";
+    const bits = [];
+    if (other.artist) bits.push(other.artist);
+    if (other.key) bits.push(other.key);
+    if (other.bpm != null && other.bpm !== "") bits.push(`${other.bpm} BPM`);
+    bits.push(link.mutual ? "Two-way" : "One-way");
+    if (link.rating != null) bits.push(`${link.rating}/5`);
+    if (!other.in_library) bits.push("Not in this library");
+    meta.textContent = bits.join(" · ");
+    main.append(meta);
+    if (link.note) {
+      const note = document.createElement("p");
+      note.className = "related-note";
+      note.textContent = link.note;
+      main.append(note);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "text-button";
+    remove.textContent = "Remove";
+    remove.setAttribute("aria-label", `Remove link to ${label}`);
+    remove.addEventListener("click", () => removeRelated(track, section, link));
+    item.append(main, remove);
+    list.append(item);
+  }
+  return list;
+}
+
+/**
+ * Build the search box used to link another track.
+ *
+ * Matches the tracks already loaded in this space. Choosing one reveals
+ * the note, rating, and two-way controls. Does not fetch.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {string} query Current search text.
+ * @returns {HTMLElement} The search block.
+ */
+function relatedSearch(track, section, query) {
+  const block = document.createElement("div");
+  block.className = "related-search";
+  const label = document.createElement("label");
+  label.append(document.createTextNode("Find a track to link"));
+  const input = document.createElement("input");
+  input.type = "search";
+  input.autocomplete = "off";
+  input.placeholder = "Title or artist";
+  input.value = query || "";
+  label.append(input);
+  const results = document.createElement("ul");
+  results.className = "related-results";
+  const form = document.createElement("div");
+  form.className = "related-form";
+  form.hidden = true;
+  block.append(label, results, form);
+
+  /**
+   * Show matches for the current search text.
+   *
+   * Nested in relatedSearch. An empty box explains what to type. Does
+   * not fetch.
+   *
+   * @returns {void}
+   */
+  const paint = () => {
+    results.replaceChildren();
+    form.hidden = true;
+    form.replaceChildren();
+    const terms = input.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) {
+      const hint = document.createElement("li");
+      hint.className = "related-meta";
+      hint.textContent = "Type a title or artist.";
+      results.append(hint);
+      return;
+    }
+    const hits = state.tracks
+      .filter((item) => item.id !== track.id && matchesQuery(item, terms))
+      .slice(0, 8);
+    if (!hits.length) {
+      const empty = document.createElement("li");
+      empty.className = "related-meta";
+      empty.textContent = "No tracks match.";
+      results.append(empty);
+      return;
+    }
+    for (const hit of hits) {
+      const item = document.createElement("li");
+      const choose = document.createElement("button");
+      choose.type = "button";
+      choose.className = "text-button";
+      choose.textContent = hit.artist ? `${hit.name || "Untitled"} · ${hit.artist}` : (hit.name || "Untitled");
+      choose.addEventListener("click", () => relatedLinkForm(track, section, form, hit, input.value));
+      item.append(choose);
+      results.append(item);
+    }
+  };
+  input.addEventListener("input", paint);
+  paint();
+  return block;
+}
+
+/**
+ * Show the note, rating, and direction controls for one chosen track.
+ *
+ * Save posts /api/related. The default direction is two-way. Does not
+ * fetch until Save is clicked.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {HTMLElement} form Form container inside the search block.
+ * @param {object} hit Track from the library list.
+ * @param {string} query Search text to restore after a save.
+ * @returns {void}
+ */
+function relatedLinkForm(track, section, form, hit, query) {
+  form.hidden = false;
+  form.replaceChildren();
+  const chosen = document.createElement("p");
+  chosen.className = "related-meta";
+  chosen.textContent = hit.artist ? `${hit.name || "Untitled"} · ${hit.artist}` : (hit.name || "Untitled");
+  const noteLabel = document.createElement("label");
+  noteLabel.append(document.createTextNode("Note"));
+  const note = document.createElement("input");
+  note.type = "text";
+  note.maxLength = 500;
+  note.placeholder = "blend out of";
+  noteLabel.append(note);
+  const ratingLabel = document.createElement("label");
+  ratingLabel.append(document.createTextNode("Link rating"));
+  const rating = document.createElement("select");
+  for (const [value, text] of [["", "Not rated"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    rating.append(option);
+  }
+  ratingLabel.append(rating);
+  const mutualLabel = document.createElement("label");
+  mutualLabel.className = "check";
+  const mutual = document.createElement("input");
+  mutual.type = "checkbox";
+  mutual.checked = true;
+  mutualLabel.append(mutual, document.createTextNode("Two-way link"));
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "text-button";
+  save.textContent = "Save link";
+  save.addEventListener("click", () => {
+    save.disabled = true;
+    saveRelated(track, section, {
+      action: "add",
+      asset: track.id,
+      target: hit.id,
+      mutual: mutual.checked,
+      note: note.value,
+      rating: rating.value === "" ? null : Number(rating.value),
+      space: state.space,
+    }, query);
+  });
+  form.append(chosen, noteLabel, ratingLabel, mutualLabel, save);
+}
+
+/**
+ * List suggestions with a one-click save.
+ *
+ * Each Save posts a two-way link with no note and no rating. Does not
+ * fetch until Save is clicked.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {object[]} suggested Suggestion objects.
+ * @returns {HTMLElement} The list.
+ */
+function relatedSuggestList(track, section, suggested) {
+  const list = document.createElement("ul");
+  list.className = "related-list";
+  for (const item of suggested) {
+    const row = document.createElement("li");
+    row.className = "related-row";
+    const main = document.createElement("div");
+    const name = document.createElement("span");
+    name.textContent = item.artist ? `${item.title || "Untitled"} · ${item.artist}` : (item.title || "Untitled");
+    const reasons = document.createElement("p");
+    reasons.className = "related-meta";
+    reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
+    main.append(name, reasons);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "text-button";
+    save.textContent = "Save";
+    save.setAttribute("aria-label", `Save link to ${item.title || "Untitled"}`);
+    save.addEventListener("click", () => {
+      save.disabled = true;
+      saveRelated(track, section, {
+        action: "add",
+        asset: track.id,
+        target: item.asset_id,
+        mutual: true,
+        note: "",
+        rating: null,
+        space: state.space,
+      }, "");
+    });
+    row.append(main, save);
+    list.append(row);
+  }
+  return list;
+}
+
+/**
+ * POST a new related-track link and reload the section.
+ *
+ * The body is the add action. A failure stays in the section status and
+ * the notice. Titles and paths are not added to the request beyond the
+ * asset ids the server already knows.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {object} body POST /api/related body.
+ * @param {string} query Search text to restore.
+ * @returns {Promise<void>}
+ */
+async function saveRelated(track, section, body, query) {
+  try {
+    await postJSON("/api/related", body);
+    setNotice("Link saved.");
+    const kept = section.querySelector(".related-search input");
+    await loadRelated(track, section, Boolean(track.serato?.writable && state.writable), kept ? kept.value : query);
+  } catch (error) {
+    if (error.status === 409) lockDown(error);
+    else setNotice(error.message);
+    const status = section.querySelector("[role=status]");
+    if (status) status.textContent = error.message;
+  }
+}
+
+/**
+ * Remove one saved link after a confirmation.
+ *
+ * POST /api/related with action remove. The audio file and the Serato
+ * library are not changed.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @param {object} link Saved link, including its id and track title.
+ * @returns {Promise<void>}
+ */
+async function removeRelated(track, section, link) {
+  const label = link.track?.title || "this track";
+  if (!confirm(`Remove the link to “${label}”?`)) return;
+  try {
+    await postJSON("/api/related", { action: "remove", id: link.id });
+    setNotice("Link removed.");
+    const kept = section.querySelector(".related-search input");
+    await loadRelated(track, section, Boolean(track.serato?.writable && state.writable), kept ? kept.value : "");
+  } catch (error) {
+    setNotice(error.message);
+  }
+}
+
+/**
+ * Create or refresh the Serato crate for this track's saved links.
+ *
+ * POST /api/related with action crate. Serato must be quit. A 409 locks
+ * the page the same way other library writes do.
+ *
+ * @param {object} track Open track.
+ * @param {HTMLElement} section Related section.
+ * @returns {Promise<void>}
+ */
+async function refreshRelatedCrate(track, section) {
+  const button = section.querySelector("[data-related-crate]");
+  if (button) button.disabled = true;
+  try {
+    const result = await postJSON("/api/related", { action: "crate", asset: track.id, space: state.space });
+    setNotice(result.warning || `Crate “${result.name}” updated.`);
+    await loadLibrary();
+    selectTrack(track.id);
+  } catch (error) {
+    if (error.status === 409) {
+      lockDown(error);
+      if (button) button.disabled = true;
+    } else {
+      setNotice(error.message);
+      if (button) button.disabled = !state.writable;
+    }
+  }
 }
 
 /**
