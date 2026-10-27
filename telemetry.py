@@ -6,12 +6,14 @@ PostHog. Keys come from the environment, then from ``_build_config``, which
 release builds overwrite from GitHub secrets.
 
 Events are an allowlist: ``app_opened``, ``library_scanned``,
-``crate_created``, ``backup_made``, and ``tags_read``. Properties are the
-app name ``serato-library-manager``, the app version, the operating
-system, and a track-count bucket. Track titles, crate names, file paths,
-and library rows are not properties, and the Sentry ``before_send`` hook
-removes paths if one appears in an exception. Crash reports carry the
-tag ``app=serato-library-manager``.
+``crate_created``, ``backup_made``, ``tags_read``, ``related_link_saved``,
+``related_link_removed``, and ``related_crate_written``. Properties are
+the app name ``serato-library-manager``, the app version, the operating
+system, a track-count bucket, and ``link_direction`` (``one_way`` or
+``two_way``) on ``related_link_saved``. Track titles, crate names, file
+paths, and library rows are not properties, and the Sentry
+``before_send`` hook removes paths if one appears in an exception. Crash
+reports carry the tag ``app=serato-library-manager``.
 """
 
 from __future__ import annotations
@@ -42,8 +44,13 @@ EVENT_LIBRARY_SCANNED = "library_scanned"
 EVENT_CRATE_CREATED = "crate_created"
 EVENT_BACKUP_MADE = "backup_made"
 EVENT_TAGS_READ = "tags_read"
+EVENT_RELATED_LINK_SAVED = "related_link_saved"
+EVENT_RELATED_LINK_REMOVED = "related_link_removed"
+EVENT_RELATED_CRATE_WRITTEN = "related_crate_written"
 TRACK_COUNT = "track_count"
 TRACK_COUNT_BUCKET = "track_count_bucket"
+LINK_DIRECTION = "link_direction"
+LINK_DIRECTIONS = frozenset({"one_way", "two_way"})
 
 # Event name to the caller-supplied properties it may carry. Global
 # properties are added here, not by the caller.
@@ -53,6 +60,9 @@ EVENTS: dict[str, frozenset[str]] = {
     EVENT_CRATE_CREATED: frozenset(),
     EVENT_BACKUP_MADE: frozenset(),
     EVENT_TAGS_READ: frozenset(),
+    EVENT_RELATED_LINK_SAVED: frozenset({LINK_DIRECTION}),
+    EVENT_RELATED_LINK_REMOVED: frozenset(),
+    EVENT_RELATED_CRATE_WRITTEN: frozenset(),
 }
 BUCKETS = (
     (1, "0"),
@@ -72,6 +82,7 @@ POSTHOG_PROPERTY_ALLOWLIST = frozenset(
         "app_version",
         "os",
         TRACK_COUNT_BUCKET,
+        LINK_DIRECTION,
         "$python_runtime",
         "$python_version",
         "$os",
@@ -486,6 +497,13 @@ def limit_posthog_event(event: dict[str, Any]) -> dict[str, Any] | None:
             continue
         if key == TRACK_COUNT_BUCKET and value not in BUCKET_LABELS:
             return None
+        if key == LINK_DIRECTION:
+            if LINK_DIRECTION not in EVENTS.get(name, frozenset()):
+                continue
+            if value not in LINK_DIRECTIONS:
+                return None
+            kept[key] = value
+            continue
         if key == "app":
             continue
         if isinstance(value, str):
@@ -512,8 +530,10 @@ def _allow_properties(event: str, properties: Mapping[str, object]) -> dict[str,
 
     Returns:
         The properties to hand to PostHog, or None when the track count
-        is not an integer. The app name, app version, and operating
-        system are always the values this process computed.
+        is not an integer or ``link_direction`` is not ``one_way`` or
+        ``two_way``. The app name, app version, and operating system are
+        always the values this process computed. A path or a title in
+        ``properties`` is ignored.
     """
     allowed = EVENTS[event]
     props: dict[str, object] = {
@@ -528,6 +548,11 @@ def _allow_properties(event: str, properties: Mapping[str, object]) -> dict[str,
             props[TRACK_COUNT_BUCKET] = track_count_bucket(properties[TRACK_COUNT])  # type: ignore[arg-type]
         except TypeError:
             return None
+    if LINK_DIRECTION in allowed:
+        direction = properties.get(LINK_DIRECTION)
+        if direction not in LINK_DIRECTIONS:
+            return None
+        props[LINK_DIRECTION] = direction
     return props
 
 
@@ -673,7 +698,7 @@ def capture(event: str, properties: Mapping[str, object] | None = None) -> bool:
     """Record one allowlisted usage event.
 
     Args:
-        event: One of the five event names.
+        event: One of the allowlisted event names.
         properties: Optional ``track_count`` for ``library_scanned``.
             Other keys are ignored and are not sent.
 

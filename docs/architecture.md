@@ -52,23 +52,28 @@ Container(page, "static/", "HTML, CSS, JavaScript", "Crate tree, track list, and
 Container(server, "server.py", "Python HTTP server", "JSON API on 127.0.0.1 port 8765")
 Container(library, "library.py", "Python", "Reads and writes the Serato SQLite schema")
 Container(tags, "tags.py", "Python", "Reads cue, loop, flip, and beatgrid frames")
+Container(related, "related.py", "Python", "Saved links and key, BPM, and crate suggestions")
 ContainerDb(master, "master.sqlite", "SQLite", "Library Serato displays")
 ContainerDb(root, "root.sqlite", "SQLite", "On-disk location database")
+ContainerDb(sidecar, "related.sqlite", "SQLite", "Links beside settings.json")
 Container(audio, "Audio file", "ID3 GEOB", "Markers2 and BeatGrid frames")
 
 Rel(dj, page, "Uses")
 Rel(page, server, "HTTP", "127.0.0.1:8765")
 Rel(server, library, "Calls")
+Rel(server, related, "Calls")
 Rel(server, page, "Serves files")
 Rel(library, master, "Reads and writes")
 Rel(library, root, "Mirrors a write")
 Rel(library, tags, "Reads markers")
+Rel(related, sidecar, "Reads and writes")
+Rel(related, library, "Reads tracks, writes one crate")
 Rel(tags, audio, "Reads the tag header")
 ```
 
 ## Modules
 
-`server.py`, `library.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `related.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -120,6 +125,16 @@ A write to a track or crate updates `master.sqlite`, then mirrors the change int
 
 `reveal` shows the resolved audio file in the host file manager. macOS runs `open -R`. Windows runs `explorer /select,`. `markers_for` calls `tags.read_serato_tags` when the file is on disk. A successful read can record `tags_read`. The audio path is not a property of the event.
 
+`update_related_path` rewrites a path in the related-tracks sidecar after a file move. It does not open `master.sqlite`. The implementation is `related.update_path`.
+
+### `related.py`
+
+`related_db_path` is `related.sqlite` beside `settings.json`. The schema is version 1 (`PRAGMA user_version`) and is documented in [related-tracks.md](related-tracks.md). Reads and writes of that file do not take the Serato lock.
+
+A track key is the canonical file path. Title, artist, and length in whole seconds are a fallback when exactly one stored row matches and that path is not still a different track in the library. `update_path` is what a file move calls. `add_link` stores a one-way or two-way link with an optional note and a rating from 1 to 5. `remove_link` deletes the link and keeps the identity rows. `overview` returns saved links and suggestions. `refresh_crate` creates or replaces a normal Serato crate named `Related - ` plus the track title. That call writes `master.sqlite` through `crate_action`, so Serato must be quit and the backup rules apply.
+
+Suggestions rank other tracks in the space by Camelot key (same, relative, or one step on the wheel), BPM within 6 percent including half time and double time, and shared normal crates. Crates whose names start with `Related - ` are not counted. At most 12 suggestions are returned. They are not stored.
+
 ### `tags.py`
 
 `read_serato_tags` reads. It does not write audio. It scans the first 2,000,000 bytes and, for a longer file, the last 512,000 bytes. It collects ID3 GEOB frames named `Serato Markers2` and `Serato BeatGrid`.
@@ -134,7 +149,7 @@ BeatGrid version byte `1` yields markers. Each marker has a position in seconds.
 
 `app.js` keeps library state in `state`. The list paints only the rows inside the scroll window. Row height is 36 pixels. Track sort keys include name, artist, album, BPM, key, and the other columns the header exposes. Crate sort is custom order, name, or date added.
 
-The detail pane edits the fields `save_track` accepts, shows marker sections, lists near-duplicate copies, and offers crate membership, Prepare, reveal in the host file manager, and remove from the library. The reveal label uses `file_manager` from the track status. Writes stay disabled while `writable` is false. Color choices are None, Red, Orange, Yellow, Green, Blue, Purple, and Pink.
+The detail pane edits the fields `save_track` accepts, shows marker sections, lists near-duplicate copies, and offers crate membership, Prepare, reveal in the host file manager, and remove from the library. It also lists saved related tracks, searches the loaded tracks to add a link, removes a link, and can write the `Related - ` crate. A successful crate write reloads the library so the new crate appears in the tree. Suggestions show the reason text from `GET /api/related` and save with one click. Notes and titles are set with `textContent`. The reveal label uses `file_manager` from the track status. Writes stay disabled while `writable` is false. Color choices are None, Red, Orange, Yellow, Green, Blue, Purple, and Pink.
 
 The rail ends with Settings. The first launch opens a dialog whose heading is "Share anonymous usage stats and crash reports?" **Don't share** is focused. Esc or closing the dialog saves a decline. Settings holds the same choice as a checkbox, plus **Open logs folder** and **Copy logs**. The page does not load a third-party analytics script, and it does not insert log text with `innerHTML`.
 
@@ -146,11 +161,11 @@ The rail ends with Settings. The first launch opens a dialog whose heading is "S
 
 Keys are read from the environment first, then from `_build_config.py`. The committed file sets `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` to empty strings. `scripts/write_build_config.py` overwrites that file for a release build. `POSTHOG_HOST` falls back to `https://us.i.posthog.com`. The script prints `yes` or `no`. It does not print the value.
 
-The events are `app_opened` (once per process after consent), `library_scanned`, `crate_created` (a created crate, or a crate created by an M3U import), `backup_made`, and `tags_read`. Properties this process adds are `app` (`serato-library-manager`), `app_version` (the same `app_config.APP_VERSION` string Sentry uses as its release), `os`, and, for a scan, `track_count_bucket`. Buckets are `0`, `1-9`, `10-49`, `50-99`, `100-499`, `500-999`, `1000-4999`, `5000-9999`, and `10000+`. The exact count is not sent. The PostHog client may also attach its Python and library version fields. A before-send hook drops any other property, including a title or a path, and drops the event if consent is no longer granted. GeoIP is disabled. Feature-flag polling and exception autocapture are off.
+The events are `app_opened` (once per process after consent), `library_scanned`, `crate_created` (a created crate, or a crate created by an M3U import), `backup_made`, `tags_read`, `related_link_saved`, `related_link_removed`, and `related_crate_written`. Properties this process adds are `app` (`serato-library-manager`), `app_version` (the same `app_config.APP_VERSION` string Sentry uses as its release), `os`, for a scan, `track_count_bucket`, and for `related_link_saved`, `link_direction` (`one_way` or `two_way`). Buckets are `0`, `1-9`, `10-49`, `50-99`, `100-499`, `500-999`, `1000-4999`, `5000-9999`, and `10000+`. The exact count is not sent. The PostHog client may also attach its Python and library version fields. A before-send hook drops any other property, including a title or a path, and drops the event if consent is no longer granted. GeoIP is disabled. Feature-flag polling and exception autocapture are off.
 
 Sentry uses `server_name` `local`, environment `local`, release `app_config.APP_VERSION` (`0.1.1`), and the tag `app=serato-library-manager`. `send_default_pii` is false. Local variables, source context, and request bodies are off. Argv and logging integrations are disabled. Framework auto-enabling is off. `before_send` returns `None` when consent is off. Otherwise it removes request data, frame variables, and absolute paths. A path becomes `[path]`. A final component ending in `.py` is kept as the file name.
 
-`app_config.py` stores `settings.json` with `install_id` and `telemetry_consent`. The id is a random UUID, created when the choice is saved, not before. `None` means the prompt is still due. `False` is a saved decline. The file is written only when both fields are set. A corrupt file is renamed to `settings.json.unreadable`. The directory is `~/Library/Application Support/Serato Library` on macOS, `%APPDATA%\Serato Library` on Windows, and `$XDG_CONFIG_HOME/serato-library` (or `~/.config/serato-library`) elsewhere. `SERATO_LIBRARY_CONFIG_DIR` overrides it when the value is absolute.
+`app_config.py` stores `settings.json` with `install_id` and `telemetry_consent`. The id is a random UUID, created when the choice is saved, not before. `None` means the prompt is still due. `False` is a saved decline. The file is written only when both fields are set. A corrupt file is renamed to `settings.json.unreadable`. The directory is `~/Library/Application Support/Serato Library` on macOS, `%APPDATA%\Serato Library` on Windows, and `$XDG_CONFIG_HOME/serato-library` (or `~/.config/serato-library`) elsewhere. `SERATO_LIBRARY_CONFIG_DIR` overrides it when the value is absolute. `related.sqlite` is in that same directory. Its schema is in [related-tracks.md](related-tracks.md).
 
 `app_log.py` writes `serato-library.log` with `RotatingFileHandler`: 1 MiB and three backups. The directory is `~/Library/Logs/Serato Library` on macOS, `%LOCALAPPDATA%\Serato Library\Logs` on Windows, and `$XDG_STATE_HOME/serato-library/logs` (or `~/.local/state/serato-library/logs`) elsewhere. `SERATO_LIBRARY_LOG_DIR` overrides it when the value is absolute. The startup line can include the database path. That file is not uploaded. Copying the log skips a symlink and skips a file that is not inside the log directory, and it keeps the newest 200,000 characters. Opening the folder runs `open` on macOS, `xdg-open` elsewhere, and `os.startfile` on Windows. The response does not include the path.
 
@@ -166,17 +181,19 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | GET | `/api/history` | none | `{ "sessions": [...] }` |
 | GET | `/api/history` | `session` | One session and its entries |
 | GET | `/api/duplicates` | `space` | Groups, plus `count` |
+| GET | `/api/related` | `path`, optional `space`, `title`, `artist`, `length_ms` | Saved links and suggestions. See [related-tracks.md](related-tracks.md) |
 | GET | `/api/export.m3u` | `space`, `crate` | M3U file `crate.m3u`. `crate=all` exports the space |
 | POST | `/api/track` | `id`, `space`, `fields` | Saves track fields |
 | POST | `/api/crate` | `action` plus ids and fields | Crate or membership change |
 | POST | `/api/import.m3u` | `space`, `parent`, `name`, `text` | New crate from playlist text |
 | POST | `/api/reveal` | `id` | Reveals the file in Finder or File Explorer |
+| POST | `/api/related` | `action` `add`, `remove`, or `crate` | Saves or removes a sidecar link, or writes the `Related - ` crate |
 | GET | `/api/settings` | none | `telemetry_consent` (`true`, `false`, or `null`), `needs_consent_prompt`, `telemetry_configured`, `app_version`. The install id and the keys are omitted |
 | POST | `/api/settings` | `telemetry_consent` | Saves the boolean choice. Any other field, or a non-boolean, returns 400 |
 | GET | `/api/logs` | none | `{ "text", "truncated" }` from the local log. The text can contain a path. It is not a report |
 | POST | `/api/logs/open` | none | Opens the logs folder. `{ "ok": true }`. The path is not in the body |
 
-`GET /api/settings` and `GET /api/logs` do not take the library write lock. `POST /api/settings` and `POST /api/logs/open` are handled before that lock. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
+`GET /api/settings` and `GET /api/logs` do not take the library write lock. `POST /api/settings` and `POST /api/logs/open` are handled before that lock. `GET /api/related` and `POST /api/related` with `add` or `remove` write only the sidecar file and do not take that lock. `action` `crate` takes the lock, then `library.crate_action`. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
 
 `GET /api/library` crate objects use `id`, `parent`, `name`, `smart`, `order`, `color`, `expanded`, `added`, `tracks`, and `rules` on smart crates. The space root crate is omitted. `root_id` is returned separately.
 

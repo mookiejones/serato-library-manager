@@ -12,6 +12,8 @@ The server uses the Python standard library. On macOS it reads `~/Library/Applic
 
 The first launch asks "Share anonymous usage stats and crash reports?" Sharing stays off until you choose it. Settings in the sidebar keeps that switch, and can open or copy the local log. [PRIVACY.md](PRIVACY.md) lists what can leave the machine.
 
+Open a track to save related tracks, with a note and a rating, or to keep a one-way link. Suggestions use musical key, tempo, and shared crates. The links are stored in `related.sqlite` next to the app settings, not in Serato's library, so they can be saved while Serato is open. Copying them into a Serato crate named `Related - ` plus the track title is a library write and waits until Serato has quit. The file layout is [docs/related-tracks.md](docs/related-tracks.md).
+
 In VS Code, press F5. That launch runs `server.py`.
 
 ## Desktop window
@@ -54,4 +56,4 @@ The tests build a temporary database. They do not open the live Serato library. 
 
 ## Documentation
 
-The code reference is [docs/architecture.md](docs/architecture.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.
+The code reference is [docs/architecture.md](docs/architecture.md). Related-track storage is [docs/related-tracks.md](docs/related-tracks.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `related.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.

@@ -2473,3 +2473,27 @@ def markers_for(path: str | None, on_disk: bool) -> SeratoTags:
     parsed["unavailable"] = False
     telemetry.capture(telemetry.EVENT_TAGS_READ)
     return parsed
+
+
+def update_related_path(old_path: str, new_path: str) -> bool:
+    """Point saved related-track links at a file after a move.
+
+    The file manager calls this after a cue-safe move. The sidecar
+    database next to the settings file is updated. ``master.sqlite`` is
+    not opened.
+
+    Args:
+        old_path: Path stored before the move.
+        new_path: Path after the move.
+
+    Returns:
+        True when a related-track identity uses the new path. False when
+        ``old_path`` is not stored.
+
+    Raises:
+        LibraryError: If ``new_path`` already identifies a different track,
+            or either path is empty.
+    """
+    import related
+
+    return related.update_path(old_path, new_path)
