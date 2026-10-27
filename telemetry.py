@@ -6,15 +6,17 @@ PostHog. Keys come from the environment, then from ``_build_config``, which
 release builds overwrite from GitHub secrets.
 
 Events are an allowlist: ``app_opened``, ``library_scanned``,
-``crate_created``, ``backup_made``, ``tags_read``, ``related_link_saved``,
-``related_link_removed``, ``related_crate_written``, and
-``duplicates_merged``. Properties are the app name
-``serato-library-manager``, the app version, the operating system, a
-track-count bucket, and ``link_direction`` (``one_way`` or ``two_way``)
-on ``related_link_saved``. Track titles, crate names, file paths, and
-library rows are not properties, and the Sentry ``before_send`` hook
-removes paths if one appears in an exception. Crash reports carry the
-tag ``app=serato-library-manager``.
+``crate_created``, ``backup_made``, ``tags_read``, ``files_changed``,
+``related_link_saved``, ``related_link_removed``,
+``related_crate_written``, and ``duplicates_merged``. Properties are the
+app name ``serato-library-manager``, the app version, the operating
+system, a track-count bucket, a file-count bucket, a change type, and a
+cue result for a file change, and ``link_direction`` (``one_way`` or
+``two_way``) on ``related_link_saved``. ``duplicates_merged`` carries no
+extra properties. Track titles, crate names, file paths, and library
+rows are not properties, and the Sentry ``before_send`` hook removes
+paths if one appears in an exception. Crash reports carry the tag
+``app=serato-library-manager``.
 """
 
 from __future__ import annotations
@@ -45,13 +47,20 @@ EVENT_LIBRARY_SCANNED = "library_scanned"
 EVENT_CRATE_CREATED = "crate_created"
 EVENT_BACKUP_MADE = "backup_made"
 EVENT_TAGS_READ = "tags_read"
+EVENT_FILES_CHANGED = "files_changed"
 EVENT_RELATED_LINK_SAVED = "related_link_saved"
 EVENT_RELATED_LINK_REMOVED = "related_link_removed"
 EVENT_RELATED_CRATE_WRITTEN = "related_crate_written"
 EVENT_DUPLICATES_MERGED = "duplicates_merged"
 TRACK_COUNT = "track_count"
 TRACK_COUNT_BUCKET = "track_count_bucket"
+FILE_COUNT = "file_count"
+FILE_COUNT_BUCKET = "file_count_bucket"
+CHANGE = "change"
+CUES = "cues"
 LINK_DIRECTION = "link_direction"
+CHANGES = frozenset({"rename", "move", "move_folder", "replace", "delete"})
+CUE_RESULTS = frozenset({"copied", "kept", "skipped", "unsupported", "failed"})
 LINK_DIRECTIONS = frozenset({"one_way", "two_way"})
 
 # Event name to the caller-supplied properties it may carry. Global
@@ -62,6 +71,7 @@ EVENTS: dict[str, frozenset[str]] = {
     EVENT_CRATE_CREATED: frozenset(),
     EVENT_BACKUP_MADE: frozenset(),
     EVENT_TAGS_READ: frozenset(),
+    EVENT_FILES_CHANGED: frozenset({FILE_COUNT, CHANGE, CUES}),
     EVENT_RELATED_LINK_SAVED: frozenset({LINK_DIRECTION}),
     EVENT_RELATED_LINK_REMOVED: frozenset(),
     EVENT_RELATED_CRATE_WRITTEN: frozenset(),
@@ -95,6 +105,9 @@ POSTHOG_PROPERTY_ALLOWLIST = frozenset(
         "$lib_version",
         "$geoip_disable",
         "$is_server",
+        FILE_COUNT_BUCKET,
+        CHANGE,
+        CUES,
     }
 )
 POSTHOG_EVENT_KEYS = frozenset({"event", "distinct_id", "properties", "timestamp", "uuid"})
@@ -498,7 +511,11 @@ def limit_posthog_event(event: dict[str, Any]) -> dict[str, Any] | None:
     for key, value in properties.items():
         if key not in POSTHOG_PROPERTY_ALLOWLIST:
             continue
-        if key == TRACK_COUNT_BUCKET and value not in BUCKET_LABELS:
+        if key in {TRACK_COUNT_BUCKET, FILE_COUNT_BUCKET} and value not in BUCKET_LABELS:
+            return None
+        if key == CHANGE and value not in CHANGES:
+            return None
+        if key == CUES and value not in CUE_RESULTS:
             return None
         if key == LINK_DIRECTION:
             if LINK_DIRECTION not in EVENTS.get(name, frozenset()):
@@ -508,6 +525,9 @@ def limit_posthog_event(event: dict[str, Any]) -> dict[str, Any] | None:
             kept[key] = value
             continue
         if key == "app":
+            continue
+        if key in {TRACK_COUNT_BUCKET, FILE_COUNT_BUCKET, CHANGE, CUES}:
+            kept[key] = value
             continue
         if isinstance(value, str):
             kept[key] = scrub_text(value)
@@ -551,6 +571,23 @@ def _allow_properties(event: str, properties: Mapping[str, object]) -> dict[str,
             props[TRACK_COUNT_BUCKET] = track_count_bucket(properties[TRACK_COUNT])  # type: ignore[arg-type]
         except TypeError:
             return None
+    if FILE_COUNT in allowed:
+        if FILE_COUNT not in properties:
+            return None
+        try:
+            props[FILE_COUNT_BUCKET] = track_count_bucket(properties[FILE_COUNT])  # type: ignore[arg-type]
+        except TypeError:
+            return None
+    if CHANGE in allowed:
+        change = properties.get(CHANGE)
+        if change not in CHANGES:
+            return None
+        props[CHANGE] = change
+    if CUES in properties and CUES in allowed:
+        cues = properties.get(CUES)
+        if cues not in CUE_RESULTS:
+            return None
+        props[CUES] = cues
     if LINK_DIRECTION in allowed:
         direction = properties.get(LINK_DIRECTION)
         if direction not in LINK_DIRECTIONS:
@@ -702,8 +739,11 @@ def capture(event: str, properties: Mapping[str, object] | None = None) -> bool:
 
     Args:
         event: One of the allowlisted event names.
-        properties: Optional ``track_count`` for ``library_scanned``.
-            Other keys are ignored and are not sent.
+        properties: Optional ``track_count`` for ``library_scanned``,
+            ``file_count``, ``change``, and ``cues`` for ``files_changed``,
+            or ``link_direction`` for ``related_link_saved``. Other keys
+            are ignored and are not sent. Paths and names are not accepted
+            properties.
 
     Returns:
         True when the event was handed to PostHog. False when consent,

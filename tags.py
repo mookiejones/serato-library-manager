@@ -1,15 +1,21 @@
 """Read Serato cue points, loops, flips, and beatgrids from audio files.
 
 Serato stores these in GEOB frames (Markers2 and BeatGrid), not in the
-library database. This module only reads. It does not rewrite audio files,
-because replacing an ID3 tag can drop those frames.
+library database. Reading never rewrites a file. ``copy_serato_geob``
+copies existing Serato GEOB frames onto another file when that file has a
+plain ID3v2.3 tag, or when it is an MP3 with no tag yet. Other frames and
+the audio bytes stay as they are. Any other layout is left untouched.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import os
+import shutil
 import struct
+import tempfile
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
@@ -73,6 +79,17 @@ class SeratoTags(TypedDict):
     beatgrid: list[BeatMarker]
     found: bool
     unavailable: NotRequired[bool]
+
+
+class CueCopy(TypedDict):
+    """Result of copying Serato GEOB frames onto another file.
+
+    status is copied, kept, skipped, unsupported, or failed. detail is a
+    short sentence for the page. It does not include a path.
+    """
+
+    status: str
+    detail: str
 
 
 def read_serato_tags(path: str | None) -> SeratoTags:
@@ -443,3 +460,315 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
             pos += 4
             markers.append({"position": round(position, 3), "beats": beats})
     return markers
+
+
+_TAG_LIMIT = 16_000_000
+_UNSYNC = 0x80
+_EXTENDED = 0x40
+_V23_COMPRESSED = 0x80
+_V23_ENCRYPTED = 0x40
+_COPIED = "Cue points were copied onto the new file."
+_KEPT = "The new file already has Serato cue points, so they were left as they are."
+_SKIPPED = "The old file has no Serato cue points to copy."
+_UNSUPPORTED = "Cue points stay on the old file. This file type cannot take a Serato tag safely."
+_FAILED = "Cue points could not be copied. The new file was left unchanged."
+
+
+def plan_serato_geob(source: str | Path | None, dest: str | Path | None) -> CueCopy:
+    """Decide whether Serato frames can be copied without rewriting other tags.
+
+    The check only reads. A plain ID3v2.3 tag can take the frames. An MP3
+    with no tag yet can take a new ID3v2.3 tag. A file that already has
+    Serato frames is left alone. Every other layout is refused.
+
+    Args:
+        source: Audio file that already has the cue points.
+        dest: Audio file that should receive them.
+
+    Returns:
+        A status of copied (meaning the copy is safe to try), kept,
+        skipped, or unsupported, plus a sentence that does not name a path.
+    """
+    if not source or not dest:
+        return {"status": "unsupported", "detail": _UNSUPPORTED}
+    src = Path(source)
+    dst = Path(dest)
+    try:
+        if not src.is_file() or src.is_symlink() or not dst.is_file() or dst.is_symlink():
+            return {"status": "unsupported", "detail": _UNSUPPORTED}
+        if src.resolve() == dst.resolve():
+            return {"status": "skipped", "detail": _SKIPPED}
+        source_tag = _read_id3v23(src)
+        if source_tag is None:
+            return {"status": "unsupported", "detail": _UNSUPPORTED}
+        serato = [frame for frame in source_tag["frames"] if _serato_frame(frame)]
+        if any(_unsafe_frame(frame) for frame in serato):
+            return {"status": "unsupported", "detail": _UNSUPPORTED}
+        if not serato:
+            return {"status": "skipped", "detail": _SKIPPED}
+        dest_tag = _read_id3v23(dst)
+        if dest_tag is None:
+            if _can_prepend_mp3(dst):
+                return {"status": "copied", "detail": _COPIED}
+            return {"status": "unsupported", "detail": _UNSUPPORTED}
+        if any(_serato_frame(frame) for frame in dest_tag["frames"]):
+            return {"status": "kept", "detail": _KEPT}
+        return {"status": "copied", "detail": _COPIED}
+    except OSError:
+        return {"status": "unsupported", "detail": _UNSUPPORTED}
+
+
+def copy_serato_geob(source: str | Path, dest: str | Path) -> CueCopy:
+    """Copy Serato GEOB frames from source onto dest when that is safe.
+
+    Other ID3 frames are copied as raw bytes. The audio after the tag is
+    streamed unchanged. The destination is replaced only after the new
+    file is written beside it. A failed check restores the previous bytes.
+
+    Args:
+        source: Audio file that already has the cue points.
+        dest: Audio file that should receive them.
+
+    Returns:
+        The same status vocabulary as ``plan_serato_geob``. failed means
+        the destination was restored.
+    """
+    decision = plan_serato_geob(source, dest)
+    if decision["status"] != "copied":
+        return decision
+    dst = Path(dest)
+    try:
+        written = _write_copied_tag(Path(source), dst)
+    except OSError:
+        return {"status": "failed", "detail": _FAILED}
+    if not written:
+        return {"status": "failed", "detail": _FAILED}
+    parsed = read_serato_tags(str(dst))
+    if not parsed["found"]:
+        return {"status": "failed", "detail": _FAILED}
+    return {"status": "copied", "detail": _COPIED}
+
+
+def _encode_synchsafe(size: int) -> bytes:
+    """Encode a tag size the way an ID3 header stores it.
+
+    Args:
+        size: Number of bytes after the 10-byte header.
+
+    Returns:
+        Four synchsafe bytes.
+    """
+    return bytes(
+        (
+            (size >> 21) & 0x7F,
+            (size >> 14) & 0x7F,
+            (size >> 7) & 0x7F,
+            size & 0x7F,
+        )
+    )
+
+
+def _read_id3v23(path: Path) -> dict[str, object] | None:
+    """Read a plain ID3v2.3 tag from the start of a file.
+
+    Args:
+        path: Audio file.
+
+    Returns:
+        The version, the frames, the padding, and the audio offset.
+        None when the file has no plain ID3v2.3 tag. Unsynchronisation,
+        an extended header, and a tag larger than 16,000,000 bytes are
+        refused so the caller does not rewrite them.
+    """
+    with path.open("rb") as handle:
+        header = handle.read(10)
+        if len(header) < 10 or header[:3] != b"ID3" or header[3] != 3:
+            return None
+        if header[5] & _UNSYNC or header[5] & _EXTENDED:
+            return None
+        tag_size = _synchsafe(header[6:10])
+        if tag_size <= 0 or tag_size > _TAG_LIMIT:
+            return None
+        body = handle.read(tag_size)
+    if len(body) < tag_size:
+        return None
+    frames: list[bytes] = []
+    pos = 0
+    while pos + 10 <= tag_size:
+        frame_id = body[pos:pos + 4]
+        if frame_id == b"\x00\x00\x00\x00" or frame_id[0] == 0:
+            break
+        frame_size = int.from_bytes(body[pos + 4:pos + 8], "big")
+        if frame_size < 0 or pos + 10 + frame_size > tag_size:
+            return None
+        frames.append(body[pos:pos + 10 + frame_size])
+        pos += 10 + frame_size
+    return {
+        "frames": frames,
+        "audio_offset": 10 + tag_size,
+        "tag_size": tag_size,
+    }
+
+
+def _unsafe_frame(frame: bytes) -> bool:
+    """Return whether a frame is compressed or encrypted.
+
+    Args:
+        frame: One raw ID3 frame, header included.
+
+    Returns:
+        True when the ID3v2.3 compression or encryption flag is set.
+    """
+    if len(frame) < 10:
+        return True
+    flags = frame[9]
+    return bool(flags & _V23_COMPRESSED or flags & _V23_ENCRYPTED)
+
+
+def _serato_frame(frame: bytes) -> bool:
+    """Return whether a raw frame is a Serato GEOB frame.
+
+    Args:
+        frame: One raw ID3 frame, header included.
+
+    Returns:
+        True when the frame is GEOB and its description starts with Serato.
+    """
+    if len(frame) < 11 or frame[:4] != b"GEOB":
+        return False
+    name, _payload = _geob_body(frame[10:])
+    return name.startswith("Serato ")
+
+
+def _can_prepend_mp3(path: Path) -> bool:
+    """Return whether an MP3 with no ID3 tag can take a new tag.
+
+    Args:
+        path: Destination file.
+
+    Returns:
+        True for an ``.mp3`` file that does not already start with a
+        container this module refuses to rewrite.
+    """
+    if path.suffix.lower() != ".mp3":
+        return False
+    with path.open("rb") as handle:
+        head = handle.read(12)
+    if head.startswith((b"fLaC", b"RIFF", b"FORM", b"OggS", b"ID3")):
+        return False
+    if len(head) >= 8 and head[4:8] == b"ftyp":
+        return False
+    return True
+
+
+def _audio_hash(path: Path, offset: int) -> str:
+    """Hash the bytes after an ID3 tag.
+
+    Args:
+        path: Audio file.
+        offset: Index of the first audio byte.
+
+    Returns:
+        The SHA-256 hex digest of that tail.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _build_tag(source: Path, dest: Path) -> tuple[bytes, int] | None:
+    """Build a new ID3v2.3 tag and report the old audio offset.
+
+    Args:
+        source: File that holds the Serato frames.
+        dest: File that will keep its other frames.
+
+    Returns:
+        The new tag bytes (header included) and the offset of the
+        destination audio. None when the plan no longer applies.
+    """
+    source_tag = _read_id3v23(source)
+    if source_tag is None:
+        return None
+    serato = [frame for frame in source_tag["frames"] if _serato_frame(frame) and not _unsafe_frame(frame)]
+    if not serato:
+        return None
+    dest_tag = _read_id3v23(dest)
+    if dest_tag is None:
+        if not _can_prepend_mp3(dest):
+            return None
+        kept: list[bytes] = []
+        audio_offset = 0
+        old_size = 0
+    else:
+        if any(_serato_frame(frame) for frame in dest_tag["frames"]):
+            return None
+        kept = list(dest_tag["frames"])
+        audio_offset = int(dest_tag["audio_offset"])
+        old_size = int(dest_tag["tag_size"])
+    body = b"".join([*kept, *serato])
+    if old_size >= len(body):
+        padding = old_size - len(body)
+        tag_size = old_size
+    else:
+        padding = 1024
+        tag_size = len(body) + padding
+    tag = b"ID3" + bytes((3, 0, 0)) + _encode_synchsafe(tag_size) + body + (b"\x00" * padding)
+    return tag, audio_offset
+
+
+def _write_copied_tag(source: Path, dest: Path) -> bool:
+    """Write a copied tag beside dest and replace dest when the audio matches.
+
+    Args:
+        source: File that holds the Serato frames.
+        dest: File to replace after the audio tail is checked.
+
+    Returns:
+        True when dest now contains the Serato frames and the same audio
+        bytes. False when dest was left or restored unchanged.
+    """
+    built = _build_tag(source, dest)
+    if built is None:
+        return False
+    tag, audio_offset = built
+    before = _audio_hash(dest, audio_offset)
+    directory = dest.parent
+    backup_fd, backup_name = tempfile.mkstemp(prefix=".serato-cuebak-", dir=directory)
+    os.close(backup_fd)
+    backup = Path(backup_name)
+    temp_fd, temp_name = tempfile.mkstemp(prefix=".serato-cue-", dir=directory)
+    os.close(temp_fd)
+    temp: Path | None = Path(temp_name)
+    try:
+        shutil.copy2(dest, backup)
+        assert temp is not None
+        with temp.open("wb") as out, dest.open("rb") as src:
+            out.write(tag)
+            src.seek(audio_offset)
+            shutil.copyfileobj(src, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temp, dest)
+        temp = None
+        if _audio_hash(dest, len(tag)) != before or not read_serato_tags(str(dest))["found"]:
+            shutil.copy2(backup, dest)
+            return False
+        return True
+    except OSError:
+        try:
+            if backup.is_file():
+                shutil.copy2(backup, dest)
+        except OSError:
+            return False
+        return False
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+        backup.unlink(missing_ok=True)

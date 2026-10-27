@@ -21,6 +21,7 @@ from typing import NotRequired, TypedDict, cast
 from urllib.parse import parse_qs, urlparse
 
 import app_log
+import files
 import library
 import related
 import telemetry
@@ -1305,7 +1306,7 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a GET request.
 
         Settings and logs are answered before the library routes. Library,
-        status, track, history, duplicate, related-track, and M3U paths
+        status, track, history, duplicate, file, related-track, and M3U paths
         return data. Every other path is a file under static/.
         """
         try:
@@ -1316,8 +1317,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Library, status, track, history, duplicate, and M3U paths return data.
-        Every other path is a file under static/.
+        Library, status, track, history, duplicate, file, and M3U paths return
+        data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1365,6 +1366,9 @@ class Handler(BaseHTTPRequestHandler):
                 groups = as_dicts(_library_call("duplicate_groups", space))
                 self.send_json({"space": space, "groups": groups, "count": len(groups)})
                 return
+            if parsed.path == "/api/files":
+                self.send_json(files.list_directory(query_text(query, "path", "") or ""))
+                return
             if parsed.path == "/api/export.m3u":
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
@@ -1403,8 +1407,9 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a JSON POST.
 
         Settings and opening the logs folder return before the library lock.
-        Track, crate, import, reveal, and duplicate merge run as before.
-        A merge preview does not drop the library cache.
+        Track, crate, import, reveal, duplicate merge, and file changes
+        take that lock. A merge preview does not drop the library cache.
+        A file preview does.
         """
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
@@ -1469,6 +1474,11 @@ class Handler(BaseHTTPRequestHandler):
                     result = as_dict(_library_call("merge_duplicates", payload))
                     if not preview:
                         telemetry.capture(telemetry.EVENT_DUPLICATES_MERGED)
+                elif parsed.path == "/api/files":
+                    if payload.get("confirm") is True:
+                        result = files.execute(payload)
+                    else:
+                        result = files.plan(payload)
                 else:
                     self.send_json(
                         {"error": "That action is not available."}, status=404
@@ -1707,6 +1717,10 @@ def serve() -> ThreadingHTTPServer:
         raise SystemExit(f"Serato library not found at {db_path()}")
     app_log.configure()
     app_log.logger.info("Library file: %s", db_path())
+    try:
+        files.recover_interrupted()
+    except Exception:
+        app_log.logger.exception("An interrupted file change could not be finished.")
     try:
         httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError as exc:

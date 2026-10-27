@@ -4,9 +4,10 @@
 
   One screen: the space menu, the view switch, the crate or history rail,
   a virtualized track list, and the detail pane. The Duplicates view can
-  merge a group into the copy you keep. app.css and app.js are local files.
-  The page talks only to the library server on 127.0.0.1. It does not open
-  master.sqlite itself.
+  merge a group into the copy you keep. The Files view browses folders
+  and previews a rename, move, replace, or delete before it is saved.
+  app.css and app.js are local files. The page talks only to the library
+  server on 127.0.0.1. It does not open master.sqlite itself.
 -->
 <html lang="en">
 <head>
@@ -40,6 +41,7 @@
         <button type="button" data-view="missing" role="tab">Missing</button>
         <button type="button" data-view="duplicates" role="tab">Duplicates</button>
         <button type="button" data-view="stems" role="tab">Stems</button>
+        <button type="button" data-view="files" role="tab">Files</button>
       </div>
       <div id="crate-tools">
         <label class="rail-field">
@@ -97,6 +99,26 @@
       <section id="detail" class="detail" aria-live="polite">
         <p class="detail-empty">Select a track to read its attributes.</p>
       </section>
+
+      <section id="files-panel" class="files-panel" hidden>
+        <div class="browser-bar">
+          <button id="files-up" type="button">Up</button>
+          <p id="files-path" class="files-path"></p>
+          <button id="files-refresh" type="button">Refresh</button>
+        </div>
+        <p id="files-pick" class="files-pick" hidden>Choose the destination folder. Then confirm the move.</p>
+        <p id="files-status" class="notice" role="status" aria-live="polite"></p>
+        <div id="files-list" class="files-list" role="group" aria-label="Folder contents" aria-busy="false" tabindex="0"></div>
+        <div class="files-actions">
+          <button id="files-rename" type="button">Rename</button>
+          <button id="files-move" type="button">Move to folder</button>
+          <button id="files-move-folder" type="button">Move this folder</button>
+          <button id="files-replace" type="button">Replace file</button>
+          <button id="files-delete" type="button">Delete</button>
+          <button id="files-move-here" type="button" hidden>Move here</button>
+          <button id="files-pick-cancel" type="button" hidden>Cancel</button>
+        </div>
+      </section>
     </main>
   </div>
   <dialog id="consent-dialog" aria-labelledby="consent-title" aria-describedby="consent-body">
@@ -141,6 +163,27 @@
       <button id="merge-confirm" type="button">Merge copies</button>
     </div>
     <p id="merge-status" class="dialog-status" role="status" aria-live="polite"></p>
+  </dialog>
+  <dialog id="files-dialog" aria-labelledby="files-dialog-title">
+    <h2 id="files-dialog-title">Review this change</h2>
+    <p id="files-summary"></p>
+    <p class="dialog-note">Nothing is changed until you confirm.</p>
+    <label id="files-name-label" class="files-field" hidden>
+      <span>New name</span>
+      <input id="files-name" type="text" autocomplete="off">
+    </label>
+    <label id="files-replace-label" class="files-field" hidden>
+      <span>New file</span>
+      <input id="files-replacement" type="text" autocomplete="off" spellcheck="false">
+    </label>
+    <ul id="files-changes"></ul>
+    <p id="files-warning" class="dialog-note"></p>
+    <p id="files-dialog-status" class="dialog-status" role="status" aria-live="polite"></p>
+    <div class="dialog-actions">
+      <button id="files-cancel" type="button">Cancel</button>
+      <button id="files-review" type="button">Review</button>
+      <button id="files-confirm" type="button">Confirm</button>
+    </div>
   </dialog>
   <script src="/app.js"></script>
 </body>

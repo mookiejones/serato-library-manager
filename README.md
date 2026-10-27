@@ -10,7 +10,9 @@ A local page for the Serato DJ Pro library on macOS and Windows.
 
 The server uses the Python standard library. On macOS it reads `~/Library/Application Support/Serato/Library/master.sqlite`. On Windows it reads `%LOCALAPPDATA%\Serato\Library\master.sqlite`. Writes wait until Serato has quit. Press Ctrl-C to stop the server.
 
-The Duplicates view can merge copies that share a title, artist, and length. Choose the file to keep. The others leave the library, and the copy you keep is added to the crates they were in. Empty fields are filled from the other copies. Play count and rating keep the higher value. Audio files stay on disk unless you move them to the Trash. Cue points stay in the audio file. The app reads them and does not rewrite them.
+The Duplicates view can merge copies that share a title, artist, and length. Choose the file to keep. The others leave the library, and the copy you keep is added to the crates they were in. Empty fields are filled from the other copies. Play count and rating keep the higher value. Audio files stay on disk unless you move them to the Trash. Cue points stay in the audio file. A merge reads them and does not rewrite them.
+
+The Files view renames, moves, and deletes audio on disk and updates the library path so crates and history stay attached. Replacing a track copies its cue points onto the new file when the tag can take them, and says so when it cannot. Nothing is written until you confirm the preview. A move also points saved related-track links at the new path.
 
 The first launch asks "Share anonymous usage stats and crash reports?" Sharing stays off until you choose it. Settings in the sidebar keeps that switch, and can open or copy the local log. [PRIVACY.md](PRIVACY.md) lists what can leave the machine.
 
@@ -58,4 +60,4 @@ The tests build a temporary database. They do not open the live Serato library. 
 
 ## Documentation
 
-The code reference is [docs/architecture.md](docs/architecture.md). Related-track storage is [docs/related-tracks.md](docs/related-tracks.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `related.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.
+The code reference is [docs/architecture.md](docs/architecture.md). Related-track storage is [docs/related-tracks.md](docs/related-tracks.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `files.py`, `related.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.
