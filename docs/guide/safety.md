@@ -26,13 +26,13 @@ File changes in the [Files](files.md) view are different. Rename and move carry 
 
 **Snapshots** in the sidebar keeps hash-checked copies of the library database, the crates on each drive (including a drive's `_Serato_` folder and `database V2`), and the Serato cue, beatgrid, and autotag data stored inside MP3, FLAC, M4A, and AIFF files. The music itself is not copied. Snapshots are kept with no time limit. The page does not delete old ones.
 
-Quit Serato DJ Pro before you restore. If Serato DJ is still running, restore stops and the page tells you to quit it first. **Review restore** shows what would change: crates, tracks, and the cue and beatgrid differences for each file. Nothing is written until you confirm. Confirm saves a new snapshot first, so the restore can be undone from the list.
+Quit Serato DJ Pro before you restore. If Serato DJ is still running, restore stops and the page tells you to quit it first. That check runs again before the database, the crates, and the audio are replaced. **Review restore** shows what would change: crates, tracks, and the cue and beatgrid differences for each file. Nothing is written until you confirm. Confirm saves a new snapshot first, so the restore can be undone from the list. If the app stops in the middle of a restore, the next time it opens it puts that saved snapshot back.
 
 A drive that is not plugged in is shown as unavailable. Its crates and tracks stay in the snapshot. They are not treated as deleted, and a restore does not remove them.
 
 If something else changes the Serato folder while this app is open, including Lexicon, the app saves a snapshot after that change and offers **Review undo**. That restore puts back the previous snapshot. It cannot put back a copy from before the other program wrote, because that moment was not captured. The log names Lexicon when a Lexicon process is running, or when Lexicon's own folder was updated at the same time. The app does not open files inside `_Serato_/Lexicon/` or `_Serato_/Export Backups/`, and it does not include them in a snapshot or a restore.
 
-Each snapshot records the Serato version and build when those can be read from the app. On a Mac that is the app bundle. On Windows it is the Serato DJ program under Program Files, or the registry. If Serato's version or build changes, one new snapshot is saved of the library as it is then. If the version cannot be read, the snapshot says unknown and is still saved, and writes and restores stay off until a version can be read. An unreadable preferences file is treated the same way.
+Each snapshot records the Serato version and build when those can be read from the app. On a Mac that is the app bundle. On Windows it is the Serato DJ program under Program Files, or the registry. If Serato's version or build changes, one new snapshot is saved of the library as it is then. If the version cannot be read, or it is not a plain number such as `4.1.0`, the snapshot says unknown and is still saved, and writes and restores stay off until a version can be read. An unreadable preferences file is treated the same way.
 
 ## Serato 5
 

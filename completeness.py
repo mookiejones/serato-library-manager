@@ -76,11 +76,22 @@ def verify_legacy_backup(backup_dir: Path) -> None:
     """
     import library
 
-    if not _is_legacy_backup(backup_dir):
+    root = _resolved_directory(backup_dir)
+    if root is None or not _is_legacy_backup(root):
         raise library.LibraryError("That folder is not an unverified legacy backup.")
-    master = backup_dir / "master.sqlite"
+    master = _file_inside(root, "master.sqlite")
+    if master is None:
+        raise library.LibraryError("That folder is not an unverified legacy backup.")
+    wal = root / "master.sqlite-wal"
+    wal_inside = None
+    if wal.exists() or wal.is_symlink():
+        wal_inside = _file_inside(root, "master.sqlite-wal")
+        if wal_inside is None:
+            raise library.LibraryError(
+                "That legacy backup could not be checked, so it was not restored."
+            )
     try:
-        rows = _integrity_rows(master)
+        rows = _integrity_rows(master, wal_inside)
     except (sqlite3.Error, OSError) as exc:
         raise library.LibraryError(
             "That legacy backup could not be checked, so it was not restored."
@@ -110,12 +121,18 @@ def publish_directory(final: Path, files: Mapping[str, bytes]) -> None:
         _remove_partial(partial)
     partial.mkdir(parents=True)
     try:
+        root = _resolved_directory(partial)
+        if root is None:
+            raise OSError("The staging directory is not a real directory.")
         for name, data in files.items():
-            if name in {COMPLETE_NAME, INCOMPLETE_NAME} or Path(name).name != name:
+            if name in {COMPLETE_NAME, INCOMPLETE_NAME} or not _single_component(name):
                 raise OSError("A published file name is not a single path component.")
-            _write_file(partial / name, data)
-        write_complete_marker(partial)
-        os.replace(partial, final)
+            target = _child_inside(root, name, allow_missing=True)
+            if target is None:
+                raise OSError("A published file leaves the directory.")
+            _write_file(target, data)
+        write_complete_marker(root)
+        os.replace(root, final)
     except Exception:
         _remove_partial(partial)
         raise
@@ -130,15 +147,20 @@ def write_complete_marker(folder: Path) -> None:
     Raises:
         OSError: If a file cannot be read or the marker cannot be written.
     """
-    files = _relative_files(folder)
+    root = _resolved_directory(folder)
+    if root is None:
+        raise OSError("The directory is not a real directory.")
+    files = _relative_files(root)
     if files is None:
         raise OSError("The directory contains a shortcut.")
     payload = {
         "version": MARKER_VERSION,
         "algorithm": HASH_ALGORITHM,
-        "hashes": {rel.as_posix(): _sha256_file(folder / rel) for rel in files},
+        "hashes": {rel: _sha256_inside(root, rel) for rel in files},
     }
-    marker = folder / COMPLETE_NAME
+    marker = _child_inside(root, COMPLETE_NAME, allow_missing=True)
+    if marker is None:
+        raise OSError("The marker leaves the directory.")
     marker.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _fsync_file(marker)
 
@@ -152,11 +174,17 @@ def _hashes_match(folder: Path) -> bool:
     Returns:
         True when the algorithm is ``sha256`` and every digest matches.
     """
+    root = _resolved_directory(folder)
+    if root is None:
+        return False
+    marker = _file_inside(root, COMPLETE_NAME)
+    if marker is None:
+        return False
     try:
-        payload = json.loads((folder / COMPLETE_NAME).read_text(encoding="utf-8"))
+        payload = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or set(payload) != {"version", "algorithm", "hashes"}:
         return False
     if payload.get("version") != MARKER_VERSION or payload.get("algorithm") != HASH_ALGORITHM:
         return False
@@ -169,20 +197,20 @@ def _hashes_match(folder: Path) -> bool:
             return False
         if not _sha256_digest(digest) or rel in {COMPLETE_NAME, INCOMPLETE_NAME}:
             return False
-        if "\\" in rel or rel.startswith("/") or any(part in {"", ".", ".."} for part in rel.split("/")):
+        if _child_inside(root, rel) is None:
             return False
         if rel in listed:
             return False
         listed[rel] = digest.lower()
-    files = _relative_files(folder)
+    files = _relative_files(root)
     if files is None:
         return False
-    names = [path.as_posix() for path in files]
+    names = list(files)
     if names != sorted(listed):
         return False
     try:
         for rel, digest in listed.items():
-            if _sha256_file(folder / rel) != digest:
+            if _sha256_inside(root, rel) != digest:
                 return False
     except OSError:
         return False
@@ -207,6 +235,104 @@ def _sha256_digest(value: str) -> bool:
     return True
 
 
+def _resolved_directory(path: Path) -> Path | None:
+    """Resolve a directory and reject a shortcut.
+
+    Args:
+        path: Candidate directory.
+
+    Returns:
+        The resolved directory, or None when it is missing, a shortcut, or
+        unreadable.
+    """
+    try:
+        if path.is_symlink() or not path.is_dir():
+            return None
+        return path.resolve()
+    except OSError:
+        return None
+
+
+def _single_component(name: str) -> bool:
+    """Return whether a name is one path component.
+
+    Args:
+        name: File name from a caller.
+
+    Returns:
+        True when the name has no separator, dot-dot, or colon.
+    """
+    if not name or name in {".", ".."} or "/" in name or "\\" in name or ":" in name:
+        return False
+    return Path(name).name == name
+
+
+def _child_inside(root: Path, relative: str, *, allow_missing: bool = False) -> Path | None:
+    """Resolve a relative path and keep it inside a directory.
+
+    Args:
+        root: Directory that was already resolved.
+        relative: POSIX relative path from a marker or a caller.
+        allow_missing: When true, a path that does not exist yet is returned
+            so a file can be created there.
+
+    Returns:
+        The resolved path, or None when it escapes, is a shortcut, or is not
+        a file.
+    """
+    if not relative or "\\" in relative or relative.startswith("/"):
+        return None
+    parts = relative.split("/")
+    if any(part in {"", ".", ".."} or ":" in part for part in parts):
+        return None
+    try:
+        base = root.resolve()
+        candidate = base.joinpath(*parts)
+        if candidate.is_symlink():
+            return None
+        if not allow_missing and not candidate.is_file():
+            return None
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+    if resolved != base and base not in resolved.parents:
+        return None
+    return resolved
+
+
+def _file_inside(root: Path, relative: str) -> Path | None:
+    """Return a regular file that stays inside a directory.
+
+    Args:
+        root: Directory that was already resolved.
+        relative: POSIX relative path.
+
+    Returns:
+        The resolved file, or None when it is missing, a shortcut, or outside
+        the directory.
+    """
+    return _child_inside(root, relative, allow_missing=False)
+
+
+def _sha256_inside(root: Path, relative: str) -> str:
+    """Hash one file in chunks after checking it stays inside the directory.
+
+    Args:
+        root: Directory that was already resolved.
+        relative: POSIX relative path.
+
+    Returns:
+        The lowercase hex digest.
+
+    Raises:
+        OSError: If the file is outside the directory or cannot be read.
+    """
+    path = _file_inside(root, relative)
+    if path is None:
+        raise OSError("That file is outside the directory.")
+    return _sha256_file(path)
+
+
 def _sha256_file(path: Path) -> str:
     """Return the SHA-256 hex digest of a file, read in chunks.
 
@@ -226,7 +352,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _relative_files(folder: Path) -> list[Path] | None:
+def _relative_files(folder: Path) -> list[str] | None:
     """Return regular files under a folder, excluding the marker and lock.
 
     Args:
@@ -236,21 +362,25 @@ def _relative_files(folder: Path) -> list[Path] | None:
         Relative paths sorted by POSIX name. None when a shortcut is found
         or the walk cannot be read.
     """
-    found: list[Path] = []
+    found: list[str] = []
     try:
+        base = folder.resolve()
         for path in folder.rglob("*"):
             if path.is_symlink():
                 return None
             if not path.is_file():
                 continue
+            resolved = path.resolve()
+            if base not in resolved.parents:
+                return None
             if path.name == COMPLETE_NAME and path.parent == folder:
                 continue
             if path.name == PARTIAL_LOCK_NAME:
                 continue
-            found.append(path.relative_to(folder))
+            found.append(path.relative_to(folder).as_posix())
     except OSError:
         return None
-    return sorted(found, key=lambda item: item.as_posix())
+    return sorted(found)
 
 
 def _rejected(path: Path) -> bool:
@@ -263,11 +393,15 @@ def _rejected(path: Path) -> bool:
         True for a shortcut, a missing path, a failed name, a staging name,
         a folder that contains ``INCOMPLETE``, or an unreadable path.
     """
-    if path.is_symlink() or not path.is_dir():
+    root = _resolved_directory(path)
+    if root is None:
         return True
-    if _is_failed_name(path.name) or _is_partial_name(path.name):
+    if _is_failed_name(root.name) or _is_partial_name(root.name):
         return True
-    return (path / INCOMPLETE_NAME).exists()
+    marker = _child_inside(root, INCOMPLETE_NAME, allow_missing=True)
+    if marker is None:
+        return True
+    return marker.exists()
 
 
 def _is_failed_name(name: str) -> bool:
@@ -319,11 +453,13 @@ def _is_legacy_backup(backup_dir: Path) -> bool:
         return False
 
 
-def _integrity_rows(master: Path) -> list[tuple[object, ...]]:
+def _integrity_rows(master: Path, wal: Path | None) -> list[tuple[object, ...]]:
     """Run ``PRAGMA integrity_check`` on a copy of a legacy database.
 
     Args:
-        master: ``master.sqlite`` inside the legacy folder. It is not opened.
+        master: Resolved ``master.sqlite`` inside the legacy folder. It is
+            not opened in place.
+        wal: Resolved ``-wal`` file inside that same folder, or None.
 
     Returns:
         Rows from the check on the temporary copy.
@@ -334,11 +470,10 @@ def _integrity_rows(master: Path) -> list[tuple[object, ...]]:
     """
     import tempfile
 
-    wal = Path(str(master) + "-wal")
     with tempfile.TemporaryDirectory() as raw:
         copied = Path(raw) / "master.sqlite"
         shutil.copyfile(master, copied)
-        if _real_file(wal):
+        if wal is not None:
             shutil.copyfile(wal, Path(raw) / "master.sqlite-wal")
         uri = f"file:{copied.resolve()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True)
@@ -392,12 +527,15 @@ def _remove_partial(path: Path) -> None:
     Args:
         path: Directory whose name ends in ``.partial``.
     """
-    if not path.exists():
+    root = _resolved_directory(path)
+    if root is None or not _is_partial_name(root.name):
         return
-    if _is_partial_name(path.name) and path.is_dir() and not path.is_symlink():
-        for child in sorted(path.rglob("*"), reverse=True):
-            if child.is_file() or child.is_symlink():
-                child.unlink()
-            elif child.is_dir():
-                child.rmdir()
-        path.rmdir()
+    for child in sorted(root.rglob("*"), reverse=True):
+        parent = child.parent.resolve()
+        if parent != root and root not in parent.parents:
+            raise OSError("Refusing to remove a file outside the partial directory.")
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            child.rmdir()
+    root.rmdir()

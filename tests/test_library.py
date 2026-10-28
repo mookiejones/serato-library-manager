@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import unittest
 from pathlib import Path
 from typing import cast
@@ -59,6 +60,35 @@ class LibraryTests(unittest.TestCase):
                     library.begin_write()
         self.assertFalse(info["writable"])
         self.assertEqual(info["pid"], 99)
+
+    def test_process_check_error_refuses_begin_write(self) -> None:
+        """Refuse a write when the lock check cannot tell whether Serato is running.
+
+        A lock row is present. The process lookup raises, times out, or
+        exits non-zero. ``begin_write`` must raise ``SeratoOpen`` and must
+        not copy a backup.
+
+        Returns:
+            None. The test fails if the write is allowed.
+        """
+        with TempLibrary() as temp:
+            with open_database(library.MASTER) as conn:
+                conn.execute(
+                    "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (99, 'Serato DJ Pro')"
+                )
+            with mock.patch.object(library, "_process_is_serato", side_effect=OSError("ps failed")):
+                with self.assertRaises(SeratoOpen):
+                    library.begin_write()
+            with mock.patch.object(library, "_process_is_serato", side_effect=subprocess.TimeoutExpired("ps", 2)):
+                info = library.status()
+            self.assertTrue(info["open"])
+            self.assertFalse(info["writable"])
+            failed = mock.Mock(returncode=1, stdout="")
+            with mock.patch("library.subprocess.run", return_value=failed):
+                self.assertTrue(library._process_is_serato(99))
+            backups = temp.db.resolve().parent / "Backups"
+            stamped = list(backups.glob("serato-web-*")) if backups.is_dir() else []
+            self.assertEqual(stamped, [])
 
     def test_save_track_updates_the_row_and_backs_up(self) -> None:
         """Save a title and BPM, and copy the database once.

@@ -29,7 +29,7 @@ import snapshot_frames
 import snapshots
 from library import LibraryError
 from snapshots import DriveSpec, SnapshotBlocked, SnapshotStore
-from tests.fixture import TempLibrary
+from tests.fixture import TempLibrary, open_database
 
 
 def _geob(description: str, payload: bytes) -> bytes:
@@ -880,6 +880,193 @@ class SnapshotTests(unittest.TestCase):
             self.assertTrue(loaded["grids"])
             self.assertTrue(loaded["tags"])
 
+    def test_non_numeric_version_blocks(self) -> None:
+        """Block a version that is not a dotted number.
+
+        Returns:
+            None. The test fails if ``v5.0`` is treated as a known release.
+        """
+        blocked = snapshots.write_block_message(snapshots.SeratoInstall("v5.0", "x", "on"))
+        self.assertIsNotNone(blocked)
+        assert blocked is not None
+        self.assertIn("unknown", blocked.lower())
+        self.assertIsNone(snapshots.write_block_message(snapshots.SeratoInstall("4.1.0", "4.1.0.1", "off")))
+        self.assertIsNotNone(snapshots.write_block_message(snapshots.SeratoInstall("5.0.0", "5.0.0.1251", "off")))
+
+    def test_restore_rechecks_serato_before_audio_and_rollback(self) -> None:
+        """Stop before audio, and before rollback, when Serato starts mid-restore.
+
+        Returns:
+            None. The test fails if the audio file is restored or the
+            pre-restore database is written back while Serato is running.
+        """
+        with TempLibrary() as temp:
+            music, serato, store = _drive(temp.root, temp.db)
+            track = music / "track.mp3"
+            good = _audio_file(track)
+            (serato / "Subcrates").mkdir(parents=True)
+            (serato / "Subcrates" / "House.crate").write_bytes(_crate(["track.mp3"]))
+            with open_database(temp.db) as conn:
+                original = conn.execute("SELECT name FROM asset WHERE id = 1").fetchone()
+            assert original is not None
+            saved = store.take("manual", "Good audio.")
+            track.write_bytes(b"not-the-snapshot")
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET name = ? WHERE id = 1", ("Changed",))
+            crates_done = {"value": False}
+
+            def drives(manifest: dict[str, object]) -> None:
+                SnapshotStore._apply_drives(store, manifest)
+                crates_done["value"] = True
+
+            def running() -> bool:
+                return crates_done["value"]
+
+            store.serato_running = running
+            store._apply_drives = drives  # type: ignore[method-assign]
+            with self.assertRaises(SnapshotBlocked):
+                store.restore(saved["id"])
+            self.assertEqual(track.read_bytes(), b"not-the-snapshot")
+            with open_database(temp.db) as conn:
+                name = conn.execute("SELECT name FROM asset WHERE id = 1").fetchone()
+            assert name is not None
+            self.assertEqual(name[0], original[0])
+            self.assertNotEqual(track.read_bytes(), good)
+
+    def test_keyboard_interrupt_rolls_the_restore_back(self) -> None:
+        """Put the pre-restore snapshot back when the restore is interrupted.
+
+        Returns:
+            None. The test fails if the database stays on the half-applied copy.
+        """
+        with TempLibrary() as temp:
+            _music, serato, store = _drive(temp.root, temp.db)
+            (serato / "Subcrates").mkdir(parents=True)
+            saved = store.take("manual", "Original database.")
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET name = ? WHERE id = 1", ("Changed",))
+            def boom(manifest: dict[str, object]) -> None:
+                store._apply_drives = SnapshotStore._apply_drives.__get__(store, SnapshotStore)
+                raise KeyboardInterrupt()
+
+            store._apply_drives = boom  # type: ignore[method-assign]
+            with self.assertRaises(KeyboardInterrupt):
+                store.restore(saved["id"])
+            with open_database(temp.db) as conn:
+                name = conn.execute("SELECT name FROM asset WHERE id = 1").fetchone()
+            assert name is not None
+            self.assertEqual(name[0], "Changed")
+            self.assertFalse((store.root / "restore-journal.json").exists())
+
+    def test_unfinished_restore_rolls_back_when_the_store_opens(self) -> None:
+        """Roll back a restore that was killed after the database replace.
+
+        Returns:
+            None. The test fails if the opened store leaves the half-applied
+            database in place.
+        """
+        with TempLibrary() as temp:
+            _music, _serato, store = _drive(temp.root, temp.db)
+            with open_database(temp.db) as conn:
+                original = conn.execute("SELECT name FROM asset WHERE id = 1").fetchone()
+            assert original is not None
+            saved = store.take("manual", "Original database.")
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET name = ? WHERE id = 1", ("Changed",))
+            pre = store.take("before-restore", "Before the interrupted restore.")
+            store._write_restore_journal(saved["id"], pre["id"])
+            store._apply_database(store._manifest(saved["id"]))
+            with open_database(temp.db) as conn:
+                midway = conn.execute("SELECT name FROM asset WHERE id = 1").fetchone()
+            assert midway is not None
+            self.assertEqual(midway[0], original[0])
+            healed = SnapshotStore(temp.db, store.drives)
+            with open_database(temp.db) as conn:
+                name = conn.execute("SELECT name FROM asset WHERE id = 1").fetchone()
+            assert name is not None
+            self.assertEqual(name[0], "Changed")
+            self.assertFalse((healed.root / "restore-journal.json").exists())
+
+    def test_windows_aliases_of_lexicon_are_excluded(self) -> None:
+        """Exclude Lexicon under a trailing dot, a trailing space, or a stream name.
+
+        Returns:
+            None. The test fails if any of those paths is stored or restored.
+        """
+        for rel in ("Lexicon./old.db", "Lexicon /old.db", "Lexicon::$DATA/old.db"):
+            self.assertTrue(snapshots._excluded_relative(rel))
+        with TempLibrary() as temp:
+            _music, serato, store = _drive(temp.root, temp.db)
+            secret = b"do-not-touch"
+            created: list[Path] = []
+            for name in ("Lexicon.", "Lexicon ", "Lexicon::$DATA"):
+                folder = serato / name
+                try:
+                    folder.mkdir()
+                except OSError:
+                    continue
+                if folder.name != name:
+                    continue
+                (folder / "old.db").write_bytes(secret)
+                created.append(folder)
+            saved = store.take("manual", "Aliases present.")
+            manifest = store._manifest(saved["id"])
+            stored = [
+                str(item["path"])
+                for drive in manifest["drives"]
+                if isinstance(drive, dict)
+                for item in drive.get("files", [])
+                if isinstance(item, dict)
+            ]
+            self.assertFalse(any(snapshots._excluded_relative(path) for path in stored))
+            self.assertFalse(any("lexicon" in path.casefold() for path in stored))
+            for folder in created:
+                (folder / "old.db").write_bytes(b"changed")
+                (folder / "new.db").write_bytes(b"added")
+            store.restore(saved["id"])
+            for folder in created:
+                self.assertEqual((folder / "old.db").read_bytes(), b"changed")
+                self.assertEqual((folder / "new.db").read_bytes(), b"added")
+
+    def test_music_path_snapshots_the_audio_directory(self) -> None:
+        """Snapshot a clip stored in audio/ when the crate says Music/.
+
+        Returns:
+            None. The test fails if the fixture layout is skipped.
+        """
+        with TempLibrary() as temp:
+            music, serato, store = _drive(temp.root, temp.db)
+            audio = music / "audio"
+            audio.mkdir()
+            track = audio / "one-grid.mp3"
+            _audio_file(track)
+            (serato / "Subcrates").mkdir(parents=True)
+            (serato / "Subcrates" / "House.crate").write_bytes(_crate(["Music/one-grid.mp3"]))
+            saved = store.take("manual", "Fixture audio path.")
+            loaded = store.load(saved["id"])
+            paths = [row["path"] for row in loaded["cues"]]
+            self.assertTrue(any(str(path).endswith("one-grid.mp3") for path in paths))
+
+    def test_plain_hash_does_not_verify_a_manifest(self) -> None:
+        """Reject a manifest whose sha256 was not signed with the store key.
+
+        Returns:
+            None. The test fails if a bare SHA-256 is accepted.
+        """
+        with TempLibrary() as temp:
+            _music, _serato, store = _drive(temp.root, temp.db)
+            saved = store.take("manual", "Signed.")
+            folder = store._snapshot_dir(saved["id"])
+            payload = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+            payload["reason"] = "forged"
+            payload.pop("sha256")
+            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            payload["sha256"] = hashlib.sha256(canonical).hexdigest()
+            (folder / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+            completeness.write_complete_marker(folder)
+            with self.assertRaises(snapshots.SnapshotError):
+                store._manifest(saved["id"])
+
     def _flip_frames(self, path: Path, frames: dict[str, bytes]) -> None:
         """Flip the last byte of each stored frame.
 
@@ -1135,6 +1322,50 @@ class CompletenessTests(unittest.TestCase):
             self.assertFalse(completeness.is_complete(folder))
             payload["hashes"]["a.txt"] = "z" * 64
             marker_path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertFalse(completeness.is_complete(folder))
+
+    def test_missing_marker_keys_fail(self) -> None:
+        """Reject a marker that omits version, algorithm, or hashes.
+
+        Returns:
+            None. The test fails if a short object is complete.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw) / "snap"
+            folder.mkdir()
+            (folder / "a.txt").write_bytes(b"a")
+            completeness.write_complete_marker(folder)
+            marker_path = folder / "COMPLETE"
+            payload = json.loads(marker_path.read_text(encoding="utf-8"))
+            for key in ("version", "algorithm", "hashes"):
+                short = dict(payload)
+                short.pop(key)
+                marker_path.write_text(json.dumps(short), encoding="utf-8")
+                self.assertFalse(completeness.is_complete(folder), key)
+
+    def test_path_outside_the_directory_is_incomplete(self) -> None:
+        """Reject a marker path that leaves the directory.
+
+        Returns:
+            None. The test fails if ``..`` or a shortcut is hashed.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            folder = root / "snap"
+            folder.mkdir()
+            (folder / "a.txt").write_bytes(b"a")
+            completeness.write_complete_marker(folder)
+            outside = root / "secret.txt"
+            outside.write_bytes(b"secret")
+            payload = json.loads((folder / "COMPLETE").read_text(encoding="utf-8"))
+            payload["hashes"]["../secret.txt"] = hashlib.sha256(b"secret").hexdigest()
+            (folder / "COMPLETE").write_text(json.dumps(payload), encoding="utf-8")
+            self.assertFalse(completeness.is_complete(folder))
+            payload = json.loads((folder / "COMPLETE").read_text(encoding="utf-8"))
+            payload["hashes"].pop("../secret.txt")
+            (folder / "COMPLETE").write_text(json.dumps(payload), encoding="utf-8")
+            link = folder / "link.txt"
+            link.symlink_to(outside)
             self.assertFalse(completeness.is_complete(folder))
 
     def test_legacy_backup_is_checked_on_a_copy(self) -> None:

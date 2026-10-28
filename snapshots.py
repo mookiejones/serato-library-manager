@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -66,6 +67,9 @@ AUDIO_SUFFIXES = {".mp3", ".flac", ".m4a", ".aiff", ".aif"}
 LUCID_BEATGRID_VERIFIED = False
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$")
 _HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
+_JOURNAL_NAME = "restore-journal.json"
+_KEY_NAME = "manifest.key"
 _MAX_FILE = 512 * 1024 * 1024
 _LEXICON_WINDOW = 3.0
 
@@ -253,14 +257,16 @@ def write_block_message(install: SeratoInstall | None = None) -> str | None:
         The refusal, or None when a known Serato older than 5 may be written.
     """
     chosen = install if install is not None else read_install()
-    if chosen.version == "unknown":
+    parsed = _parsed_version(chosen.version)
+    if parsed is None:
         return (
             f"Serato version is unknown (build {chosen.build}). "
             "Writes and restores are off until the installed Serato version can be read. "
-            "An unreadable plist is treated as unknown. Snapshots can still be taken and read."
+            "A value that is not a dotted number, including an unreadable plist, is unknown. "
+            "Snapshots can still be taken and read."
         )
     install = chosen
-    if not _is_serato_5(install.version):
+    if parsed[0] < 5:
         return None
     if install.protect == "off" and LUCID_BEATGRID_VERIFIED:
         return None
@@ -461,6 +467,7 @@ class SnapshotStore:
         self.serato_running = serato_dj_running
         self.process_names: Callable[[], Sequence[str]] = default_process_names
         self._depth = 0
+        self._recover_if_journal()
 
     def list_snapshots(self) -> list[SnapshotInfo]:
         """Return snapshots, newest first.
@@ -478,7 +485,7 @@ class SnapshotStore:
                 manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, UnicodeError):
                 continue
-            if isinstance(manifest, dict) and isinstance(manifest.get("id"), str) and _body_digest_matches(manifest):
+            if isinstance(manifest, dict) and isinstance(manifest.get("id"), str) and _body_digest_matches(manifest, self._manifest_key()):
                 rows.append(_info(manifest))
         rows.sort(key=lambda item: item["created"], reverse=True)
         return rows
@@ -588,6 +595,175 @@ class SnapshotStore:
         if status.get("open"):
             raise SnapshotBlocked(str(status.get("message") or SERATO_RUNNING_MESSAGE))
 
+    def _refuse_if_running(self) -> None:
+        """Refuse before the next restore phase when Serato DJ is running.
+
+        Raises:
+            SnapshotBlocked: If the process check says Serato DJ is running,
+                or if that check errors or times out.
+        """
+        if self.serato_running():
+            raise SnapshotBlocked(SERATO_RUNNING_MESSAGE)
+
+    def _write_restore_journal(self, target_id: str, undo_id: str) -> None:
+        """Record the pre-restore snapshot before the first file is replaced.
+
+        Args:
+            target_id: Snapshot that is about to be restored.
+            undo_id: Snapshot that puts the library back.
+
+        Raises:
+            SnapshotError: If the journal cannot be written inside the store.
+        """
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self.root / _JOURNAL_NAME
+        if path.is_symlink() or not _contained(path, self.root):
+            raise SnapshotError("The restore journal is not inside the snapshot store.")
+        payload = json.dumps(
+            {"version": 1, "target": target_id, "undo": undo_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        _atomic_write(path, payload)
+
+    def _clear_restore_journal(self) -> None:
+        """Remove the restore journal after a finished restore or rollback.
+
+        Raises:
+            SnapshotError: If the journal is a shortcut or leaves the store.
+        """
+        path = self.root / _JOURNAL_NAME
+        if not path.exists() and not path.is_symlink():
+            return
+        if path.is_symlink() or not _contained(path, self.root):
+            raise SnapshotError("The restore journal is not inside the snapshot store.")
+        path.unlink()
+
+    def _rollback_restore(self, undo_id: str, exc: BaseException) -> None:
+        """Put the pre-restore snapshot back, then raise.
+
+        Serato DJ is checked again before any file is replaced. A
+        ``KeyboardInterrupt`` or ``SystemExit`` is raised again after the
+        library is put back.
+
+        Args:
+            undo_id: Snapshot saved before the restore.
+            exc: Failure from the restore that was in progress.
+
+        Raises:
+            SnapshotBlocked: If Serato DJ is running. The journal stays.
+            SnapshotError: If the library was put back, or if that also failed.
+            KeyboardInterrupt: After a successful rollback, when that was the
+                original failure.
+            SystemExit: After a successful rollback, when that was the
+                original failure.
+        """
+        if self.serato_running():
+            raise SnapshotBlocked(SERATO_RUNNING_MESSAGE) from exc
+        try:
+            self._apply(undo_id)
+        except BaseException as rollback:
+            raise SnapshotError(
+                f"Restore failed and snapshot {undo_id} could not be put back either."
+            ) from rollback
+        self._clear_restore_journal()
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise exc
+        raise SnapshotError(
+            f"Restore failed. The library was put back using snapshot {undo_id}."
+        ) from exc
+
+    def recover_interrupted_restore(self) -> bool:
+        """Roll an unfinished restore back to the snapshot from before it.
+
+        Returns:
+            True when a journal was found and the pre-restore snapshot was
+            applied. False when there is no journal.
+
+        Raises:
+            SnapshotBlocked: If Serato DJ is running. The journal stays.
+            SnapshotError: If the journal or the pre-restore snapshot is not
+                valid. The journal stays.
+        """
+        path = self.root / _JOURNAL_NAME
+        if path.is_symlink() or not _contained(path, self.root):
+            raise SnapshotError("The restore journal is not inside the snapshot store.")
+        if not path.is_file():
+            return False
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SnapshotError("The restore journal could not be read.") from exc
+        undo = payload.get("undo") if isinstance(payload, dict) else None
+        if not isinstance(undo, str):
+            raise SnapshotError("The restore journal is not valid.")
+        self._refuse_if_running()
+        if not completeness.is_complete(self._snapshot_dir(undo)):
+            raise SnapshotError("The pre-restore snapshot is incomplete.")
+        self._verify(self._manifest(undo))
+        self._apply(undo)
+        self._clear_restore_journal()
+        self.rebase_fingerprint()
+        return True
+
+    def _recover_if_journal(self) -> None:
+        """Roll back an unfinished restore when this store is opened.
+
+        A missing journal does nothing. A failure is logged and the journal
+        is left in place so the next open can try again.
+        """
+        path = self.root / _JOURNAL_NAME
+        try:
+            if not path.is_file() or path.is_symlink():
+                return
+        except OSError:
+            return
+        try:
+            self.recover_interrupted_restore()
+        except SnapshotBlocked:
+            app_log.logger.warning("An unfinished restore is waiting until Serato DJ quits.")
+        except (OSError, SnapshotError, snapshot_frames.FrameRewriteError):
+            app_log.logger.exception("An unfinished restore could not be rolled back.")
+
+    def _manifest_key(self) -> bytes:
+        """Return the key that signs manifest hashes for this library.
+
+        The key is 32 random bytes in ``manifest.key`` beside the snapshot
+        store, not inside a snapshot directory. Replacing a manifest without
+        this key fails the check. Replacing the key file as well can still
+        produce a matching hash; the file mode is ``0o600``.
+
+        Returns:
+            The key bytes.
+
+        Raises:
+            SnapshotError: If the key is missing, the wrong length, or not
+                inside the store.
+        """
+        self.root.mkdir(parents=True, exist_ok=True)
+        path = self.root / _KEY_NAME
+        if path.is_symlink() or not _contained(path, self.root):
+            raise SnapshotError("The manifest key is not inside the snapshot store.")
+        if path.is_file():
+            key = path.read_bytes()
+            if len(key) != 32:
+                raise SnapshotError("The manifest key is not valid.")
+            return key
+        key = secrets.token_bytes(32)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            key = path.read_bytes()
+            if len(key) != 32:
+                raise SnapshotError("The manifest key is not valid.")
+            return key
+        try:
+            os.write(fd, key)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        return key
+
     def restore(self, snapshot_id: str) -> dict[str, object]:
         """Restore one snapshot after saving the current library.
 
@@ -615,18 +791,12 @@ class SnapshotStore:
         self._verify(self._manifest(pre["id"]))
         if self.serato_running():
             raise SnapshotBlocked(SERATO_RUNNING_MESSAGE)
+        self._write_restore_journal(snapshot_id, pre["id"])
         try:
             self._apply(snapshot_id)
-        except Exception as exc:
-            try:
-                self._apply(pre["id"])
-            except Exception as rollback:
-                raise SnapshotError(
-                    f"Restore failed and snapshot {pre['id']} could not be put back either."
-                ) from rollback
-            raise SnapshotError(
-                f"Restore failed. The library was put back using snapshot {pre['id']}."
-            ) from exc
+        except BaseException as exc:
+            self._rollback_restore(pre["id"], exc)
+        self._clear_restore_journal()
         self.rebase_fingerprint()
         return {
             "ok": True,
@@ -823,8 +993,11 @@ class SnapshotStore:
         """
         manifest = self._manifest(snapshot_id)
         self._verify(manifest)
+        self._refuse_if_running()
         self._apply_database(manifest)
+        self._refuse_if_running()
         self._apply_drives(manifest)
+        self._refuse_if_running()
         self._apply_tracks(manifest)
 
     def _apply_database(self, manifest: Mapping[str, object]) -> None:
@@ -1278,7 +1451,7 @@ class SnapshotStore:
             raise SnapshotError("That snapshot could not be read.") from exc
         if not isinstance(manifest, dict) or manifest.get("id") != snapshot_id:
             raise SnapshotError("That snapshot could not be read.")
-        if not _body_digest_matches(manifest):
+        if not _body_digest_matches(manifest, self._manifest_key()):
             raise SnapshotError("That snapshot manifest does not match its hash.")
         return manifest
 
@@ -1335,7 +1508,7 @@ class SnapshotStore:
                 manifest.pop("sha256", None)
                 continue
             manifest.pop("sha256", None)
-            manifest["sha256"] = _body_digest(manifest)
+            manifest["sha256"] = _body_digest(manifest, self._manifest_key())
             payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
             try:
                 completeness.publish_directory(folder, {"manifest.json": payload})
@@ -2098,14 +2271,28 @@ def _resolve_track(text: str, music_root: Path) -> Path | None:
         The file, or None when it is missing, a shortcut, or outside the root.
     """
     raw = text.replace("\\", "/").lstrip("/")
-    if not raw or ".." in Path(raw).parts:
+    parts = [part for part in raw.split("/") if part != ""]
+    if not raw or not parts or any(part in {".", ".."} for part in parts):
         return None
-    candidate = (music_root / raw).resolve()
-    if _contained(candidate, music_root.resolve()) and candidate.is_file() and not candidate.is_symlink():
-        return candidate
-    direct = (music_root / Path(raw).name).resolve()
-    if direct != candidate and _contained(direct, music_root.resolve()) and direct.is_file() and not direct.is_symlink():
-        return direct
+    if any(":" in part for part in parts):
+        return None
+    relatives = [raw]
+    # Format fixtures record Music/track.mp3 and keep the clip in audio/.
+    if len(parts) > 1 and _fold_component(parts[0]) == "music":
+        relatives.append("/".join(["audio", *parts[1:]]))
+    if parts[-1] not in relatives:
+        relatives.append(parts[-1])
+    root = music_root.resolve()
+    for rel in relatives:
+        candidate = (music_root / rel)
+        if candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if _contained(resolved, root) and resolved.is_file():
+            return resolved
     return None
 
 
@@ -2126,7 +2313,7 @@ def _iter_serato_files(root: Path) -> list[tuple[str, Path]]:
         current = Path(dirpath)
         dirnames[:] = [
             name for name in dirnames
-            if name.casefold() not in _EXCLUDED_FOLDED and not (current / name).is_symlink()
+            if _fold_component(name) not in _EXCLUDED_FOLDED and not (current / name).is_symlink()
         ]
         for name in filenames:
             path = current / name
@@ -2138,7 +2325,7 @@ def _iter_serato_files(root: Path) -> list[tuple[str, Path]]:
             except OSError:
                 continue
             rel = path.relative_to(root).as_posix()
-            if _excluded_relative(rel):
+            if _excluded_relative(rel) or _fold_component(name) in _EXCLUDED_FOLDED:
                 continue
             found.append((rel, path))
     return found
@@ -2240,14 +2427,33 @@ def _safe_relative(value: str) -> str:
         SnapshotError: If the path is absolute, climbs out, or names
             ``Export Backups`` or ``Lexicon``.
     """
-    if not value or value.startswith(("/", "\\")) or ":" in value:
+    if not value or value.startswith(("/", "\\")):
         raise SnapshotError("A snapshot path is not valid.")
-    path = Path(value)
-    if path.is_absolute() or ".." in path.parts:
+    text = value.replace("\\", "/")
+    parts = text.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
         raise SnapshotError("A snapshot path is not valid.")
-    if _excluded_relative(value):
+    if _excluded_relative(text):
         raise SnapshotError("Export Backups and Lexicon are not restored.")
-    return path.as_posix()
+    if any(":" in part for part in parts):
+        raise SnapshotError("A snapshot path is not valid.")
+    return "/".join(parts)
+
+
+def _fold_component(part: str) -> str:
+    """Normalize one path component before an exclusion check.
+
+    Trailing dots and spaces are removed first. Windows treats ``Lexicon.``
+    and ``Lexicon `` as ``Lexicon``. Text after a colon is an alternate data
+    stream, so ``Lexicon::$DATA`` is compared as ``Lexicon``.
+
+    Args:
+        part: One path component.
+
+    Returns:
+        The folded name.
+    """
+    return part.split(":", 1)[0].rstrip(" .").casefold()
 
 
 def _excluded_relative(value: str) -> bool:
@@ -2258,9 +2464,11 @@ def _excluded_relative(value: str) -> bool:
 
     Returns:
         True when any path part matches ``Export Backups`` or ``Lexicon``
-        ignoring case. A sibling such as ``Export Backups-extra`` is not excluded.
+        after trailing dots, spaces, and an alternate-data-stream suffix are
+        removed. A sibling such as ``Export Backups-extra`` is not excluded.
     """
-    return any(part.casefold() in _EXCLUDED_FOLDED for part in Path(value).parts)
+    parts = value.replace("\\", "/").split("/")
+    return any(_fold_component(part) in _EXCLUDED_FOLDED for part in parts if part)
 
 
 def _join(root: Path, rel: str) -> Path:
@@ -2330,31 +2538,40 @@ def _clear_sqlite_sidecars(path: Path, library_dir: Path) -> None:
         sidecar.unlink()
 
 
-def _body_digest(manifest: Mapping[str, object]) -> str:
+def _body_digest(manifest: Mapping[str, object], key: bytes) -> str:
     """Hash a manifest without its own sha256 field.
+
+    The digest is HMAC-SHA256 with the library's manifest key. A copied
+    ``manifest.json`` does not verify on this machine unless that key is
+    copied too. The key file is not inside the snapshot directory.
 
     Args:
         manifest: Manifest object.
+        key: 32-byte key from ``manifest.key``.
 
     Returns:
-        The SHA-256 hex digest of the canonical JSON.
+        The HMAC-SHA256 hex digest of the canonical JSON.
     """
-    body = {key: value for key, value in manifest.items() if key != "sha256"}
+    body = {item: value for item, value in manifest.items() if item != "sha256"}
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
+    return hmac.new(key, canonical, hashlib.sha256).hexdigest()
 
 
-def _body_digest_matches(manifest: Mapping[str, object]) -> bool:
+def _body_digest_matches(manifest: Mapping[str, object], key: bytes) -> bool:
     """Return whether a manifest's sha256 matches its other fields.
 
     Args:
         manifest: Manifest that includes ``sha256``.
+        key: 32-byte key from ``manifest.key``.
 
     Returns:
-        True when the recorded digest matches.
+        True when the recorded HMAC matches.
     """
     recorded = manifest.get("sha256")
-    return isinstance(recorded, str) and recorded == _body_digest(manifest)
+    if not isinstance(recorded, str):
+        return False
+    expected = _body_digest(manifest, key)
+    return len(recorded) == len(expected) and hmac.compare_digest(recorded, expected)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -2835,6 +3052,21 @@ def _load_plist(path: Path) -> object | None:
         return None
 
 
+def _parsed_version(version: str) -> tuple[int, ...] | None:
+    """Parse a Serato version that is only decimal numbers.
+
+    Args:
+        version: A version string such as ``4.1.0`` or ``5.0.0``.
+
+    Returns:
+        The numeric components, or None when the text is not a dotted
+        number. ``v5.0`` and ``unknown`` are None.
+    """
+    if not _VERSION_RE.fullmatch(version):
+        return None
+    return tuple(int(part) for part in version.split("."))
+
+
 def _is_serato_5(version: str) -> bool:
     """Return whether a version string is Serato 5 or newer.
 
@@ -2842,13 +3074,12 @@ def _is_serato_5(version: str) -> bool:
         version: CFBundleShortVersionString, or ``unknown``.
 
     Returns:
-        True when the first numeric component is 5 or more.
+        True when the version is a dotted number and the first component
+        is 5 or more. Anything else is not treated as Serato 5 here; the
+        write gate blocks it as unknown.
     """
-    head = version.split(".", 1)[0]
-    try:
-        return int(head) >= 5
-    except ValueError:
-        return False
+    parsed = _parsed_version(version)
+    return parsed is not None and parsed[0] >= 5
 
 
 def _using_live_library() -> bool:
