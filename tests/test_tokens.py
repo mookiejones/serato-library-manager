@@ -166,6 +166,10 @@ class TokenSheetTests(unittest.TestCase):
         for name, token in aliases.items():
             self.assertIn(f"{name}: var({token})", text)
         self.assertIn("--row: 36px; /* must match ROW in app.js */", text)
+        source = (ROOT / "src" / "state.ts").read_text(encoding="utf-8")
+        self.assertIn("export const ROW = 36", source)
+        script = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("ROW = 36", script)
 
 
 def _rules(css: str) -> list[tuple[str, dict[str, str]]]:

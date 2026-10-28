@@ -25,5 +25,8 @@ env/
 build/
 dist/
 
+# Frontend toolchain. The bundled static/app.js is committed.
+node_modules/
+
 # MkDocs output from `mkdocs build -f docs/mkdocs.yml`
 /site/

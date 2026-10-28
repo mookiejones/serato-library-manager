@@ -53,6 +53,36 @@ jobs:
       - name: Run the suite
         run: python -m unittest discover -s tests -t . -v
 
+  frontend:
+    name: frontend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Typecheck the page
+        run: npx tsc --noEmit
+
+      - name: Reject any
+        run: npx eslint src
+
+      - name: Rebuild the page and fail if the bundle is stale
+        run: node scripts/build_frontend.mjs --check
+
   audit:
     name: dependency audit
     runs-on: ubuntu-latest

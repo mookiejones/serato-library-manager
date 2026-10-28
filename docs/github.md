@@ -8,7 +8,7 @@ The HTTP banner in `server.py` is `SeratoLibrary/1.0`. A release tag does not ch
 
 | Workflow | When it runs | What it does |
 |----------|----------------|--------------|
-| CI | Push to `main`, and every pull request | Tests, then audits the requirements files |
+| CI | Push to `main`, and every pull request | Tests, typechecks and rebuilds the page bundle, then audits the requirements files |
 | CodeQL | Push to `main`, and every pull request | Analyzes the Python source. There is no autobuild |
 | Dependency review | Pull requests only | Reviews dependency changes. It does not comment on the pull request |
 | Release | Tag `v*.*.*`, or a manual run | Builds the macOS disk images, the Windows installer, and the portable zip. A tag also publishes a GitHub Release |
@@ -18,7 +18,7 @@ A push to `main` runs CI and CodeQL once. When that push also changes `docs/` or
 
 Each workflow sets `permissions: contents: read` and a `timeout-minutes` value. A job that needs more access sets its own permissions, which replace the workflow floor. CI, CodeQL, and dependency review cancel an older run on the same ref. The release workflow does not. The Pages workflow does not cancel an in-progress run, because a publish should finish. The Pages deploy job sets `contents: read`, `pages: write`, and `id-token: write`.
 
-Actions are pinned to a commit SHA. The trailing comment is the version Dependabot matches. Dependabot opens a weekly Monday pull request for Python dependencies and another for GitHub Actions. Each group is one pull request, with a `deps` commit prefix, and at most five Python pull requests stay open.
+Actions are pinned to a commit SHA. The trailing comment is the version Dependabot matches. Dependabot opens a weekly Monday pull request for Python dependencies, another for the Node toolchain (`typescript`, `esbuild`, and ESLint), and another for GitHub Actions. Each group is one pull request, with a `deps` commit prefix, and at most five Python pull requests stay open. The Node group is one pull request as well.
 
 ### CI
 
@@ -31,6 +31,15 @@ The test job is a matrix:
 There is no macOS test job. The suite mocks platform paths, and a macOS runner costs ten times a Linux minute. Windows stays in the matrix because the app ships a Windows build.
 
 The Windows test job runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. No tag is passed on the command line. That is the same environment path the release job uses, and it runs on `windows-latest` for every pull request. `v0.0.0` is not a published release.
+
+The frontend job runs on `ubuntu-latest` and `windows-latest`. It installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit`, runs ESLint so `any` is rejected, then rebuilds `static/app.js` and fails if that file or `static/app.js.map` differs from the committed copies. The check names are `frontend (ubuntu-latest)` and `frontend (windows-latest)`. On your machine:
+
+```bash
+npm ci
+npx tsc --noEmit
+npx eslint src
+node scripts/build_frontend.mjs --check
+```
 
 The test job installs `requirements.txt`, then runs the suite. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
 
@@ -75,7 +84,7 @@ A pull request runs the three `build` legs when it changes `packaging/`, `serato
 
 Signing is a dormant hook in `scripts/release_sign.py`. The macOS step runs when `runner.os` is `macOS` and receives only `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_NOTARY_KEY_BASE64`, `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER_ID`. The Windows app step runs when `runner.os` is `Windows` and receives only `WINDOWS_CERTIFICATE_PFX_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD`. The installer step on Windows receives those same two Windows secrets. Those secrets are not configured. When every secret for that step is empty, the step prints `Signing skipped` and exits 0. When some are set and some are not, the step fails. The script does not print secret values. The Inno Setup script does not call SignTool.
 
-On a tag push, each build job checks the tag, installs the build file, bakes `_build_config.py`, runs `python -m PyInstaller serato-library.spec`, checks the frozen architecture, runs the signing step for that OS, then packs. A manual run does the same work and skips the bake, so the frozen app has no telemetry keys. A macOS job runs `pack-dmg`, which writes a UDZO disk image containing `Serato Library.app` and an Applications link, mounts that image, copies the app outside the repository, and launches it with `SERATO_LIBRARY_SMOKE`. A Windows job runs `pack` for the portable zip, installs Inno Setup 6.7.3 after checking its SHA-256, compiles the installer, runs the signing hook on the installer, then installs it into a temporary directory and launches that copy. The smoke path binds `127.0.0.1` on a free port, writes the URL and a shutdown token to the marker, and does not open the library, a browser, a menu icon, or telemetry. The harness GET `/api/health` and POST `/api/shutdown` with the token. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the file the command was writing.
+On a tag push, each build job checks the tag, installs the build file, bakes `_build_config.py`, runs `npm ci` and `npm run build` so the frozen app contains the page bundle from the TypeScript sources, runs `python -m PyInstaller serato-library.spec`, checks the frozen architecture, runs the signing step for that OS, then packs. A pull request that builds the app does the same page build before PyInstaller. A manual run does the same work and skips the bake, so the frozen app has no telemetry keys. A macOS job runs `pack-dmg`, which writes a UDZO disk image containing `Serato Library.app` and an Applications link, mounts that image, copies the app outside the repository, and launches it with `SERATO_LIBRARY_SMOKE`. A Windows job runs `pack` for the portable zip, installs Inno Setup 6.7.3 after checking its SHA-256, compiles the installer, runs the signing hook on the installer, then installs it into a temporary directory and launches that copy. The smoke path binds `127.0.0.1` on a free port, writes the URL and a shutdown token to the marker, and does not open the library, a browser, a menu icon, or telemetry. The harness GET `/api/health` and POST `/api/shutdown` with the token. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the file the command was writing.
 
 The pull-request `build` job only has `contents: read`. It builds, smoke-tests, and uploads the disk images, the portable zip, and the Windows installer. `release-build` runs on a tag push or a manual run and uploads the same files for the later jobs. `attest build provenance` downloads those artifacts and runs only on a tag push or a manual run. Its permissions are `contents: read`, `actions: read`, `id-token: write`, and `attestations: write`. A pull request never starts `release-build`, `attest`, or `publish`.
 
@@ -139,6 +148,8 @@ Wait until CI, CodeQL, and a pull-request dependency review have each completed 
 - `tests (ubuntu-latest, Python 3.12)`
 - `tests (ubuntu-latest, Python 3.14)`
 - `tests (windows-latest, Python 3.12)`
+- `frontend (ubuntu-latest)`
+- `frontend (windows-latest)`
 - `dependency audit`
 - `analyze Python`
 

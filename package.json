@@ -1,0 +1,17 @@
+{
+  "name": "serato-library-manager",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build_frontend.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "check": "tsc --noEmit && eslint src && node scripts/build_frontend.mjs --check"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "eslint": "10.13.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
