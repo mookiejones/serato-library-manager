@@ -1,0 +1,99 @@
+/*
+  Design tokens for the library page.
+
+  Green = safe/undoable. Amber = heads-up. Red = data leaves the library.
+
+  Names match the design system. Values are the walnut and manila palette
+  the page already uses, so this file does not change the screen.
+  design/tokens.css is the designer's dark reference and is not linked.
+
+  --color-safe and --color-warn are the text colors on manila
+  (--color-card) and on --color-safe-bg / --color-warn-bg.
+  --color-safe-on-dark and --color-warn-on-dark are the text colors on
+  walnut (--color-bg). --color-safe-border and --color-warn-text are
+  derived by mixing the safe and warn colors toward --color-text in
+  sRGB. The lightest mix that clears 4.5:1 on both manila and the
+  matching tint is the one kept.
+
+  Radius tokens are the design scale: 8, 12, and 14. The page keeps its
+  3px, 4px, and 10px corners. --radius-pill is used by .pill-preview.
+  Type sizes are the design scale. The page uses --font-heading and
+  --font-body where it already set 14px and 13px. Larger display sizes
+  stay in app.css. --font-family is Familjen Grotesk, the face already
+  loaded for the page.
+*/
+
+:root {
+  --color-bg: #231910;
+  --color-panel: #32261c;
+  --color-card: #f3ecdf;
+  --color-button: #e7ddcc;
+  --color-text: #1b140e;
+  --color-text-muted: #6f655b;
+  --color-text-faint: #9a8d7e;
+  --color-border: #d9cfbf;
+  --color-primary: #e23b16;
+  --color-danger: #a33a32;
+
+  /* Rail and sheet colors the role ramp does not name. */
+  --color-text-muted-on-dark: #cbbba6;
+  --color-text-faint-on-dark: #b5a490;
+  --color-border-on-dark: #5c4b3a;
+  --color-smart: #e7b9a4;
+  --color-column: #a39688;
+  --color-selection: #f6e3d4;
+  --color-shadow: #000000;
+
+  --color-safe: #3f7d4e;
+  --color-safe-on-dark: #7fbf8e;
+  --color-safe-bg: #e3eedf;
+  --color-safe-border: #3d764a;
+  --color-warn: #b7791f;
+  --color-warn-on-dark: #e0a83a;
+  --color-warn-text: #8e5e1b;
+  --color-warn-bg: #f5e6c8;
+
+  --radius-card: 8px;
+  --radius-panel: 12px;
+  --radius-pill: 14px;
+
+  --font-family: "Familjen Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  --font-title: 20px;
+  --font-heading: 14px;
+  --font-body: 13px;
+  --font-caption: 11px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+}
+
+/* Preview of the three meanings. Text uses the derived colors that clear
+   4.5:1. The raw safe and warn tokens are below that on manila. */
+.pill-preview {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-safe-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-safe-bg);
+  color: var(--color-safe-border);
+  font-family: var(--font-family);
+  font-size: var(--font-caption);
+  line-height: 1.4;
+}
+
+.pill-preview.warn {
+  border-color: var(--color-warn-text);
+  background: var(--color-warn-bg);
+  color: var(--color-warn-text);
+}
+
+.pill-preview.danger {
+  border-color: var(--color-danger);
+  background: var(--color-card);
+  color: var(--color-danger);
+}

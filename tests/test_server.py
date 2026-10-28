@@ -267,6 +267,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertIn(b"--walnut", body)
 
+    def test_tokens_css_is_a_stylesheet(self) -> None:
+        """Serve /tokens.css as text/css from static/.
+
+        The page links this file before app.css. The body is the walnut
+        and manila sheet, not the dark reference under design/.
+
+        Returns:
+            None. The test fails if the status, media type, or palette differs.
+        """
+        host, port = self.httpd.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.putrequest("GET", "/tokens.css")
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        content_type = response.getheader("Content-Type")
+        connection.close()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(content_type, "text/css; charset=utf-8")
+        self.assertIn(b"--color-bg: #231910", body)
+        self.assertNotIn(b"#0d0f14", body)
+
     def test_save_and_read_track(self) -> None:
         """Save a comment through POST ``/api/track`` and read it back.
 

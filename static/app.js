@@ -177,7 +177,7 @@ function sizeLabel(bytes) {
  * is omitted. No request is made.
  *
  * @param {number|string|null|undefined} color Serato color integer.
- * @returns {string} "#rrggbb", or an empty string when there is no color.
+ * @returns {string} A CSS color with a leading hash and six digits, or an empty string when there is no color.
  */
 function colorHex(color) {
   if (color == null || Number(color) === 0xffffff) return "";
@@ -1090,7 +1090,7 @@ function renderDetail(track) {
     const cell = document.createElement("div");
     const strong = document.createElement("strong");
     strong.textContent = value || "—";
-    if (label === "BPM") strong.style.color = "var(--cadmium)";
+    if (label === "BPM") strong.className = "bpm";
     const span = document.createElement("span");
     span.textContent = label;
     cell.append(strong, span);
@@ -1099,11 +1099,8 @@ function renderDetail(track) {
   if (track.color) {
     const cell = document.createElement("div");
     const swatch = document.createElement("span");
-    swatch.className = "swatch";
+    swatch.className = "swatch swatch-lg";
     swatch.style.background = track.color;
-    swatch.style.width = "18px";
-    swatch.style.height = "18px";
-    swatch.style.marginTop = "8px";
     const span = document.createElement("span");
     span.textContent = "Color";
     cell.append(swatch, span);

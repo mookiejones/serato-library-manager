@@ -27,16 +27,17 @@ class AssetTests(unittest.TestCase):
     build an app.
     """
     def test_library_page_assets(self) -> None:
-        """List the local stylesheet and script on the library page.
+        """List the local stylesheets and script on the library page.
 
         Remote font links must not count as bundled files. The order is the
-        order of the tags.
+        order of the tags. tokens.css comes before app.css.
 
         Returns:
             None. The test fails if the page names a different local file.
         """
         names = static_assets.local_asset_names(ROOT / "static" / "index.html")
-        self.assertEqual(names, ["app.css", "app.js"])
+        self.assertEqual(names, ["tokens.css", "app.css", "app.js"])
+        self.assertEqual(static_assets.missing_static_files(ROOT / "static"), [])
 
     def test_remote_links_are_not_assets(self) -> None:
         """Skip an https link and keep a local script with a query string.
