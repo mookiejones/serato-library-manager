@@ -753,6 +753,11 @@ class SnapshotTests(unittest.TestCase):
 
         self.assertTrue(snapshots.serato_dj_running(fail_listing))
         self.assertTrue(snapshots.serato_dj_running(time_out))
+        failed = subprocess.CompletedProcess(["ps", "-ax", "-o", "comm="], 1, stdout="", stderr="ps failed")
+        with mock.patch("snapshots.subprocess.run", return_value=failed):
+            with self.assertRaises(OSError):
+                snapshots._run(["ps", "-ax", "-o", "comm="])
+            self.assertTrue(snapshots.serato_dj_running())
         with TempLibrary() as temp:
             _music, serato, store = _drive(temp.root, temp.db)
             crate = serato / "Subcrates" / "House.crate"
@@ -967,6 +972,11 @@ class SnapshotTests(unittest.TestCase):
         self.assertIsNotNone(blocked)
         assert blocked is not None
         self.assertIn("unknown", blocked.lower())
+        for version in ("5.0-beta", ""):
+            message = snapshots.write_block_message(snapshots.SeratoInstall(version, "x", "off"))
+            self.assertIsNotNone(message, version)
+            assert message is not None
+            self.assertIn("unknown", message.lower())
         self.assertIsNone(snapshots.write_block_message(snapshots.SeratoInstall("4.1.0", "4.1.0.1", "off")))
         self.assertIsNotNone(snapshots.write_block_message(snapshots.SeratoInstall("5.0.0", "5.0.0.1251", "off")))
 

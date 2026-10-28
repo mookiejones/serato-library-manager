@@ -310,8 +310,9 @@ def serato_dj_running(runner: Callable[[list[str]], str] | None = None) -> bool:
 
     macOS uses ``ps``. Windows uses ``tasklist``. The command name must
     contain both ``serato`` and ``dj``. This process and a path that only
-    contains ``serato-library`` do not count. A command failure or a timeout
-    is treated as running, so a restore stops. The result is not cached.
+    contains ``serato-library`` do not count. A command failure, a non-zero
+    exit, or a timeout is treated as running, so a restore stops. The result
+    is not cached.
 
     Args:
         runner: Replacement for the process command. Tests pass one.
@@ -2861,10 +2862,13 @@ def _run(command: list[str]) -> str:
         Standard output.
 
     Raises:
-        OSError: If the command cannot start.
+        OSError: If the command cannot start or exits non-zero. A non-zero
+            exit is not a process list, so the caller treats it as unread.
         subprocess.TimeoutExpired: If it runs longer than two seconds.
     """
     result = subprocess.run(command, capture_output=True, text=True, timeout=2, check=False)
+    if result.returncode != 0:
+        raise OSError(result.returncode, result.stderr.strip() or "process list failed")
     return result.stdout
 
 
