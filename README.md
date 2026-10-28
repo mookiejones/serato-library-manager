@@ -14,7 +14,7 @@ A local window for the Serato DJ Pro library on macOS and Windows. Source on `ma
   <img alt="Serato Library Manager: restore your library to any point in time, checked against the saved backup, on every drive." src="docs/images/hero-light.png" width="100%">
 </picture>
 
-The hero is a product illustration. Screenshots of the running app are still placeholders.
+The hero is a product illustration. The screenshots below are the app on main `9d2bb92`, and they show example data. The app has one theme, so there is no dark variant.
 
 ## Install
 
@@ -52,15 +52,20 @@ These are on `main` (1.1.0).
 
 ### Screenshots
 
-The designer will replace each row. These are not pictures of the app.
+<figure>
+  <img alt="Crates view with an example library" src="docs/images/screenshot-home.png" width="100%">
+  <figcaption>Example data. Crates.</figcaption>
+</figure>
 
-| View | Placeholder |
-| --- | --- |
-| Crates | Screenshot placeholder |
-| Track detail | Screenshot placeholder |
-| Duplicates | Screenshot placeholder |
-| Snapshots | Screenshot placeholder |
-| Files | Screenshot placeholder |
+<figure>
+  <img alt="Snapshots view: reviewing a restore before anything is written" src="docs/images/screenshot-backups.png" width="100%">
+  <figcaption>Example data. Snapshots, reviewing a restore before anything is written.</figcaption>
+</figure>
+
+<figure>
+  <img alt="Prepare space for gig prep" src="docs/images/screenshot-gig-prep.png" width="100%">
+  <figcaption>Example data. Prepare.</figcaption>
+</figure>
 
 ## Architecture
 
