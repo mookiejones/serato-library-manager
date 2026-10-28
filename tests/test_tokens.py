@@ -23,29 +23,7 @@ HEX_COLOR = re.compile(
 )
 TOKEN_DECL = re.compile(r"(--[A-Za-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{6})\b")
 
-# Text needs 4.5:1. Manila is --color-card. Walnut is --color-bg.
-# The third item is the ratio rounded to two decimals.
-TEXT_PAIRS = (
-    ("safe-text on manila", "--color-safe-text", "--color-card", 5.43),
-    ("safe-text on safe-bg", "--color-safe-text", "--color-safe-bg", 5.34),
-    ("warn-text on manila", "--color-warn-text", "--color-card", 5.62),
-    ("warn-text on warn-bg", "--color-warn-text", "--color-warn-bg", 5.35),
-    ("safe-on-dark on walnut", "--color-safe-on-dark", "--color-bg", 8.00),
-    ("warn-on-dark on walnut", "--color-warn-on-dark", "--color-bg", 8.07),
-)
-
-# Borders, fills, and icons need 3:1. Warn on the tint uses the border token.
-NON_TEXT_PAIRS = (
-    ("safe on manila", "--color-safe", "--color-card", 4.20),
-    ("safe on safe-bg", "--color-safe", "--color-safe-bg", 4.13),
-    ("safe-border on manila", "--color-safe-border", "--color-card", 4.20),
-    ("safe-border on safe-bg", "--color-safe-border", "--color-safe-bg", 4.13),
-    ("warn on manila", "--color-warn", "--color-card", 3.10),
-    ("warn-border on warn-bg", "--color-warn-border", "--color-warn-bg", 5.35),
-)
-
-
-def _channel(value: int) -> float:
+def _channel(value: float) -> float:
     """Convert one sRGB channel to linear light.
 
     Args:
@@ -72,18 +50,20 @@ def _rgb(color: str) -> tuple[int, int, int]:
     return (int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
 
 
-def contrast(foreground: str, background: str) -> float:
-    """Return the WCAG contrast ratio of two #rrggbb colors.
+def contrast(foreground: str | tuple[float, float, float], background: str | tuple[float, float, float]) -> float:
+    """Return the WCAG contrast ratio of two colors.
+
+    The ratio is not rounded. Callers that print it round for display.
 
     Args:
-        foreground: Text color.
-        background: Surface color.
+        foreground: ``#rrggbb`` or a red/green/blue triple in 0..255.
+        background: ``#rrggbb`` or a red/green/blue triple in 0..255.
 
     Returns:
         The ratio, from 1 to 21. Higher is easier to read.
     """
-    def luminance(color: str) -> float:
-        red, green, blue = _rgb(color)
+    def luminance(color: str | tuple[float, float, float]) -> float:
+        red, green, blue = _rgb(color) if isinstance(color, str) else color
         return 0.2126 * _channel(red) + 0.7152 * _channel(green) + 0.0722 * _channel(blue)
 
     lighter = max(luminance(foreground), luminance(background))
@@ -188,66 +168,481 @@ class TokenSheetTests(unittest.TestCase):
         self.assertIn("--row: 36px; /* must match ROW in app.js */", text)
 
 
+def _rules(css: str) -> list[tuple[str, dict[str, str]]]:
+    """Split a stylesheet into selector and declaration pairs.
+
+    Args:
+        css: Stylesheet text. Comments are ignored. Rules inside an
+            at-rule are returned too.
+
+    Returns:
+        One entry per selector. Declarations are lower-case property
+        names and collapsed values.
+    """
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    found: list[tuple[str, dict[str, str]]] = []
+
+    def walk(text: str) -> None:
+        index = 0
+        while True:
+            start = text.find("{", index)
+            if start < 0:
+                return
+            selector = " ".join(text[index:start].split())
+            depth = 1
+            cursor = start + 1
+            while cursor < len(text) and depth:
+                if text[cursor] == "{":
+                    depth += 1
+                elif text[cursor] == "}":
+                    depth -= 1
+                cursor += 1
+            body = text[start + 1 : cursor - 1]
+            if selector.startswith("@"):
+                walk(body)
+            else:
+                props: dict[str, str] = {}
+                for chunk in body.split(";"):
+                    if ":" not in chunk:
+                        continue
+                    key, value = chunk.split(":", 1)
+                    props[key.strip().lower()] = " ".join(value.split())
+                for part in selector.split(","):
+                    found.append((" ".join(part.split()), props))
+            index = cursor
+
+    walk(css)
+    return found
+
+
+def _sheet_colors() -> dict[str, str]:
+    """Resolve token and alias colors to ``#rrggbb``.
+
+    Returns:
+        Custom property name to lowercase hex. Aliases in ``app.css``
+        point at the token sheet.
+    """
+    colors = token_colors(TOKENS.read_text(encoding="utf-8"))
+    colors.update(token_colors(APP_CSS.read_text(encoding="utf-8")))
+    aliases = {
+        "--walnut": "--color-bg",
+        "--walnut-lift": "--color-panel",
+        "--manila": "--color-card",
+        "--manila-deep": "--color-button",
+        "--ink": "--color-text",
+        "--quiet": "--color-text-muted",
+        "--cadmium": "--color-primary",
+        "--missing": "--color-danger",
+        "--rule": "--color-border",
+    }
+    for name, target in aliases.items():
+        colors[name] = colors[target]
+    return colors
+
+
+def _paint(value: str, colors: dict[str, str]) -> tuple[float, float, float]:
+    """Resolve a CSS color expression to red, green, and blue.
+
+    Args:
+        value: A ``var()``, hex color, or ``color-mix`` with transparent.
+        colors: Resolved custom properties.
+
+    Returns:
+        Channels from 0 to 255. A mix with transparent returns the solid
+        color; the caller applies the percentage over a surface.
+    """
+    value = value.strip()
+    mixed = re.search(r"var\(\s*(--[A-Za-z0-9-]+)\)\s*(\d+(?:\.\d+)?)%", value)
+    if mixed:
+        return _rgb(colors[mixed.group(1)])
+    named = re.search(r"var\(\s*(--[A-Za-z0-9-]+)", value)
+    if named:
+        return _rgb(colors[named.group(1)])
+    return _rgb(value)
+
+
+def _mix_amount(value: str) -> float | None:
+    """Return the color-mix percentage as a fraction.
+
+    Args:
+        value: Declaration value.
+
+    Returns:
+        The fraction, or None when the value is not a mix.
+    """
+    mixed = re.search(r"(\d+(?:\.\d+)?)%", value)
+    if "color-mix" not in value or mixed is None:
+        return None
+    return float(mixed.group(1)) / 100
+
+
+def _over(foreground: tuple[float, float, float], background: tuple[float, float, float], alpha: float) -> tuple[float, float, float]:
+    """Composite a color over a surface.
+
+    Args:
+        foreground: Solid color.
+        background: Surface.
+        alpha: Fraction of the foreground.
+
+    Returns:
+        The painted color.
+    """
+    return tuple(alpha * foreground[index] + (1 - alpha) * background[index] for index in range(3))
+
+
+def _length(value: str, colors: dict[str, str]) -> float:
+    """Resolve a font size to pixels.
+
+    Args:
+        value: A ``px`` length or ``var(--font-…)``.
+        colors: Unused except to read the token sheet sizes.
+
+    Returns:
+        The size in pixels.
+    """
+    named = re.search(r"var\(\s*(--[A-Za-z0-9-]+)", value)
+    if named:
+        token = {
+            "--font-title": 20,
+            "--font-heading": 14,
+            "--font-body": 13,
+            "--font-caption": 11,
+        }[named.group(1)]
+        return float(token)
+    return float(value.replace("px", "").strip())
+
+
+def _minimum(size: float, weight: int) -> float:
+    """Return the contrast bar for a font size and weight.
+
+    Args:
+        size: Font size in pixels.
+        weight: CSS font-weight.
+
+    Returns:
+        3 for large or bold text, otherwise 4.5. Large text is 24px or
+        more, or 18.66px or more at weight 700.
+    """
+    if size >= 24 or (size >= 18.66 and weight >= 700):
+        return 3.0
+    return 4.5
+
+
+# Text painted by app.css. The size and weight are the inherited values
+# when the rule itself does not set them. Background names are custom
+# properties, plus "hover" for the track-row wash.
+_TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
+    ("html", ("--color-card", "--color-selection", "hover", "--color-button"), 15, 400),
+    ("body", ("--color-card", "--color-selection", "hover", "--color-button"), 15, 400),
+    (".rail", ("--color-bg",), 15, 400),
+    (".brand p", ("--color-bg",), 14, 400),
+    (".rail select", ("--color-bg",), 15, 400),
+    (".rail-field input", ("--color-bg",), 15, 400),
+    (".view-switch button", ("--color-bg",), 15, 400),
+    (".sort-crates button", ("--color-bg",), 15, 400),
+    (".crate-actions button", ("--color-bg",), 15, 400),
+    ('.view-switch button[aria-selected="true"]', ("--color-bg",), 15, 400),
+    ('.sort-crates button[aria-pressed="true"]', ("--color-bg",), 15, 400),
+    (".rail-foot button", ("--color-bg",), 15, 400),
+    (".mode-note", ("--color-bg",), 13, 400),
+    (".crate-foot", ("--color-bg",), 13, 400),
+    (".crate-row", ("--color-bg", "--color-panel"), 15, 400),
+    (".twist", ("--color-bg", "--color-panel"), 15, 400),
+    (".twist:hover", ("--color-bg", "--color-panel"), 15, 400),
+    (".crate .meta", ("--color-bg", "--color-panel"), 12, 400),
+    (".crate .smart", ("--color-bg", "--color-panel"), 12, 400),
+    (".search input::placeholder", ("--color-card",), 15, 400),
+    (".count", ("--color-card",), 15, 400),
+    ("#reload", ("--color-card",), 15, 400),
+    ("#export-m3u", ("--color-card",), 15, 400),
+    ("#export-rekordbox", ("--color-card",), 15, 400),
+    ("#import-m3u", ("--color-card",), 15, 400),
+    (".text-button", ("--color-card",), 15, 400),
+    (".actions button", ("--color-card",), 15, 400),
+    (".rekordbox-option", ("--color-card",), 15, 400),
+    (".notice", ("--color-card",), 15, 400),
+    (".columns button", ("--color-card",), 15, 400),
+    ('.columns button[data-active="true"]', ("--color-card",), 15, 400),
+    (".cell.num", ("--color-card", "--color-selection", "hover"), 15, 400),
+    (".missing-word", ("--color-card", "--color-selection", "hover"), 15, 400),
+    (".empty-list", ("--color-card",), 15, 400),
+    (".detail-empty", ("--color-card",), 15, 400),
+    (".detail-error", ("--color-card",), 15, 400),
+    (".detail-kicker", ("--color-card",), 15, 400),
+    (".deck .bpm", ("--color-card",), 28, 500),
+    (".deck span", ("--color-card",), 13, 400),
+    (".field .label", ("--color-card",), 15, 400),
+    (".field .column", ("--color-card",), 12, 400),
+    (".rules", ("--color-card",), 13, 400),
+    (".rules strong", ("--color-card",), 13, 500),
+    (".related-meta", ("--color-card",), 15, 400),
+    (".related-note", ("--color-card",), 15, 400),
+    (".lock-note", ("--color-card",), 15, 400),
+    (".editor label", ("--color-card",), 13, 400),
+    ("dialog", ("--color-card",), 15, 400),
+    (".dialog-note", ("--color-card",), 15, 400),
+    (".dialog-status", ("--color-card",), 15, 400),
+    ("#consent-decline", ("--color-text",), 15, 400),
+    ("#settings-close", ("--color-text",), 15, 400),
+    ("#consent-accept", ("--color-card",), 15, 400),
+    ("#open-logs", ("--color-card",), 15, 400),
+    ("#copy-logs", ("--color-card",), 15, 400),
+    ("#rekordbox-download", ("--color-text",), 15, 400),
+    ("#rekordbox-cancel", ("--color-card",), 15, 400),
+    (".merge-meta", ("--color-card",), 15, 400),
+    (".merge-warning", ("--color-card",), 15, 400),
+    ("#merge-cancel", ("--color-card",), 15, 400),
+    ("#merge-confirm.danger", ("--color-danger",), 15, 400),
+    (".log-fallback", ("--color-card",), 15, 400),
+    (".files-badge", ("--color-card",), 13, 400),
+    (".files-kind", ("--color-card",), 13, 400),
+    (".files-empty", ("--color-card",), 15, 400),
+    ("#files-confirm.danger", ("--color-danger",), 15, 400),
+)
+
+# Large or inherited text whose color comes from an ancestor rule.
+_INHERITED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (".brand h1", ".rail", ("--color-bg",)),
+    (".detail h2", "body", ("--color-card",)),
+    (".deck strong", "body", ("--color-card",)),
+    ("dialog h2", "dialog", ("--color-card",)),
+    (".group h3", "body", ("--color-card",)),
+)
+
+# Focus rings are offset by 2px, so they sit on the surface around the
+# control: walnut, the crate row, the manila sheet, a selected row, and
+# a hovered row. Filled buttons sit on the sheet, so their ring is on
+# the card rather than on the fill.
+_FOCUS_SURFACES = ("--color-bg", "--color-panel", "--color-card", "--color-selection", "hover")
+
+# Decorative hairlines, exempt under WCAG 1.4.11. They are not the only
+# thing that identifies a control. --color-border on the manila card and
+# --color-border-on-dark on walnut stay as they are.
+#
+# --color-border on --color-card:
+#   .detail border-left, and border-top in the narrow layout
+#   .search input border-bottom
+#   .rekordbox-option select border-bottom
+#   .rule-edit textarea border
+#   .columns border-bottom
+#   .field border-top
+#   .editor input, .editor select, .editor textarea border-bottom
+#   .marker and .copy-row border-top
+#   .related-row border-top
+#   .related-search input, .related-form input, .related-form select border-bottom
+#   dialog border
+#   #merge-dialog fieldset border
+#   .log-fallback border
+#   .files-row border-top
+#   .files-actions border-top
+#   .files-field input border-bottom
+# --color-border-on-dark on --color-bg:
+#   .rail select and .rail-field input border-bottom
+# .swatch inset shadow: a 1px hairline of --color-shadow at 18% on a
+# data-driven swatch, not a control boundary.
+_DECORATIVE = {
+    ".detail",
+    ".search input",
+    ".rekordbox-option select",
+    ".rule-edit textarea",
+    ".columns",
+    ".field",
+    ".editor input",
+    ".editor select",
+    ".editor textarea",
+    ".marker",
+    ".copy-row",
+    ".related-row",
+    ".related-search input",
+    ".related-form input",
+    ".related-form select",
+    "dialog",
+    "#merge-dialog fieldset",
+    ".log-fallback",
+    ".files-row",
+    ".files-actions",
+    ".files-field input",
+    ".rail select",
+    ".rail-field input",
+    ".swatch",
+}
+
+
 class ContrastTests(unittest.TestCase):
-    """Measure text at 4.5:1 and borders, fills, and icons at 3:1."""
+    """Measure every token pair the page paints."""
 
     def setUp(self) -> None:
-        """Read the token sheet once for the contrast cases.
+        """Read the stylesheets and resolve their colors.
 
         Returns:
             None.
         """
-        self.colors = token_colors(TOKENS.read_text(encoding="utf-8"))
-        self.sheet = TOKENS.read_text(encoding="utf-8")
+        self.colors = _sheet_colors()
+        self.app_rules = _rules(APP_CSS.read_text(encoding="utf-8"))
+        self.token_rules = _rules(TOKENS.read_text(encoding="utf-8"))
 
-    def test_text_pairs_clear_body_contrast(self) -> None:
-        """Require 4.5:1 for every text token on its surface.
+    def _rule(self, selector: str, rules: list[tuple[str, dict[str, str]]] | None = None) -> dict[str, str]:
+        """Return the declarations of one selector.
 
-        Safe text and warn text are measured on manila and on their
-        tints. The on-dark tokens are measured on walnut. The ratios
-        are rounded to two decimals.
-
-        Returns:
-            None. The test fails if a text pair drops under 4.5:1.
-        """
-        for label, foreground, background, expected in TEXT_PAIRS:
-            ratio = round(contrast(self.colors[foreground], self.colors[background]), 2)
-            self.assertEqual(ratio, expected, label)
-            self.assertGreaterEqual(ratio, 4.5, label)
-
-    def test_non_text_pairs_clear_ui_contrast(self) -> None:
-        """Require 3:1 for borders, fills, and icons.
-
-        Safe and the safe border use ``#3f7d4e``. Warn on manila stays
-        ``#b7791f``. A warn border or icon on the warn tint uses
-        ``--color-warn-border`` (``#7f5417``). Every pair clears 3:1.
+        Args:
+            selector: A single selector, not a comma group.
+            rules: Rules to search. Defaults to ``app.css``.
 
         Returns:
-            None. The test fails if a non-text pair drops under 3:1.
+            The declaration map.
+
+        Raises:
+            AssertionError: If the selector is not in the stylesheet.
         """
-        self.assertEqual(self.colors["--color-safe"], "#3f7d4e")
-        self.assertEqual(self.colors["--color-safe-border"], "#3f7d4e")
-        self.assertEqual(self.colors["--color-warn"], "#b7791f")
-        self.assertEqual(self.colors["--color-warn-border"], "#7f5417")
-        self.assertEqual(self.colors["--color-safe-text"], "#356a41")
-        self.assertEqual(self.colors["--color-warn-text"], "#7f5417")
-        for label, foreground, background, expected in NON_TEXT_PAIRS:
-            ratio = round(contrast(self.colors[foreground], self.colors[background]), 2)
-            self.assertEqual(ratio, expected, label)
-            self.assertGreaterEqual(ratio, 3, label)
-        text_colors = [
-            line.split(":", 1)[1].strip().rstrip(";")
-            for line in self.sheet.splitlines()
-            if line.strip().startswith("color:")
-        ]
-        self.assertEqual(
-            text_colors,
-            [
-                "var(--color-safe-text)",
-                "var(--color-warn-text)",
-                "var(--color-danger)",
-            ],
+        source = self.app_rules if rules is None else rules
+        merged: dict[str, str] = {}
+        found = False
+        for name, props in source:
+            if name == selector:
+                merged.update(props)
+                found = True
+        if not found:
+            raise AssertionError(f"{selector} is not in the stylesheet")
+        return merged
+
+    def _surface(self, name: str) -> tuple[float, float, float]:
+        """Resolve a background name to channels.
+
+        Args:
+            name: A custom property, or ``hover`` for the track-row wash.
+
+        Returns:
+            Red, green, and blue.
+        """
+        if name == "hover":
+            return _over(_paint("var(--cadmium)", self.colors), _rgb(self.colors["--color-card"]), 0.06)
+        return _rgb(self.colors[name])
+
+    def test_rendered_text_and_controls(self) -> None:
+        """Require 4.5:1 for text and 3:1 for large text, borders, and focus.
+
+        The pairs are the selectors in ``app.css`` plus the preview pill.
+        Body text needs 4.5:1. Text at 24px or more, or at 18.66px or
+        more and weight 700, needs 3:1. Focus rings and input or control
+        borders need 3:1. The comparison uses the unrounded ratio.
+        Decorative hairlines are listed above and are not measured.
+
+        BPM is 28px at weight 500, so it is large text. Cadmium already
+        clears 3:1 on the card and on the selection bar, so the accent
+        is unchanged.
+
+        Returns:
+            None. The test fails if a painted pair misses its bar or a
+            color in the stylesheet is not classified.
+        """
+        classified = {selector for selector, _, _, _ in _TEXT}
+        painted = {
+            selector
+            for selector, props in self.app_rules
+            if "color" in props and props["color"] not in {"inherit", "currentColor"}
+        }
+        self.assertEqual(painted - classified, set(), "text colors missing from the contrast list")
+        self.assertEqual(classified - painted, set(), "contrast list names a selector that sets no color")
+
+        for selector, backgrounds, size, weight in _TEXT:
+            props = self._rule(selector)
+            if "font-size" in props:
+                size = _length(props["font-size"], self.colors)
+            if "font-weight" in props:
+                weight = int(float(props["font-weight"]))
+            foreground = _paint(props["color"], self.colors)
+            bar = _minimum(size, weight)
+            for background_name in backgrounds:
+                ratio = contrast(foreground, self._surface(background_name))
+                self.assertGreaterEqual(
+                    ratio,
+                    bar,
+                    f"{selector} on {background_name} is {ratio:.2f}:1, needs {bar}:1",
+                )
+
+        for selector, color_selector, backgrounds in _INHERITED:
+            props = self._rule(selector)
+            size = _length(props["font-size"], self.colors)
+            weight = int(float(props.get("font-weight", "400")))
+            foreground = _paint(self._rule(color_selector)["color"], self.colors)
+            bar = _minimum(size, weight)
+            for background_name in backgrounds:
+                ratio = contrast(foreground, self._surface(background_name))
+                self.assertGreaterEqual(
+                    ratio,
+                    bar,
+                    f"{selector} on {background_name} is {ratio:.2f}:1, needs {bar}:1",
+                )
+
+        outline = self._rule("button:focus-visible")
+        ring = _paint(outline["outline"], self.colors)
+        for background_name in _FOCUS_SURFACES:
+            ratio = contrast(ring, self._surface(background_name))
+            self.assertGreaterEqual(ratio, 3, f"focus on {background_name} is {ratio:.2f}:1")
+
+        solid_bars = (
+            (".crate-row:has(.crate[aria-selected=\"true\"])", "--color-panel"),
+            ('.row[aria-selected="true"]', "--color-selection"),
         )
+        for selector, background_name in solid_bars:
+            ink = _paint(self._rule(selector)["box-shadow"], self.colors)
+            ratio = contrast(ink, self._surface(background_name))
+            self.assertGreaterEqual(ratio, 3, f"{selector} is {ratio:.2f}:1")
+
+        holds = self._rule(".crate-row.holds-selection")["box-shadow"]
+        alpha = _mix_amount(holds)
+        self.assertIsNotNone(alpha)
+        mark = _paint(holds, self.colors)
+        for background_name in ("--color-bg", "--color-panel"):
+            surface = self._surface(background_name)
+            ratio = contrast(_over(mark, surface, alpha or 0), surface)
+            self.assertGreaterEqual(ratio, 3, f"holds-selection on {background_name} is {ratio:.2f}:1")
+
+        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#rekordbox-cancel", "#merge-cancel"):
+            border = _paint(self._rule(selector)["border"], self.colors)
+            ratio = contrast(border, self._surface("--color-card"))
+            self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
+
+        pill = {selector: props for selector, props in self.token_rules}
+        pill_pairs = (
+            (".pill-preview", "--color-safe-bg", "color", 4.5),
+            (".pill-preview", "--color-safe-bg", "border", 3),
+            (".pill-preview.warn", "--color-warn-bg", "color", 4.5),
+            (".pill-preview.warn", "--color-warn-bg", "border-color", 3),
+            (".pill-preview.danger", "--color-card", "color", 4.5),
+            (".pill-preview.danger", "--color-card", "border-color", 3),
+        )
+        for selector, background_name, prop, bar in pill_pairs:
+            ratio = contrast(_paint(pill[selector][prop], self.colors), self._surface(background_name))
+            self.assertGreaterEqual(ratio, bar, f"{selector} {prop} is {ratio:.2f}:1")
+
+        bordered = {
+            selector
+            for selector, props in self.app_rules
+            if any(
+                key in props and ("var(" in props[key] or "color-mix" in props[key])
+                for key in ("border", "border-top", "border-bottom", "border-left", "border-right", "border-color", "box-shadow", "outline")
+            )
+        }
+        checked_borders = _DECORATIVE | {
+            "button:focus-visible",
+            "input:focus-visible",
+            "select:focus-visible",
+            "textarea:focus-visible",
+            ".list:focus-visible",
+            ".crate:focus-visible",
+            ".twist:focus-visible",
+            '.crate-row:has(.crate[aria-selected="true"])',
+            '.row[aria-selected="true"]',
+            ".crate-row.holds-selection",
+            "#consent-accept",
+            "#open-logs",
+            "#copy-logs",
+            "#rekordbox-cancel",
+            "#merge-cancel",
+        }
+        self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")
+        self.assertEqual(checked_borders - bordered, set(), "contrast list names a border that is not painted")
 
     def test_warm_palette_values(self) -> None:
         """Fill the role tokens with the existing walnut and manila colors.
@@ -276,7 +671,7 @@ class ContrastTests(unittest.TestCase):
                 "--color-card": "#f3ecdf",
                 "--color-button": "#e7ddcc",
                 "--color-text": "#1b140e",
-                "--color-text-muted": "#6f655b",
+                "--color-text-muted": "#6a6057",
                 "--color-border": "#d9cfbf",
                 "--color-primary": "#e23b16",
                 "--color-danger": "#a33a32",

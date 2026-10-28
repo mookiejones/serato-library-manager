@@ -186,7 +186,7 @@ textarea:focus-visible,
 }
 
 .crate-row.holds-selection {
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--cadmium) 55%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--cadmium) 91%, transparent);
 }
 
 .twist,
