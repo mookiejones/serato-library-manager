@@ -416,56 +416,54 @@ _INHERITED: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 _FOCUS_SURFACES = ("--color-bg", "--color-panel", "--color-card", "--color-selection", "hover")
 
 # Decorative hairlines, exempt under WCAG 1.4.11. They are not the only
-# thing that identifies a control. --color-border on the manila card and
-# --color-border-on-dark on walnut stay as they are.
+# thing that identifies a control. --color-border on the manila card stays
+# as it is. Input and select underlines are not in this list: they are the
+# only edge of those controls and use --color-control-edge.
 #
 # --color-border on --color-card:
 #   .detail border-left, and border-top in the narrow layout
-#   .search input border-bottom
-#   .rekordbox-option select border-bottom
-#   .rule-edit textarea border
 #   .columns border-bottom
 #   .field border-top
-#   .editor input, .editor select, .editor textarea border-bottom
 #   .marker and .copy-row border-top
 #   .related-row border-top
-#   .related-search input, .related-form input, .related-form select border-bottom
 #   dialog border
 #   #merge-dialog fieldset border
 #   .log-fallback border
 #   .files-row border-top
 #   .files-actions border-top
-#   .files-field input border-bottom
-# --color-border-on-dark on --color-bg:
-#   .rail select and .rail-field input border-bottom
 # .swatch inset shadow: a 1px hairline of --color-shadow at 18% on a
 # data-driven swatch, not a control boundary.
 _DECORATIVE = {
     ".detail",
-    ".search input",
-    ".rekordbox-option select",
-    ".rule-edit textarea",
     ".columns",
     ".field",
-    ".editor input",
-    ".editor select",
-    ".editor textarea",
     ".marker",
     ".copy-row",
     ".related-row",
-    ".related-search input",
-    ".related-form input",
-    ".related-form select",
     "dialog",
     "#merge-dialog fieldset",
     ".log-fallback",
     ".files-row",
     ".files-actions",
-    ".files-field input",
-    ".rail select",
-    ".rail-field input",
     ".swatch",
 }
+
+# The only visible edge of these fields. Card surfaces use the sheet.
+# The rail fields sit on walnut.
+_CONTROL_EDGE = (
+    (".search input", "--color-card", "border-bottom"),
+    (".rail select", "--color-bg", "border-bottom"),
+    (".rail-field input", "--color-bg", "border-bottom"),
+    (".rekordbox-option select", "--color-card", "border-bottom"),
+    (".editor input", "--color-card", "border-bottom"),
+    (".editor select", "--color-card", "border-bottom"),
+    (".editor textarea", "--color-card", "border-bottom"),
+    (".related-search input", "--color-card", "border-bottom"),
+    (".related-form input", "--color-card", "border-bottom"),
+    (".related-form select", "--color-card", "border-bottom"),
+    (".files-field input", "--color-card", "border-bottom"),
+    (".rule-edit textarea", "--color-card", "border"),
+)
 
 
 class ContrastTests(unittest.TestCase):
@@ -603,6 +601,12 @@ class ContrastTests(unittest.TestCase):
             ratio = contrast(border, self._surface("--color-card"))
             self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
 
+        for selector, background_name, prop in _CONTROL_EDGE:
+            value = self._rule(selector)[prop]
+            self.assertIn("var(--color-control-edge)", value)
+            ratio = contrast(_paint(value, self.colors), self._surface(background_name))
+            self.assertGreaterEqual(ratio, 3, f"{selector} edge is {ratio:.2f}:1")
+
         pill = {selector: props for selector, props in self.token_rules}
         pill_pairs = (
             (".pill-preview", "--color-safe-bg", "color", 4.5),
@@ -640,7 +644,7 @@ class ContrastTests(unittest.TestCase):
             "#copy-logs",
             "#rekordbox-cancel",
             "#merge-cancel",
-        }
+        } | {selector for selector, _, _ in _CONTROL_EDGE}
         self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")
         self.assertEqual(checked_borders - bordered, set(), "contrast list names a border that is not painted")
 

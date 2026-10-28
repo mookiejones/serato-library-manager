@@ -105,7 +105,7 @@ textarea:focus-visible,
   background: transparent;
   color: var(--manila);
   border: 0;
-  border-bottom: 1px solid var(--color-border-on-dark);
+  border-bottom: 1px solid var(--color-control-edge);
   border-radius: 0;
   padding: 6px 0;
 }
@@ -290,7 +290,7 @@ textarea:focus-visible,
   width: 100%;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--color-control-edge);
   padding: 6px 0;
   border-radius: 0;
 }
@@ -328,7 +328,7 @@ button:disabled { cursor: default; }
 .rekordbox-option select {
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--color-control-edge);
   border-radius: 0;
   padding: 4px 0;
 }
@@ -346,7 +346,7 @@ button:disabled { cursor: default; }
   width: 100%;
   min-height: 72px;
   background: transparent;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--color-control-edge);
   border-radius: 4px;
   padding: 6px;
 }
@@ -576,7 +576,7 @@ button:disabled { cursor: default; }
   width: 100%;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--color-control-edge);
   border-radius: 0;
   padding: var(--space-1) 0;
 }
@@ -659,7 +659,7 @@ button:disabled { cursor: default; }
   width: 100%;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--color-control-edge);
   border-radius: 0;
   padding: 6px 0;
 }
@@ -954,7 +954,7 @@ dialog .check input {
   min-height: 44px;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--color-control-edge);
   border-radius: 0;
 }
 

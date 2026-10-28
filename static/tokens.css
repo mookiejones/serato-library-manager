@@ -31,6 +31,8 @@
   --color-text-muted: #6a6057;
   --color-text-faint: #76695b;
   --color-border: #d9cfbf;
+  /* First darker step of --color-border that clears 3:1 on the card and on walnut. */
+  --color-control-edge: #918778;
   --color-primary: #e23b16;
   --color-danger: #a33a32;
 
