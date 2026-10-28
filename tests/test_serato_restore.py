@@ -10,9 +10,9 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import time
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import tempfile
 
@@ -221,18 +221,25 @@ class UndoAndBackupTests(unittest.TestCase):
             None. The test fails if the second call overwrites the snapshot
             or does not raise.
         """
-        with mock.patch("library.time.strftime", return_value="20261028-120000"):
-            folder = library.ensure_backup()
-            self.assertIsNotNone(folder)
-            assert folder is not None
-            digest = (folder / "master.sqlite").read_bytes()
-            library._backed_up.clear()
-            with self.assertRaises(FileExistsError):
+        # Occupy the one-second folder name ensure_backup is about to use.
+        # A clock tick between the two steps gets another try. Patching
+        # time.strftime is not used: a specialized lookup can miss the patch.
+        key = str(Path(library.MASTER).resolve())
+        parent = Path(library.MASTER).resolve().parent / "Backups"
+        for _ in range(5):
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            folder = parent / f"serato-web-{stamp}"
+            folder.mkdir(parents=True, exist_ok=True)
+            sentinel = folder / "master.sqlite"
+            sentinel.write_bytes(b"sentinel-backup")
+            library._backed_up.discard(key)
+            try:
                 library.ensure_backup()
-            self.assertEqual((folder / "master.sqlite").read_bytes(), digest)
-        with open_database(folder / "master.sqlite") as conn:
-            row = conn.execute("SELECT id FROM asset WHERE id = 1").fetchone()
-        self.assertIsNotNone(row)
+            except FileExistsError:
+                self.assertEqual(sentinel.read_bytes(), b"sentinel-backup")
+                self.assertNotIn(key, library._backed_up)
+                return
+        self.fail("A backup folder that already exists for this second was replaced.")
 
     def _drop_backups(self) -> None:
         """Remove snapshot folders so the next call writes a fresh one.
