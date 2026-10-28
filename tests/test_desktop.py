@@ -188,6 +188,30 @@ class InstanceTests(unittest.TestCase):
                 thread.join(3)
                 holder.release()
 
+    def test_stale_port_file_is_cleared_when_the_lock_is_free(self) -> None:
+        """Start a new instance after a crash left ``instance.port`` behind.
+
+        The lock file exists and is not held. The port file names a page
+        that does not answer. The next launch must take the lock, drop
+        that URL, and not wait for it.
+
+        Returns:
+            None. The test fails if the stale URL is treated as a running
+            copy or is left in place.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / desktop.LOCK_NAME).write_bytes(b"\0")
+            (folder / desktop.PORT_NAME).write_text("http://127.0.0.1:9\n", encoding="utf-8")
+            (folder / desktop.FOCUS_NAME).write_text("stale-focus-token\n", encoding="utf-8")
+            holder = desktop.acquire_instance(folder)
+            try:
+                self.assertIsNone(holder.existing_url)
+                self.assertFalse((folder / desktop.PORT_NAME).exists())
+                self.assertFalse((folder / desktop.FOCUS_NAME).exists())
+            finally:
+                holder.release()
+
 
 class WindowChoiceTests(unittest.TestCase):
     """Check the web-view choice and the headless flag.
@@ -276,22 +300,37 @@ class WindowChoiceTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {desktop.NO_WINDOW_ENV: "true"}):
             self.assertFalse(desktop.window_skipped([]))
 
-    def test_saved_frame_moves_back_when_it_misses_every_screen(self) -> None:
-        """Park a window that sits entirely off the known screens.
+    def test_saved_frame_stays_on_a_side_monitor_and_centers_when_the_title_bar_is_hidden(self) -> None:
+        """Keep a negative origin when the title bar is on that monitor.
 
-        A frame that overlaps a screen stays put. An empty screen list
-        stays put, because this process cannot see a display.
+        A monitor left of the primary screen has a negative ``x``. One
+        above it has a negative ``y``. The saved position is restored
+        when at least 100 by 40 pixels of the title bar are on some
+        screen. A sliver, or a window whose body overlaps but whose
+        title bar does not, is centered on the screen that contains
+        the origin.
 
         Returns:
-            None. The test fails if an on-screen window is moved.
+            None. The test fails if a side monitor is treated as off-screen
+            or a hidden title bar is left in place.
         """
-        screen = mock.Mock(x=0, y=0, width=1440, height=900)
-        self.assertFalse(desktop.window_misses_every_screen(10, 10, 800, 600, [screen]))
-        self.assertTrue(desktop.window_misses_every_screen(2000, 10, 800, 600, [screen]))
-        self.assertFalse(desktop.window_misses_every_screen(2000, 10, 800, 600, []))
-        self.assertEqual(desktop.parked_origin([screen]), (40, 40))
-        self.assertIsNone(desktop.parked_origin([]))
-        self.assertFalse(desktop.window_misses_every_screen(0, 0, 100, 100, [mock.Mock(x=True, y=0, width=10, height=10)]))
+        primary = mock.Mock(x=0, y=0, width=1920, height=1080)
+        left = mock.Mock(x=-1920, y=0, width=1920, height=1080)
+        above = mock.Mock(x=0, y=-1080, width=1920, height=1080)
+        screens = [left, above, primary]
+        self.assertTrue(desktop.title_bar_is_visible(-1600, 80, 800, 600, screens))
+        self.assertTrue(desktop.title_bar_is_visible(120, -400, 800, 600, screens))
+        # Exactly 100 by 40 pixels of the title bar on the left monitor.
+        self.assertTrue(desktop.title_bar_is_visible(-2620, 80, 800, 600, screens))
+        self.assertFalse(desktop.title_bar_is_visible(-2621, 80, 800, 600, screens))
+        # The body crosses the primary screen. The title bar is above it.
+        self.assertFalse(desktop.title_bar_is_visible(100, -50, 800, 600, [primary]))
+        self.assertEqual(desktop.centered_on_primary(800, 600, screens), (560, 240))
+        self.assertEqual(desktop.centered_on_primary(800, 600, [left, primary]), (560, 240))
+        self.assertIsNone(desktop.centered_on_primary(800, 600, []))
+        self.assertFalse(
+            desktop.title_bar_is_visible(0, 0, 800, 600, [mock.Mock(x=True, y=0, width=1920, height=1080)])
+        )
 
 
 class GeometryTests(unittest.TestCase):
@@ -446,6 +485,34 @@ class GeometryTests(unittest.TestCase):
                 thread.join(3)
             httpd.server_close()
             desktop.reset_window_geometry()
+
+    def test_close_handler_posts_shutdown(self) -> None:
+        """Stop the server when ``_close_window`` runs, with no window toolkit.
+
+        Calls the close handler directly. The server is shut down only
+        by the shutdown token that handler posts. A handler that skips
+        that post leaves the thread running.
+
+        Returns:
+            None. The test fails if the server is still accepting after
+            the handler returns.
+        """
+        httpd = server.serve(port=0, require_library=False)
+        token = "direct-close-token"
+        httpd.shutdown_token = token
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        url = f"http://{host}:{port}"
+        try:
+            desktop._close_window(url, token)
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+        finally:
+            if thread.is_alive():
+                httpd.shutdown()
+                thread.join(3)
+            httpd.server_close()
 
 
 class HeadlessLaunchTests(unittest.TestCase):

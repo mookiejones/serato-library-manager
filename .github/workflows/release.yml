@@ -425,6 +425,7 @@ jobs:
             if gh attestation verify dist-zips/SHA256SUMS --repo "$RELEASE_REPO"; then
               exit 0
             fi
+            echo "Checksum attestation was not ready on attempt ${attempt}."
             sleep 5
           done
           exit 1

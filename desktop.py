@@ -45,6 +45,10 @@ WINDOW_TITLE = "Serato Library"
 WINDOW_BACKGROUND = "#231910"
 DEFAULT_WIDTH = 1120
 DEFAULT_HEIGHT = 720
+# A saved position is restored only when at least this much of the title
+# bar is on some screen. The strip is the top of the window.
+TITLE_BAR_MIN_WIDTH = 100
+TITLE_BAR_MIN_HEIGHT = 40
 GEOMETRY_SAVE_DELAY = 0.4
 _READY_SECONDS = 5.0
 _GUI_WINDOWS = "edgechromium"
@@ -631,56 +635,125 @@ def _screen_box(screen: object) -> tuple[int, int, int, int] | None:
     return values[0], values[1], values[2], values[3]
 
 
-def window_misses_every_screen(
+def _overlap(
+    ax: int,
+    ay: int,
+    aw: int,
+    ah: int,
+    bx: int,
+    by: int,
+    bw: int,
+    bh: int,
+) -> tuple[int, int]:
+    """Return the width and height of the overlap of two rectangles.
+
+    Args:
+        ax: Left edge of the first rectangle.
+        ay: Top edge of the first rectangle.
+        aw: Width of the first rectangle.
+        ah: Height of the first rectangle.
+        bx: Left edge of the second rectangle.
+        by: Top edge of the second rectangle.
+        bw: Width of the second rectangle.
+        bh: Height of the second rectangle.
+
+    Returns:
+        ``(width, height)`` of the intersection. Either component is ``0``
+        when the rectangles do not overlap. Origins may be negative.
+    """
+    width = min(ax + aw, bx + bw) - max(ax, bx)
+    height = min(ay + ah, by + bh) - max(ay, by)
+    if width < 0:
+        width = 0
+    if height < 0:
+        height = 0
+    return width, height
+
+
+def title_bar_is_visible(
     x: int,
     y: int,
     width: int,
     height: int,
     screens: list[object],
 ) -> bool:
-    """Return whether the frame shares no pixels with a known screen.
+    """Return whether a 100 by 40 pixel strip of the title bar is on a screen.
 
     Args:
-        x: Left edge of the window.
-        y: Top edge of the window.
+        x: Left edge of the window. Negative when the window is on a
+            monitor to the left of the primary screen.
+        y: Top edge of the window. Negative when the window is on a
+            monitor above the primary screen.
         width: Window width.
         height: Window height.
-        screens: Screen objects. An empty list returns False so the
-            caller leaves the window where it is.
+        screens: Screen objects. A bool coordinate is not a screen.
 
     Returns:
-        True when at least one screen has a usable box and the window
-        misses all of them. False when the list is empty or any screen
-        overlaps the frame.
+        True when the top 40 pixels of the window share at least
+        ``TITLE_BAR_MIN_WIDTH`` by ``TITLE_BAR_MIN_HEIGHT`` pixels with
+        one screen. False when that strip is missing, clipped below that
+        size, or no screen can be measured.
     """
-    saw_screen = False
+    if width < TITLE_BAR_MIN_WIDTH or height < TITLE_BAR_MIN_HEIGHT:
+        return False
     for screen in screens:
         box = _screen_box(screen)
         if box is None:
             continue
-        saw_screen = True
         sx, sy, sw, sh = box
-        if x < sx + sw and x + width > sx and y < sy + sh and y + height > sy:
-            return False
-    return saw_screen
+        if sw <= 0 or sh <= 0:
+            continue
+        overlap_w, overlap_h = _overlap(x, y, width, TITLE_BAR_MIN_HEIGHT, sx, sy, sw, sh)
+        if overlap_w >= TITLE_BAR_MIN_WIDTH and overlap_h >= TITLE_BAR_MIN_HEIGHT:
+            return True
+    return False
 
 
-def parked_origin(screens: list[object]) -> tuple[int, int] | None:
-    """Return a point on the first screen, inset from its top-left corner.
+def primary_screen(screens: list[object]) -> tuple[int, int, int, int] | None:
+    """Return the screen that contains the origin, or the first usable one.
 
     Args:
-        screens: Screen objects in the order the toolkit reported them.
+        screens: Screen objects in toolkit order.
 
     Returns:
-        ``(x + 40, y + 40)`` for the first screen with integer origins.
-        None when no screen qualifies.
+        ``(x, y, width, height)`` of the screen whose half-open box
+        contains ``(0, 0)``. When none does, the first screen with a
+        positive size. None when every screen is unusable.
     """
+    first: tuple[int, int, int, int] | None = None
     for screen in screens:
         box = _screen_box(screen)
         if box is None:
             continue
-        return box[0] + 40, box[1] + 40
-    return None
+        sx, sy, sw, sh = box
+        if sw <= 0 or sh <= 0:
+            continue
+        if first is None:
+            first = box
+        if sx <= 0 < sx + sw and sy <= 0 < sy + sh:
+            return box
+    return first
+
+
+def centered_on_primary(width: int, height: int, screens: list[object]) -> tuple[int, int] | None:
+    """Return the top-left corner that centers the window on the primary screen.
+
+    Args:
+        width: Window width.
+        height: Window height.
+        screens: Screen objects. The primary screen is the one that
+            contains ``(0, 0)``.
+
+    Returns:
+        ``(x, y)`` of the centered window. None when no screen can be
+        measured. The coordinates may be negative when the window is
+        larger than that screen.
+    """
+    box = primary_screen(screens)
+    if box is None:
+        return None
+    sx, sy, sw, sh = box
+    return sx + (sw - width) // 2, sy + (sh - height) // 2
 
 
 def _event_int(value: object, low: int, high: int) -> int | None:
@@ -920,12 +993,15 @@ def _focus(window: object) -> None:
 
 
 def _place_on_screen(window: object) -> None:
-    """Move the window onto a screen when its saved frame misses all of them.
+    """Center the window when its title bar is not on a screen.
 
     Args:
         window: pywebview window that has already been shown. Reading
             ``x`` and ``y`` waits until the toolkit has placed it.
 
+    A saved position is kept when a 100 by 40 pixel strip of the title
+    bar lies on some screen, including a monitor whose origin is
+    negative. Otherwise the window is centered on the primary screen.
     A toolkit that cannot list screens leaves the window where it is.
     """
     try:
@@ -941,9 +1017,9 @@ def _place_on_screen(window: object) -> None:
     height = getattr(window, "height", None)
     if not all(isinstance(value, int) and not isinstance(value, bool) for value in (x, y, width, height)):
         return
-    if not window_misses_every_screen(x, y, width, height, screens):
+    if title_bar_is_visible(x, y, width, height, screens):
         return
-    origin = parked_origin(screens)
+    origin = centered_on_primary(width, height, screens)
     if origin is None:
         return
     move = getattr(window, "move", None)
