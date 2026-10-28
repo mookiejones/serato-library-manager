@@ -28,6 +28,7 @@ import files
 import library
 import rekordbox
 import related
+import setup_flow
 import snapshots
 import telemetry
 
@@ -50,9 +51,11 @@ ROOT = app_root()
 STATIC = ROOT / "static"
 HOST = "127.0.0.1"
 PORT = 8765
-# Required on POST /api/shutdown. A browser page on another origin cannot
-# set this header without a preflight, and this server does not allow one.
+# Required on POST /api/shutdown and POST /api/focus. A page on another
+# origin cannot set these headers without a preflight, and this server
+# does not allow one. Neither token is placed in the page.
 SHUTDOWN_HEADER = "X-Serato-Library-Shutdown"
+FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
@@ -506,6 +509,21 @@ def export_option(value: str, *, default: bool, name: str) -> bool:
         "on" if default else "off",
     )
     return default
+
+
+def _safe_folder_error(message: str) -> str:
+    """Return a folder error that does not include a path.
+
+    Args:
+        message: Text from a library error.
+
+    Returns:
+        The message when it is one of the short folder sentences.
+        A generic sentence when the text contains a path.
+    """
+    if message in {"That folder could not be read.", "Shortcuts are left alone.", "That request is not valid."}:
+        return message
+    return "That folder could not be read."
 
 
 def query_text(
@@ -1496,6 +1514,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/settings":
                 self.send_json(telemetry.public_settings())
                 return
+            if parsed.path == "/api/setup":
+                self._get_setup(query)
+                return
             if parsed.path == "/api/logs":
                 text, truncated = app_log.read_logs()
                 self.send_json({"text": text, "truncated": truncated})
@@ -1593,6 +1614,14 @@ class Handler(BaseHTTPRequestHandler):
         except library.LibraryError as exc:
             self.send_json({"error": exc.message}, status=exc.status)
             return
+        except FileNotFoundError as exc:
+            if "Serato library not found" not in str(exc):
+                raise
+            self.send_json(
+                {"error": "No Serato library was found on this computer."},
+                status=404,
+            )
+            return
         except (TypeError, ValueError, OverflowError):
             self.send_json({"error": "That request is not valid."}, status=400)
             return
@@ -1627,6 +1656,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.rfile.read(length)
             self._post_shutdown()
             return
+        if parsed.path == "/api/focus":
+            if length:
+                self.rfile.read(length)
+            self._post_focus()
+            return
         try:
             parsed_body: object = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
@@ -1639,6 +1673,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/settings":
             self._post_settings(payload)
+            return
+        if parsed.path == "/api/setup":
+            self._post_setup(payload)
             return
         if parsed.path == "/api/logs/open":
             self._post_open_logs()
@@ -1746,19 +1783,68 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
+    def _post_focus(self) -> None:
+        """Bring the desktop window forward when the caller presents its token.
+
+        The token is set only by the desktop app. ``server.py`` leaves it
+        unset, and this route then answers 404. A wrong token answers 403.
+        The comparison does not branch on the character that differed.
+        The callback runs on this thread. pywebview moves that call onto
+        the GUI thread.
+        """
+        expected = getattr(self.server, "focus_token", None)
+        if not isinstance(expected, str) or not expected:
+            self.send_json({"error": "That action is not available."}, status=404)
+            return
+        provided = self.headers.get(FOCUS_HEADER, "")
+        if not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
+            self.send_json({"error": "That action is not available."}, status=403)
+            return
+        callback = getattr(self.server, "focus_window", None)
+        if callable(callback):
+            try:
+                callback()
+            except Exception:
+                app_log.logger.exception("The window could not be focused")
+                self.send_json({"error": "The window could not be focused."}, status=500)
+                return
+        self.send_json({"ok": True})
+
     def _post_settings(self, payload: dict[str, object]) -> None:
-        """Save the sharing choice, the export bar, or both.
+        """Save the sharing choice, the export bar, or whether setup finished.
 
         Args:
-            payload: JSON object. ``telemetry_consent`` must be a boolean
-                when it is present. ``rekordbox`` must be an object whose
-                fields are ``hot_loops``, ``memory_cues``, and
-                ``key_notation``. Booleans reject integers. ``key_notation``
-                must be ``asis``, ``camelot``, or ``classical``. Any other
-                shape is a 400, and the file is left unchanged.
+            payload: JSON object. ``{"wizard_complete": bool}`` is accepted
+                alone, and setup can be marked finished only after the
+                sharing choice is already a boolean. Otherwise
+                ``telemetry_consent`` must be a boolean when it is present,
+                and ``rekordbox`` must be an object whose fields are
+                ``hot_loops``, ``memory_cues``, and ``key_notation``.
+                Booleans reject integers. ``key_notation`` must be
+                ``asis``, ``camelot``, or ``classical``. Any other shape is
+                a 400, and the file is left unchanged.
         """
+        keys = set(payload)
+        if keys == {"wizard_complete"} and isinstance(payload.get("wizard_complete"), bool):
+            done = payload["wizard_complete"]
+            if not isinstance(done, bool):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            try:
+                app_config.set_wizard_complete(done)
+            except ValueError:
+                self.send_json(
+                    {"error": "Choose whether to share stats before finishing setup."},
+                    status=400,
+                )
+                return
+            except OSError:
+                self.send_json({"error": "Setup could not be saved."}, status=500)
+                return
+            self.send_json(telemetry.public_settings())
+            return
         allowed = {"telemetry_consent", "rekordbox"}
-        if not payload or not set(payload) <= allowed:
+        if not keys or not keys <= allowed:
             self.send_json({"error": "That request is not valid."}, status=400)
             return
         consent: bool | None = None
@@ -1799,6 +1885,40 @@ class Handler(BaseHTTPRequestHandler):
             )
         except ValueError:
             self.send_json({"error": "That request is not valid."}, status=400)
+
+    def _get_setup(self, query: dict[str, list[str]]) -> None:
+        """Return the library summary, or one folder listing.
+
+        Args:
+            query: Parsed query. ``browse`` lists folders. Without it,
+                the response describes the library in plain words.
+
+        A missing library is a normal response, not an error. The page
+        stays up so the wizard can say what to do next.
+        """
+        if "browse" in query:
+            raw = query_text(query, "browse", "") or ""
+            try:
+                self.send_json(setup_flow.browse_folders(raw))
+            except library.LibraryError as exc:
+                self.send_json({"error": _safe_folder_error(exc.message)}, status=exc.status)
+            return
+        self.send_json(setup_flow.describe_library())
+
+    def _post_setup(self, payload: dict[str, object]) -> None:
+        """Check a folder the person picked in the wizard.
+
+        Args:
+            payload: JSON object whose only field is ``folder``.
+        """
+        folder = payload.get("folder")
+        if set(payload) != {"folder"} or not isinstance(folder, str):
+            self.send_json({"error": "That request is not valid."}, status=400)
+            return
+        try:
+            self.send_json(setup_flow.accept_folder(folder))
+        except library.LibraryError as exc:
+            self.send_json({"error": _safe_folder_error(exc.message)}, status=exc.status)
 
     def _get_related(self, query: dict[str, list[str]]) -> None:
         """Return saved links and suggestions for one track path.
@@ -2038,29 +2158,29 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
     Args:
         port: TCP port. None uses 8765. ``0`` asks the operating system
             for a free port. The desktop app uses ``0``.
-        require_library: When true, a missing master database stops the
-            process before the socket is opened, and telemetry and the
-            snapshot watch start after the bind. The release smoke check
-            passes false so a runner without Serato can still answer
-            ``/api/health``.
+        require_library: When true, telemetry and the snapshot watch start
+            after the bind if the master database exists. A missing
+            database still serves the page, so the first-run wizard can
+            explain what to do. The release smoke check passes false so a
+            runner without Serato does not start telemetry either.
 
     Returns:
         A server that is listening and not yet serving. ``shutdown_token``
-        is None until the desktop app sets it.
+        and ``focus_token`` are None until the desktop app sets them.
 
     Raises:
-        SystemExit: If the master database is required and missing, or the
-            port is already taken.
+        SystemExit: If the port is already taken.
     """
-    if require_library and not db_path().exists():
-        raise SystemExit(f"Serato library not found at {db_path()}")
+    library_present = db_path().exists()
     app_log.configure()
-    if require_library:
+    if require_library and library_present:
         app_log.logger.info("Library file: %s", db_path())
         try:
             files.recover_interrupted()
         except Exception:
             app_log.logger.exception("An interrupted file change could not be finished.")
+    elif require_library:
+        app_log.logger.info("No Serato library file yet. The setup wizard will explain the next step.")
     bind_port = PORT if port is None else port
     try:
         httpd = ThreadingHTTPServer((HOST, bind_port), Handler)
@@ -2073,8 +2193,10 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
             "Quit the other Serato library server (server.py or the desktop app) and try again."
         ) from exc
     httpd.shutdown_token = None
+    httpd.focus_token = None
+    httpd.focus_window = None
     app_log.logger.info("Server listening on %s:%s", HOST, httpd.server_address[1])
-    if require_library:
+    if require_library and library_present:
         telemetry.activate()
         telemetry.note_app_opened()
         try:
@@ -2089,7 +2211,8 @@ def main() -> None:
     """Start the library server on 127.0.0.1 port 8765.
 
     Raises:
-        SystemExit: If the master database does not exist or the port is taken.
+        SystemExit: If the port is taken. A missing library still serves
+            the page.
     """
     httpd = serve()
     print(f"Serato library  http://{HOST}:{PORT}")

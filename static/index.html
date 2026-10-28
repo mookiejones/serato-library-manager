@@ -16,7 +16,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Serato library</title>
+  <title>Serato Library</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,500;9..144,620&display=swap" rel="stylesheet">
@@ -180,6 +180,7 @@
     </label>
     <p id="telemetry-note" class="dialog-note"></p>
     <div class="dialog-actions">
+      <button id="rerun-wizard" class="wizard-quiet" type="button">Run setup again</button>
       <button id="open-logs" type="button">Open logs folder</button>
       <button id="copy-logs" type="button">Copy logs</button>
       <button id="settings-close" type="button">Close</button>
@@ -248,6 +249,46 @@
     </div>
     <p id="snapshot-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
+  <!-- Designer: put an SVG or img in the matching wizard-art slot. Empty slots stay hidden. -->
+  <dialog id="wizard" aria-labelledby="wizard-title" aria-describedby="wizard-body">
+    <p id="wizard-step" class="wizard-step">
+      <span id="wizard-step-label"></span>
+      <span id="wizard-segments" class="wizard-segments" aria-hidden="true"></span>
+    </p>
+    <p id="wizard-announce" class="visually-hidden" aria-live="polite"></p>
+    <div class="wizard-art" data-art-slot="welcome" hidden></div>
+    <div class="wizard-art" data-art-slot="library" hidden></div>
+    <div class="wizard-art" data-art-slot="snapshot" hidden></div>
+    <div class="wizard-art" data-art-slot="consent" hidden></div>
+    <div class="wizard-art" data-art-slot="done" hidden></div>
+    <h2 id="wizard-title" tabindex="-1"></h2>
+    <p id="wizard-body"></p>
+    <p id="wizard-next" class="dialog-note" hidden></p>
+    <p id="wizard-status" class="wizard-status" role="status" aria-live="polite"></p>
+    <progress id="wizard-progress" max="1" aria-label="Saving a safety copy" hidden></progress>
+    <div id="wizard-folders" hidden>
+      <p id="wizard-folder-name" class="wizard-folder-name"></p>
+      <div id="wizard-folder-list" class="wizard-folders" role="group" aria-label="Folders"></div>
+      <div class="wizard-folder-actions">
+        <button id="wizard-folder-up" class="wizard-quiet" type="button">Up</button>
+        <button id="wizard-folder-use" type="button">Use this folder</button>
+        <button id="wizard-folder-close" class="wizard-quiet" type="button">Close folder list</button>
+      </div>
+    </div>
+    <div id="wizard-consent" class="wizard-choices" hidden>
+      <button id="wizard-no" class="wizard-choice" type="button">No, don't share</button>
+      <button id="wizard-yes" class="wizard-choice" type="button">Yes, share</button>
+    </div>
+    <div class="wizard-actions">
+      <div class="wizard-actions-start">
+        <button id="wizard-back" class="wizard-quiet" type="button">Back</button>
+        <button id="wizard-cancel" class="wizard-quiet" type="button">Cancel</button>
+        <button id="wizard-secondary" class="wizard-quiet" type="button">Choose a folder</button>
+      </div>
+      <button id="wizard-primary" type="button">Get started</button>
+    </div>
+  </dialog>
+  <script src="/wizard.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

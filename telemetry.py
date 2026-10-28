@@ -841,6 +841,7 @@ def public_settings() -> dict[str, object]:
     return {
         "telemetry_consent": settings.telemetry_consent,
         "needs_consent_prompt": settings.telemetry_consent is None,
+        "wizard_complete": settings.wizard_complete is True,
         "telemetry_configured": telemetry_configured(),
         "app_version": app_config.APP_VERSION,
         "rekordbox": settings.rekordbox.as_json(),

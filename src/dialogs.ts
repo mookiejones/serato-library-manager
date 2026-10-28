@@ -7,6 +7,7 @@
  */
 
 import { failureOf, postJSON, readJSONOr } from "./api";
+import type { LibraryStatusNotice, OpenOptions } from "./wizard-view";
 import type {
   FilesBody,
   FilesPayload,
@@ -456,6 +457,7 @@ function telemetryNoteText() {
 function applyPrivacy(payload: SettingsPayload) {
   state.telemetryConsent = payload.telemetry_consent ?? null;
   state.telemetryConfigured = Boolean(payload.telemetry_configured);
+  state.wizardComplete = payload.wizard_complete === true;
   privacySync = true;
   el("telemetry-toggle").checked = state.telemetryConsent === true;
   privacySync = false;
@@ -506,10 +508,42 @@ function showConsent() {
 }
 
 /**
+ * Open setup when it is not finished, or when Settings asks to run it again.
+ *
+ * The wizard script is a separate bundle. A missing script falls through
+ * to the sharing dialog. No library rows are sent.
+ *
+ * @param force Show setup again after it was completed.
+ * @param returnFocus Control to focus when setup closes.
+ * @returns True when the wizard script is present.
+ */
+function openWizard(force: boolean, returnFocus: HTMLElement): boolean {
+  const wizard = (globalThis as { SeratoWizard?: { open: (options: OpenOptions) => void } }).SeratoWizard;
+  if (!wizard || typeof wizard.open !== "function") return false;
+  const options: OpenOptions = {
+    force,
+    returnFocus,
+    onSettings(payload) {
+      applyPrivacy(payload);
+    },
+    onStatus(info: LibraryStatusNotice) {
+      applyStatus({
+        message: info.message,
+        writable: info.writable,
+        open: info.open,
+      });
+    },
+  };
+  wizard.open(options);
+  return true;
+}
+
+/**
  * Load sharing settings and show the prompt when no choice is saved.
  *
  * GET /api/settings. A failure leaves sharing off and says so. It does
- * not block the library view.
+ * not block the library view. Setup, when it is not finished, asks the
+ * sharing question itself.
  *
  * @returns {Promise<void>}
  */
@@ -520,6 +554,7 @@ export async function loadPrivacy() {
   if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
   applyPrivacy(payload);
   if (token === rekordboxToken) applyRekordboxExport(payload);
+  if (!state.wizardComplete && openWizard(false, el("search"))) return;
   if (payload.needs_consent_prompt) showConsent();
 }
 
@@ -784,6 +819,11 @@ export function wireDialogs(): void {
 
   el("settings-close").addEventListener("click", () => {
     el("settings-dialog").close();
+  });
+
+  el("rerun-wizard").addEventListener("click", () => {
+    el("settings-dialog").close();
+    openWizard(true, el("open-settings"));
   });
 
   el("telemetry-toggle").addEventListener("change", () => {

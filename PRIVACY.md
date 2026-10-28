@@ -1,10 +1,10 @@
 # Privacy
 
-Sharing is off until you turn it on. The first time the page opens it asks:
+Sharing is off until you turn it on. Setup asks on its own step:
 
 > Share anonymous usage stats and crash reports?
 
-**Don't share** is selected by default. Closing the prompt or pressing Esc saves that choice. Settings in the sidebar can change it later. Nothing is sent before you choose Share, and nothing is sent while the choice stays off.
+**No, don't share** and **Yes, share** have the same weight. **No, don't share** is first. Esc or **Cancel** closes setup and does not save a sharing choice. Nothing is sent before you choose **Yes, share**, and nothing is sent while the choice stays off. Settings in the sidebar can change it later. If the setup script did not load, the older dialog still focuses **Don't share**, and closing that dialog or pressing Esc saves that decline.
 
 ## What can be sent
 

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,11 +26,26 @@ CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "telemetry_consent", "rekordbox")
+SETTINGS_KEYS = ("install_id", "telemetry_consent", "window", "wizard_complete", "rekordbox")
 REKORDBOX_KEYS = ("hot_loops", "memory_cues", "key_notation")
 # The same three words rekordbox.py accepts for --key.
 REKORDBOX_KEY_NOTATIONS = ("asis", "camelot", "classical")
+WINDOW_FIELDS = ("x", "y", "width", "height")
+# The desktop window refuses a smaller frame. Origins may be negative
+# when a monitor sits left of or above the primary screen.
+WINDOW_MIN_WIDTH = 640
+WINDOW_MIN_HEIGHT = 480
+WINDOW_MAX_EDGE = 8192
+WINDOW_MIN_ORIGIN = -8192
+WINDOW_MAX_ORIGIN = 32768
+_WINDOW_LIMITS = (
+    ("x", WINDOW_MIN_ORIGIN, WINDOW_MAX_ORIGIN),
+    ("y", WINDOW_MIN_ORIGIN, WINDOW_MAX_ORIGIN),
+    ("width", WINDOW_MIN_WIDTH, WINDOW_MAX_EDGE),
+    ("height", WINDOW_MIN_HEIGHT, WINDOW_MAX_EDGE),
+)
 _UUID = uuid.UUID
+_settings_lock = threading.RLock()
 logger = logging.getLogger("serato.library.config")
 
 
@@ -71,38 +87,88 @@ def default_rekordbox() -> RekordboxSettings:
 
 
 @dataclass(frozen=True)
+class WindowGeometry:
+    """Pixel size and position of the desktop window.
+
+    Attributes:
+        x: Left edge, in pixels. ``0`` is the primary screen's left edge.
+            A negative value is a monitor to the left.
+        y: Top edge, in pixels. ``0`` is the primary screen's top edge.
+        width: Window width, in pixels.
+        height: Window height, in pixels.
+    """
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+    def __post_init__(self) -> None:
+        """Reject a bool or a coordinate outside the stored range.
+
+        Raises:
+            ValueError: If a field is not an ``int``, or it falls outside
+                the range the desktop window can open.
+        """
+        for name, low, high in _WINDOW_LIMITS:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"window.{name} must be an integer.")
+            if value < low or value > high:
+                raise ValueError(f"window.{name} is outside {low}..{high}.")
+
+
+@dataclass(frozen=True)
 class Settings:
-    """The sharing choice, the install id, and the export bar.
+    """The sharing choice, the install id, the window frame, setup, and the export bar.
 
     Attributes:
         install_id: Random UUID for this install, or None until one is saved.
         telemetry_consent: True, False, or None when the person has not chosen.
         rekordbox: Export bar. Defaults apply when the file has no section.
+        window: Last saved frame, or None before the window has been placed.
+        wizard_complete: True after setup finishes. False is unfinished,
+            including a file written before this key existed.
     """
 
     install_id: str | None
     telemetry_consent: bool | None
     rekordbox: RekordboxSettings = field(default_factory=default_rekordbox)
+    window: WindowGeometry | None = None
+    wizard_complete: bool = False
 
     def as_json(self) -> dict[str, object]:
         """Return the settings object for the file.
 
         Returns:
-            The export bar, plus the install id and consent when a sharing
-            choice has been saved. A missing choice is omitted, so the next
-            load still shows the prompt.
+            The completed telemetry pair when both fields are set, the
+            setup flag with that pair, the window frame when one has been
+            saved, and the export bar in full. A window or the export bar
+            may be stored before the sharing choice.
 
         Raises:
-            ValueError: If a boolean consent is missing its install id.
+            ValueError: If the install id and the choice disagree, or if
+                ``wizard_complete`` is not a boolean. A partial telemetry
+                pair would stick on the next load and hide the prompt.
         """
+        has_id = self.install_id is not None
+        has_consent = isinstance(self.telemetry_consent, bool)
+        if has_id != has_consent:
+            raise ValueError("Refusing to write a partial settings file.")
+        if not isinstance(self.wizard_complete, bool):
+            raise ValueError("wizard_complete must be a boolean.")
         body: dict[str, object] = {"rekordbox": self.rekordbox.as_json()}
-        if isinstance(self.telemetry_consent, bool):
-            if self.install_id is None:
-                raise ValueError("Refusing to write a consent without an install id.")
+        if has_id:
             body["install_id"] = self.install_id
             body["telemetry_consent"] = self.telemetry_consent
-        elif self.install_id is not None:
-            body["install_id"] = self.install_id
+            body["wizard_complete"] = self.wizard_complete
+        if self.window is not None:
+            body["window"] = {
+                "x": self.window.x,
+                "y": self.window.y,
+                "width": self.window.width,
+                "height": self.window.height,
+            }
         return body
 
 
@@ -212,6 +278,65 @@ def _valid_install_id(value: object) -> str | None:
     return str(parsed)
 
 
+def _window_int(value: object, dotted: str, low: int, high: int) -> int | None:
+    """Return a screen coordinate, or None when the value cannot be stored.
+
+    Args:
+        value: Candidate from the settings file.
+        dotted: Full path, such as ``window.x``, used in the warning.
+        low: Smallest accepted integer, inclusive.
+        high: Largest accepted integer, inclusive.
+
+    Returns:
+        The integer when ``value`` is an ``int`` inside the range. None
+        for a bool, a float, or any other type. ``0`` is a real origin
+        and is kept.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        logger.warning("Config key '%s' has wrong type — ignored", dotted)
+        return None
+    if value < low or value > high:
+        logger.warning("Config key '%s' is outside %s..%s — ignored", dotted, low, high)
+        return None
+    return value
+
+
+def _parse_window(value: object) -> WindowGeometry | None:
+    """Validate the ``window`` object.
+
+    Args:
+        value: The ``window`` member of the settings file.
+
+    Returns:
+        The frame when ``x``, ``y``, ``width``, and ``height`` are all
+        integers in range. None when the object is not a mapping or any
+        of those fields is missing or unusable. A partial frame is not
+        returned, because the next launch would open at ``0, 0``.
+    """
+    if not isinstance(value, dict):
+        logger.warning("Config key 'window' must be a mapping — ignored")
+        return None
+    for key in value:
+        if key not in WINDOW_FIELDS:
+            logger.warning("Unknown config key '%s' — ignored", f"window.{key}")
+    parsed: dict[str, int] = {}
+    complete = True
+    for name, low, high in _WINDOW_LIMITS:
+        dotted = f"window.{name}"
+        if name not in value:
+            logger.warning("Config key '%s' is missing — ignored", dotted)
+            complete = False
+            continue
+        number = _window_int(value[name], dotted, low, high)
+        if number is None:
+            complete = False
+            continue
+        parsed[name] = number
+    if not complete:
+        return None
+    return WindowGeometry(parsed["x"], parsed["y"], parsed["width"], parsed["height"])
+
+
 def _parse(payload: object) -> Settings:
     """Validate a decoded settings object.
 
@@ -221,11 +346,12 @@ def _parse(payload: object) -> Settings:
     Returns:
         The known fields. Unknown keys and wrong types are dropped. A
         missing consent stays None, which means sharing is off and the
-        prompt should be shown.
+        prompt should be shown. A missing window stays None, which means
+        the next launch is centered at the default size.
     """
     if not isinstance(payload, dict):
         logger.warning("Config file must be a mapping — ignored")
-        return Settings(install_id=None, telemetry_consent=None)
+        return Settings(install_id=None, telemetry_consent=None, wizard_complete=False)
     for key in payload:
         if key not in SETTINGS_KEYS:
             logger.warning("Unknown config key %r — ignored", key)
@@ -243,12 +369,25 @@ def _parse(payload: object) -> Settings:
         else:
             logger.warning("Config key 'telemetry_consent' has wrong type — ignored")
             consent = None
+    window = _parse_window(payload["window"]) if "window" in payload else None
+    wizard_complete = False
+    if "wizard_complete" in payload:
+        raw_wizard = payload.get("wizard_complete")
+        if isinstance(raw_wizard, bool):
+            wizard_complete = raw_wizard
+        else:
+            logger.warning("Config key 'wizard_complete' has wrong type — ignored")
     if "rekordbox" not in payload:
         rekordbox = default_rekordbox()
     else:
         rekordbox = _parse_rekordbox(payload.get("rekordbox"))
-    return Settings(install_id=install_id, telemetry_consent=consent, rekordbox=rekordbox)
-
+    return Settings(
+        install_id=install_id,
+        telemetry_consent=consent,
+        window=window,
+        wizard_complete=wizard_complete,
+        rekordbox=rekordbox,
+    )
 
 def _parse_bool(value: object, dotted: str, default: bool) -> bool:
     """Return a stored boolean, or the default when the type is wrong.
@@ -356,13 +495,13 @@ def load_settings() -> Settings:
     """
     path = settings_path()
     if not path.is_file():
-        return Settings(install_id=None, telemetry_consent=None)
+        return Settings(install_id=None, telemetry_consent=None, wizard_complete=False)
     try:
         text = path.read_text(encoding="utf-8")
         payload: object = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError):
         logger.warning("Config file %s could not be read — ignored", path.name)
-        return Settings(install_id=None, telemetry_consent=None)
+        return Settings(install_id=None, telemetry_consent=None, wizard_complete=False)
     return _parse(payload)
 
 
@@ -398,7 +537,7 @@ def save_settings(settings: Settings) -> None:
             in full.
 
     Raises:
-        ValueError: If a boolean consent has no install id.
+        ValueError: If the install id and the sharing choice disagree.
         OSError: If the directory or the file cannot be written.
 
     The write is a temp file in the same directory followed by replace, so
@@ -420,24 +559,111 @@ def set_telemetry_consent(value: bool) -> Settings:
         value: True to allow anonymous reports. False to send nothing.
 
     Returns:
-        The settings that were written.
+        The settings that were written. A saved window frame is kept.
 
     Raises:
         ValueError: If ``value`` is not a boolean. Integers are rejected
             because ``bool`` is a subclass of ``int``.
         OSError: If the settings file cannot be written.
+
+    The file is read again under the settings lock immediately before the
+    write, so a window save that landed after the last read is not dropped.
     """
     if not isinstance(value, bool):
         raise ValueError("telemetry_consent must be a boolean.")
-    current = load_settings()
-    install_id = current.install_id or str(uuid.uuid4())
-    updated = Settings(
-        install_id=install_id,
-        telemetry_consent=value,
-        rekordbox=current.rekordbox,
-    )
-    save_settings(updated)
-    return updated
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id or str(uuid.uuid4())
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=value,
+            window=current.window,
+            wizard_complete=current.wizard_complete is True,
+            rekordbox=current.rekordbox,
+        )
+        save_settings(updated)
+        return updated
+
+
+def save_window_geometry(geometry: WindowGeometry) -> Settings:
+    """Store the desktop window frame and keep a completed sharing choice.
+
+    Args:
+        geometry: Size and position to remember. Every field is checked
+            again here, including the bool exclusion, so a caller cannot
+            persist a frame the loader would drop.
+
+    Returns:
+        The settings that were written.
+
+    Raises:
+        ValueError: If ``geometry`` is not a :class:`WindowGeometry`.
+        OSError: If the settings file cannot be written.
+
+    A sharing choice is included only when both the install id and the
+    boolean are already stored. The read and the write share the settings
+    lock with :func:`set_telemetry_consent`.
+    """
+    if not isinstance(geometry, WindowGeometry):
+        raise ValueError("window must be a WindowGeometry.")
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id
+        consent = current.telemetry_consent
+        if not isinstance(consent, bool) or install_id is None:
+            install_id = None
+            consent = None
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=consent,
+            window=geometry,
+            wizard_complete=current.wizard_complete is True,
+            rekordbox=current.rekordbox,
+        )
+        save_settings(updated)
+        return updated
+
+
+def set_wizard_complete(value: bool) -> Settings:
+    """Store whether first-run setup has finished.
+
+    Args:
+        value: True when the person opens the library from the last step.
+            False leaves setup unfinished. False is a real choice.
+
+    Returns:
+        The settings after the decision. When sharing has not been chosen
+        yet, False is returned without writing a file. True is refused
+        until that choice exists, so a finished flag cannot hide the prompt.
+
+    Raises:
+        ValueError: If ``value`` is not a boolean, or True is requested
+            before the sharing choice is a boolean.
+        OSError: If the settings file cannot be written.
+    """
+    if not isinstance(value, bool):
+        raise ValueError("wizard_complete must be a boolean.")
+    with _settings_lock:
+        current = load_settings()
+        if not isinstance(current.telemetry_consent, bool) or current.install_id is None:
+            if value:
+                raise ValueError("Choose whether to share stats before finishing setup.")
+            return Settings(
+                install_id=current.install_id,
+                telemetry_consent=current.telemetry_consent,
+                window=current.window,
+                wizard_complete=False,
+                rekordbox=current.rekordbox,
+            )
+        updated = Settings(
+            install_id=current.install_id,
+            telemetry_consent=current.telemetry_consent,
+            window=current.window,
+            wizard_complete=value,
+            rekordbox=current.rekordbox,
+        )
+        save_settings(updated)
+        return updated
 
 
 def update_rekordbox(
@@ -457,7 +683,8 @@ def update_rekordbox(
 
     Returns:
         The settings that were written. A sharing choice that was already
-        saved is kept. Saving the export bar does not invent one.
+        saved is kept, and so are the window frame and the setup flag.
+        Saving the export bar does not invent a sharing choice.
 
     Raises:
         ValueError: If a field has the wrong type, or no field was given.
@@ -473,16 +700,24 @@ def update_rekordbox(
         raise ValueError("rekordbox.key_notation must be asis, camelot, or classical.")
     if hot_loops is None and memory_cues is None and key_notation is None:
         raise ValueError("rekordbox has no fields to save.")
-    current = load_settings()
-    box = current.rekordbox
-    updated = Settings(
-        install_id=current.install_id,
-        telemetry_consent=current.telemetry_consent,
-        rekordbox=RekordboxSettings(
-            hot_loops=box.hot_loops if hot_loops is None else hot_loops,
-            memory_cues=box.memory_cues if memory_cues is None else memory_cues,
-            key_notation=box.key_notation if key_notation is None else key_notation,
-        ),
-    )
-    save_settings(updated)
-    return updated
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id
+        consent = current.telemetry_consent
+        if not isinstance(consent, bool) or install_id is None:
+            install_id = None
+            consent = None
+        box = current.rekordbox
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=consent,
+            window=current.window,
+            wizard_complete=current.wizard_complete is True,
+            rekordbox=RekordboxSettings(
+                hot_loops=box.hot_loops if hot_loops is None else hot_loops,
+                memory_cues=box.memory_cues if memory_cues is None else memory_cues,
+                key_notation=box.key_notation if key_notation is None else key_notation,
+            ),
+        )
+        save_settings(updated)
+        return updated

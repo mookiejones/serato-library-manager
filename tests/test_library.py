@@ -36,8 +36,29 @@ class LibraryTests(unittest.TestCase):
             info = library.status()
         self.assertTrue(info["writable"])
         self.assertFalse(info["open"])
+        self.assertFalse(info["serato_running"])
+        self.assertEqual(info["message"], "Serato is quit. Edits save to the library.")
         self.assertEqual(info["file_manager"], library.file_manager_name())
         self.assertIn(temp.db.name, "master.sqlite")
+
+    def test_status_matches_a_running_serato_dj_process(self) -> None:
+        """Report Serato open when the process check says it is running.
+
+        The database lock table is empty. The sidebar message and the
+        wizard block both follow ``serato_dj_running``, so they cannot
+        disagree. Nothing is written.
+
+        Returns:
+            None. The test fails if the library stays writable or the
+            message still says Serato is quit.
+        """
+        with TempLibrary():
+            with mock.patch("snapshots.serato_dj_running", return_value=True):
+                info = library.status()
+        self.assertTrue(info["serato_running"])
+        self.assertTrue(info["open"])
+        self.assertFalse(info["writable"])
+        self.assertEqual(info["message"], "Serato DJ is open. Edits stay off until it quits.")
 
     def test_status_blocks_a_live_serato_process(self) -> None:
         """Refuse a write while a Serato process holds the lock.
@@ -964,6 +985,9 @@ class MergeTests(unittest.TestCase):
         directory as inside the library and refuse the move. The file must
         land in the trash files directory with a ``.trashinfo`` record, and
         the kept file must stay. ``os.unlink`` is not used on the audio.
+        The platform patch is only for the trash layout. Process detection
+        stays clear, because a missing ``ps`` on Windows would otherwise
+        count as Serato DJ still running.
 
         Returns:
             None. The test fails if the file is unlinked or left in place.
@@ -1000,6 +1024,7 @@ class MergeTests(unittest.TestCase):
                     mock.patch("library.sys.platform", "linux"),
                     mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg)}),
                     mock.patch("os.unlink", guard),
+                    mock.patch("snapshots.serato_dj_running", return_value=False),
                 ):
                     result = library.merge_duplicates(
                         {

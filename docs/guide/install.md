@@ -22,14 +22,24 @@ The builds are unsigned. macOS Gatekeeper and Windows SmartScreen warn before th
 
 Quit Serato DJ Pro if it is open and you plan to edit the library. Then open the app the way [First install](../first-install.md) describes.
 
-The browser opens a page titled **Serato library**. The address starts with `127.0.0.1`. The left side says **Library**. The status line starts as **Checking Serato**, then changes to one of these:
+A window titled **Serato Library** opens. The page is served on `127.0.0.1`. The first time, setup runs before the library is yours to browse.
+
+1. **Welcome.** Read the one sentence. Choose **Get started**.
+2. **Find your library.** The page names the disk and how many tracks it found. Choose **Use this library**. If it found nothing, open Serato DJ once, quit it, and choose **Check again**. **Choose a folder** lets you point at that folder yourself. The app still opens the library Serato keeps on this computer.
+3. **Safety snapshot.** Choose **Take a safety snapshot**. If Serato DJ is open, the page says **Close Serato DJ to continue** and checks again on its own. When the copy is saved, choose **Continue**.
+4. **Sharing,** if you have not chosen yet. **No, don't share** and **Yes, share** are the same kind of button. **No, don't share** is first.
+5. **Done.** The page says **Library ready. Snapshot saved.** Choose **Open my library**.
+
+**Back** is on every step except Welcome. **Cancel** closes setup and does not change the library. Setup shows again the next time you open the app until you choose **Open my library**. Pressing Esc cancels setup. It does not answer the sharing question.
+
+After that, the left side says **Library**. The status line starts as **Checking Serato**, then changes to one of these:
 
 - **Serato is quit. Edits save to the library.**
 - **Serato DJ Pro is open. Edits stay off until it quits.** The process name in the sentence matches the program that has the library open.
 
-Closing the browser does not stop the app. Quit from the **Serato Library** menu-bar item on a Mac, or from the **Serato Library** icon in the Windows notification area. Choose **Quit**. A second double-click opens the same page. The page is served on `127.0.0.1` only. Nothing in the release is your library. The app reads the library Serato already keeps on this computer.
+Close the window to quit. A second double-click focuses the same window. The page is served on `127.0.0.1` only. Nothing in the release is your library. The app reads the library Serato already keeps on this computer.
 
-The first launch asks **Share anonymous usage stats and crash reports?** **Don't share** is selected. Read [Settings and privacy](settings.md) before you choose Share. Closing the dialog, or pressing Esc, saves **Don't share**.
+Read [Settings and privacy](settings.md) before you choose **Yes, share**. **No, don't share** leaves sharing off. Esc on that step cancels setup and does not save a sharing choice.
 
 ## Where Serato keeps the library
 
@@ -57,10 +67,10 @@ On Windows, the file is `%LOCALAPPDATA%\Serato\Library\master.sqlite`.
 2. Paste `%LOCALAPPDATA%\Serato\Library`.
 3. Press Enter.
 
-If `master.sqlite` is missing, the app closes. The message is **Serato library not found at** followed by the path above. Install Serato DJ Pro and open it once so it can create the library. Then open Serato Library again.
+If that file is missing, the app stays open. Setup says **No Serato library was found on this computer.** Install Serato DJ Pro and open it once so it can create the library. Quit Serato DJ. Then choose **Check again**.
 
 ## If the window does not open
 
-Another copy may already be running. Quit it from the menu bar or the notification area and try again. If you started `server.py` from a terminal, the message is **http://127.0.0.1:8765 is already in use. Quit the other Serato library server (server.py or the desktop app) and try again.**
+Another copy may already be running. Its window should come forward. If it does not, close the Serato Library window and try again. If you started `server.py` from a terminal, the message is **http://127.0.0.1:8765 is already in use. Quit the other Serato library server (server.py or the desktop app) and try again.**
 
 Gatekeeper, SmartScreen, and Removable Volumes steps are in [First install](../first-install.md) and [Troubleshooting](troubleshooting.md).

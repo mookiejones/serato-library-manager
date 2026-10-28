@@ -307,6 +307,7 @@ export interface SettingsPayload {
   telemetry_consent?: boolean | null;
   telemetry_configured?: boolean;
   needs_consent_prompt?: boolean;
+  wizard_complete?: boolean;
   app_version?: string;
   rekordbox?: RekordboxSettings;
   error?: string;

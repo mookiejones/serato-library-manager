@@ -69,6 +69,7 @@ export interface PageState {
   duplicateSpace: string;
   telemetryConsent: boolean | null;
   telemetryConfigured: boolean;
+  wizardComplete: boolean;
   filesPath: string;
   filesParent: string | null;
   filesEntries: FileEntry[];
@@ -118,6 +119,7 @@ export const state: PageState = {
   duplicateSpace: "",
   telemetryConsent: null,
   telemetryConfigured: false,
+  wizardComplete: false,
   filesPath: "",
   filesParent: null,
   filesEntries: [],

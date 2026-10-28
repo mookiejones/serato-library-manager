@@ -13,15 +13,15 @@ The line you want is **Serato is quit. Edits save to the library.**
 
 A save that hits a lock shows the error in the bar above the list. The merge dialog says **Quit Serato before merging. The preview shows the plan.** The file dialog shows the same status line and leaves **Confirm** off.
 
-## The app closes as soon as it opens
+## No Serato library was found
 
-`master.sqlite` is not where the app looks. The message is **Serato library not found at** and then a path.
+Setup says **No Serato library was found on this computer.** The app stays open.
 
 1. Install Serato DJ Pro if it is not installed.
 2. Open Serato DJ Pro once, then quit it.
-3. Open the folder in [Install](install.md#where-serato-keeps-the-library).
-4. Confirm `master.sqlite` is there.
-5. Open Serato Library again.
+3. Return to Serato Library and choose **Check again**.
+
+The usual folder is in [Install](install.md#where-serato-keeps-the-library). **Choose a folder** confirms that folder. It does not switch the app to a different library.
 
 ## macOS says the app is damaged or cannot be opened
 
@@ -53,11 +53,10 @@ If you used the portable zip, run the exe from the extracted folder. Do not run 
 
 Another copy may already be running.
 
-1. On a Mac, use the **Serato Library** menu-bar item and choose **Quit**.
-2. On Windows, use the **Serato Library** icon in the notification area and choose **Quit**.
-3. Open the app again.
+1. Find the **Serato Library** window and close it.
+2. Open the app again.
 
-If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy. The desktop app uses a free port and does not show that message. A second double-click opens the page that is already running.
+A second double-click focuses the window that is already open. If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy. The desktop app uses a free port and does not show that message.
 
 ## Serato put my edit back
 

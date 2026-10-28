@@ -18,7 +18,7 @@
 
 On a Mac, double-click the disk image, drag **Serato Library** onto **Applications**, then open it from Applications. On Windows, double-click the installer and leave **Open Serato Library** checked at the end.
 
-Your browser opens the library. The address starts with `127.0.0.1`. Nothing is uploaded. A second double-click opens that same page again. Quit from the **Serato Library** menu-bar item on a Mac, or from the **Serato Library** icon in the Windows notification area. Choose **Quit**.
+A window titled **Serato Library** opens. The page is served on this computer at an address starting with `127.0.0.1`. Nothing is uploaded. The first time, setup confirms the library, saves a safety copy, and asks whether to share anonymous stats. **Cancel** leaves the library unchanged, and setup shows again next time until you choose **Open my library**. On Windows the window uses the installed WebView2 runtime. On a Mac it uses the system web view. A second double-click focuses that window. Close the window to quit.
 
 ## Why you'll see a warning
 

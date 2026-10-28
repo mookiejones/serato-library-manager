@@ -91,7 +91,7 @@ class AssetTests(unittest.TestCase):
             None. The test fails if the page names a different local file.
         """
         names = static_assets.local_asset_names(ROOT / "static" / "index.html")
-        self.assertEqual(names, ["tokens.css", "app.css", "app.js"])
+        self.assertEqual(names, ["tokens.css", "app.css", "wizard.js", "app.js"])
         self.assertEqual(static_assets.missing_static_files(ROOT / "static"), [])
 
     def test_remote_links_are_not_assets(self) -> None:
@@ -146,11 +146,11 @@ class PinTests(unittest.TestCase):
 
         ``requirements-build.txt`` must contain each ``requirements.txt``
         line and pin ``pyinstaller`` with ``==``. ``requirements-macos.txt``
-        pins the menu-bar frameworks the same way. Neither file is passed
+        pins the WKWebView frameworks the same way. Neither file is passed
         to pip.
 
         Returns:
-            None. The test fails if a pin drifts or pywebview returns.
+            None. The test fails if a pin drifts or pystray returns.
         """
         app = [
             line
@@ -162,7 +162,9 @@ class PinTests(unittest.TestCase):
             self.assertIn(line, build)
             self.assertIn("==", line)
         self.assertTrue(any(line.startswith("pyinstaller==") for line in build))
-        self.assertFalse(any(line.startswith("pywebview==") for line in app + build))
+        self.assertTrue(any(line.startswith("pywebview==") for line in app))
+        self.assertFalse(any(line.startswith("pystray==") or line.startswith("pillow==") for line in app + build))
+        self.assertFalse(any(line.startswith("cefpython3") for line in app + build))
         macos = [
             line
             for line in (ROOT / "requirements-macos.txt").read_text(encoding="utf-8").splitlines()
@@ -171,8 +173,12 @@ class PinTests(unittest.TestCase):
         self.assertEqual(
             macos,
             [
+                "pyobjc-core==12.2.2",
                 "pyobjc-framework-Cocoa==12.2.2",
                 "pyobjc-framework-Quartz==12.2.2",
+                "pyobjc-framework-WebKit==12.2.2",
+                "pyobjc-framework-Security==12.2.2",
+                "pyobjc-framework-UniformTypeIdentifiers==12.2.2",
             ],
         )
 
@@ -571,6 +577,10 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("serato-library.spec", header)
         self.assertIn("scripts/release_*", header)
         self.assertIn(".github/workflows/release.yml", header)
+        self.assertIn("desktop.py", header)
+        self.assertIn("requirements.txt", header)
+        self.assertIn("requirements-build.txt", header)
+        self.assertIn("requirements-macos.txt", header)
         self.assertIn("scripts/release_bundle.py pack", text)
         self.assertIn("scripts/release_bundle.py pack-dmg", text)
         self.assertIn("scripts/release_bundle.py check-binaries", text)
@@ -931,9 +941,9 @@ class PackageTests(unittest.TestCase):
         """Document the release files and Removable Volumes beside Open Anyway.
 
         Reads ``docs/first-install.md``. The page must name each download,
-        say the browser opens, and tell a Mac user to allow Removable
-        Volumes rather than Full Disk Access. It must not link a missing
-        panic page.
+        say the Serato Library window opens, and tell a Mac user to allow
+        Removable Volumes rather than Full Disk Access. It must not link
+        a missing panic page.
 
         Returns:
             None. The test fails if a shipped name or the permission is absent.
@@ -946,14 +956,22 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Full Disk Access", text)
         self.assertIn("Privacy & Security", text)
         self.assertIn("Files and Folders", text)
-        self.assertIn("menu-bar", text)
-        self.assertIn("notification area", text)
+        self.assertIn("Close the window", text)
+        self.assertIn("WebView2", text)
+        self.assertNotIn("menu-bar", text)
+        self.assertNotIn("notification area", text)
         self.assertIn("127.0.0.1", text)
         self.assertNotIn("panic.md", text)
         self.assertNotIn("PREVIEW", text)
         spec = (ROOT / "serato-library.spec").read_text(encoding="utf-8")
         self.assertIn("NSRemovableVolumesUsageDescription", spec)
-        self.assertNotIn("webview", spec)
+        self.assertIn("webview.platforms.edgechromium", spec)
+        self.assertIn("webview.platforms.cocoa", spec)
+        self.assertIn("webview.platforms.gtk", spec)
+        self.assertIn('"cefpython3"', spec)
+        self.assertIn('"pystray"', spec)
+        self.assertNotIn("pystray._", spec)
+        self.assertNotIn("LSUIElement", spec)
 
 
 if __name__ == "__main__":

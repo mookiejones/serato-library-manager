@@ -13,7 +13,7 @@ A local window for the Serato DJ Pro library on macOS and Windows. Source on `ma
   <img alt="Serato Library Manager: restore your library to any point in time, checked against the saved backup, on every drive." src="docs/images/hero-light.png" width="100%">
 </picture>
 
-The hero is a product illustration. The screenshots below are the app on main `9d2bb92`, and they show example data. The app has one theme, so there is no dark variant.
+The hero is a product illustration. The screenshots below show example data of the crates, snapshots, and Prepare views. The app has one theme, so there is no dark variant.
 
 ## Install
 
@@ -45,7 +45,7 @@ These are on `main` (1.1.0).
 - Rename, move, replace, and trash audio, and update the library path.
 - Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied.
 - The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
-- Ask before sharing anonymous counts and crash reports. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
+- Ask before sharing anonymous counts and crash reports. Setup asks on the first launch. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
 
 The page source is strict TypeScript in `src/`. `npm run build` writes the `static/app.js` the server loads. Node is not required to run the server. Node 22 or newer is required to typecheck and rebuild that file.
 
@@ -75,7 +75,7 @@ The page source is strict TypeScript in `src/`. `npm run build` writes the `stat
   <img alt="The UI (static/app.js) talks over HTTP to server.py on 127.0.0.1. The safe-write layer (library.py, files.py, tags.py, snapshot_frames.py, snapshots.py, serato_web/completeness.py) writes the _Serato_ folder on every drive and saves to the snapshot store first." src="docs/images/architecture-light.png" width="100%">
 </picture>
 
-`desktop.py` is a menu-bar or tray app. It opens the default browser. It does not embed a web view. Color and type tokens live in `static/tokens.css`. The code reference is [docs/architecture.md](docs/architecture.md).
+`desktop.py` opens a native window titled Serato Library. The window uses the system web view: WebView2 on Windows, WKWebView on macOS, and WebKitGTK or Qt WebKit on Linux. Chromium is not bundled. Color and type tokens live in `static/tokens.css`. The code reference is [docs/architecture.md](docs/architecture.md).
 
 ## Run from source
 
@@ -97,7 +97,7 @@ python3 -m venv .venv
 .venv/bin/python desktop.py
 ```
 
-The app binds `127.0.0.1` on a free port and opens the browser. Quit from the menu bar on macOS or the notification area on Windows. Closing the browser leaves the app running. A second launch opens the same page. On Windows, use `.venv\Scripts\python`. On macOS, also install `requirements-macos.txt` in that environment so the menu bar can load.
+The app binds `127.0.0.1` on a free port and opens a window titled Serato Library. Close the window to quit. A second launch focuses that window. On Windows, use `.venv\Scripts\python`, and install the WebView2 runtime when Windows does not already have it. On macOS, also install `requirements-macos.txt` in that environment so WKWebView can load. On Linux, install WebKitGTK (GTK 3 and WebKit2), or Qt WebKit without Qt WebEngine. `SERATO_LIBRARY_NO_WINDOW=1` or `--no-window` skips the window.
 
 A local unsigned build of the current operating system:
 

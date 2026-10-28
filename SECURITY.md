@@ -1,6 +1,6 @@
 # Security
 
-The library browser is a local program. `server.py` binds `127.0.0.1` port `8765` and has no login. The desktop app binds `127.0.0.1` on a free port, then opens the default browser. It does not embed a web view. Do not publish that port, put the process behind a tunnel, or deploy it as a website. Anyone who can reach it can read and edit the Serato library on that machine. `POST /api/shutdown` is enabled only for the desktop process, and only with a token that is not in the page.
+The library browser is a local program. `server.py` binds `127.0.0.1` port `8765` and has no login. The desktop app binds `127.0.0.1` on a free port, then opens that page in a native window. The window uses the system web view and does not bundle Chromium. Do not publish that port, put the process behind a tunnel, or deploy it as a website. Anyone who can reach it can read and edit the Serato library on that machine. `POST /api/shutdown` and `POST /api/focus` are enabled only for the desktop process, and only with tokens that are not in the page.
 
 Do not send `master.sqlite`, `root.sqlite`, or audio files with a report. Cue data lives in the audio file. The database lives outside this repository.
 

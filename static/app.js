@@ -94,6 +94,7 @@
     duplicateSpace: "",
     telemetryConsent: null,
     telemetryConfigured: false,
+    wizardComplete: false,
     filesPath: "",
     filesParent: null,
     filesEntries: [],
@@ -2460,6 +2461,7 @@
   function applyPrivacy(payload) {
     state.telemetryConsent = payload.telemetry_consent ?? null;
     state.telemetryConfigured = Boolean(payload.telemetry_configured);
+    state.wizardComplete = payload.wizard_complete === true;
     privacySync = true;
     el("telemetry-toggle").checked = state.telemetryConsent === true;
     privacySync = false;
@@ -2485,6 +2487,26 @@
     el("consent-dialog").showModal();
     el("consent-decline").focus();
   }
+  function openWizard(force, returnFocus) {
+    const wizard = globalThis.SeratoWizard;
+    if (!wizard || typeof wizard.open !== "function") return false;
+    const options = {
+      force,
+      returnFocus,
+      onSettings(payload) {
+        applyPrivacy(payload);
+      },
+      onStatus(info) {
+        applyStatus({
+          message: info.message,
+          writable: info.writable,
+          open: info.open
+        });
+      }
+    };
+    wizard.open(options);
+    return true;
+  }
   async function loadPrivacy() {
     const token = rekordboxToken;
     const response = await fetch("/api/settings");
@@ -2492,6 +2514,7 @@
     if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
     applyPrivacy(payload);
     if (token === rekordboxToken) applyRekordboxExport(payload);
+    if (!state.wizardComplete && openWizard(false, el("search"))) return;
     if (payload.needs_consent_prompt) showConsent();
   }
   function openFilesDialog(action, trigger) {
@@ -2690,6 +2713,10 @@
     });
     el("settings-close").addEventListener("click", () => {
       el("settings-dialog").close();
+    });
+    el("rerun-wizard").addEventListener("click", () => {
+      el("settings-dialog").close();
+      openWizard(true, el("open-settings"));
     });
     el("telemetry-toggle").addEventListener("change", () => {
       if (privacySync) return;
