@@ -479,7 +479,8 @@ def assert_zip(
 
     The publish job calls this without launching the app. The executable
     must be a regular file, the macOS binary must be marked executable,
-    and every bundled ``static`` file must match ``source``.
+    and every bundled ``static`` file must match ``source``. A Windows
+    executable must be a 64-bit PE (machine ``0x8664``).
 
     Args:
         archive: Zip file to inspect.
@@ -510,6 +511,10 @@ def assert_zip(
             raise SystemExit(f"{exe_name} is not a regular executable")
         if kind == "macos" and _unix_mode(exe_info) & 0o111 == 0:
             raise SystemExit(f"{exe_name} is not marked executable")
+        if kind == "windows":
+            machine = pe_machine_bytes(zipped.read(exe_name), exe_name)
+            if machine != PE_MACHINE_AMD64:
+                raise SystemExit(f"{exe_name} machine {machine:#x} is not x64")
         prefixes = [
             info.filename[: -len("index.html")]
             for info in infos
@@ -906,6 +911,28 @@ def app_version() -> str:
     return version
 
 
+def pe_machine_bytes(data: bytes, name: str) -> int:
+    """Return the PE machine field in ``data``.
+
+    Args:
+        data: Executable bytes, starting at the DOS header.
+        name: File or zip member named in the error.
+
+    Returns:
+        The 16-bit machine id. ``0x8664`` is 64-bit x86. ``0x14c`` is
+        32-bit x86.
+
+    Raises:
+        SystemExit: If ``data`` is not a PE executable.
+    """
+    if len(data) < 64 or data[:2] != b"MZ":
+        raise SystemExit(f"{name} is not a Windows executable")
+    offset = int.from_bytes(data[0x3C:0x40], "little")
+    if offset < 0 or offset + 6 > len(data) or data[offset : offset + 4] != b"PE\0\0":
+        raise SystemExit(f"{name} has no PE header")
+    return int.from_bytes(data[offset + 4 : offset + 6], "little")
+
+
 def pe_machine(path: Path) -> int:
     """Return the PE machine field of a Windows executable.
 
@@ -913,18 +940,15 @@ def pe_machine(path: Path) -> int:
         path: ``.exe`` file.
 
     Returns:
-        The 16-bit machine id. ``0x8664`` is 64-bit x86.
+        The 16-bit machine id. ``0x8664`` is 64-bit x86. ``0x14c`` is
+        32-bit x86.
 
     Raises:
         SystemExit: If the file is not a PE executable.
+
+    Reads the whole file.
     """
-    data = path.read_bytes()
-    if len(data) < 64 or data[:2] != b"MZ":
-        raise SystemExit(f"{path.name} is not a Windows executable")
-    offset = int.from_bytes(data[0x3C:0x40], "little")
-    if offset < 0 or offset + 6 > len(data) or data[offset : offset + 4] != b"PE\0\0":
-        raise SystemExit(f"{path.name} has no PE header")
-    return int.from_bytes(data[offset + 4 : offset + 6], "little")
+    return pe_machine_bytes(path.read_bytes(), path.name)
 
 
 def assert_frozen_arch(exe: Path, arch: str) -> None:
@@ -984,19 +1008,58 @@ def assert_dmg(
         raise SystemExit(f"{archive.name} is not a UDIF disk image")
 
 
-def assert_setup(archive: Path) -> None:
-    """Require the installer to be a 64-bit PE file of a plausible size.
+def assert_installer_script(path: Path | None = None) -> None:
+    """Require the Inno script to install a 64-bit app.
+
+    Args:
+        path: Script to read. Defaults to ``packaging/serato-library.iss``.
+
+    Raises:
+        SystemExit: If ``ArchitecturesInstallIn64BitMode`` or
+            ``ArchitecturesAllowed`` is not ``x64compatible``.
+
+    Reads the script. Does not compile it.
+    """
+    script = ISS_PATH if path is None else path
+    text = script.read_text(encoding="utf-8")
+    required = (
+        "ArchitecturesInstallIn64BitMode=x64compatible",
+        "ArchitecturesAllowed=x64compatible",
+    )
+    for line in required:
+        if line not in text:
+            raise SystemExit(f"{script.name} is missing {line}")
+
+
+def assert_setup(
+    archive: Path,
+    *,
+    min_bytes: int = MIN_ZIP_BYTES,
+    max_bytes: int = MAX_ZIP_BYTES,
+) -> None:
+    """Require a sized PE installer and a 64-bit Inno script.
+
+    Inno Setup 6.7.3 writes ``Setup.e32``. That stub is a 32-bit x86
+    binary (machine ``0x14c``) even when the script's
+    ``ArchitecturesInstallIn64BitMode`` is ``x64compatible``. Setup
+    itself stays 32-bit. This check accepts that stub. The application
+    executable inside the portable zip is the file that must be x64.
 
     Args:
         archive: ``Serato-Library-windows-setup.exe``.
+        min_bytes: Smallest accepted size, inclusive.
+        max_bytes: Largest accepted size, inclusive.
 
     Raises:
-        SystemExit: If the size or the machine type is wrong.
+        SystemExit: If the size is outside the bounds, the file is not a
+            PE, or the installer script does not select 64-bit mode.
+
+    Reads the installer header and ``packaging/serato-library.iss``.
+    Does not launch the installer.
     """
-    assert_size(archive.name, archive.stat().st_size, MIN_ZIP_BYTES, MAX_ZIP_BYTES)
-    machine = pe_machine(archive)
-    if machine != PE_MACHINE_AMD64:
-        raise SystemExit(f"{archive.name} machine {machine:#x} is not x64")
+    assert_size(archive.name, archive.stat().st_size, min_bytes, max_bytes)
+    pe_machine(archive)
+    assert_installer_script()
 
 
 def _file_names(directory: Path) -> list[str]:
@@ -1014,9 +1077,11 @@ def _file_names(directory: Path) -> list[str]:
 def check_binaries(directory: Path) -> None:
     """Check the four release files without launching them.
 
-    The publish job runs on Linux. It can read the Windows zip and the
-    PE header, and it can read the UDIF trailer. It cannot mount a disk
-    image or start either app. The build jobs already did that.
+    The publish job runs on Linux. It can read the Windows zip, the
+    application executable's PE header, and the UDIF trailer. It cannot
+    mount a disk image or start either app. The build jobs already did
+    that. The Inno stub is not required to be 64-bit. The script beside
+    this repository must select 64-bit install mode instead.
 
     Args:
         directory: Folder that holds the downloaded artifacts and no checksum
