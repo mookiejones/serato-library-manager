@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import quote, unquote, urlparse
 
+import app_log
 import telemetry
 from tags import SeratoTags, read_serato_tags
 
@@ -559,15 +560,24 @@ def _discard_failed_backup(folder: Path, backups: Path) -> None:
 
     The folder must be a real directory strictly inside ``backups``. A
     symlink is left in place so the removal cannot follow a link out of
-    that directory. ``backups`` itself is not removed.
+    that directory. ``backups`` itself is not removed. An ``OSError``
+    while removing the folder, such as a file lock, is logged and not
+    raised. The caller still re-raises the copy error.
     """
-    if folder.is_symlink() or not folder.is_dir():
-        return
-    resolved = folder.resolve()
-    root = backups.resolve()
-    if root not in resolved.parents:
-        return
-    shutil.rmtree(folder)
+    try:
+        if folder.is_symlink() or not folder.is_dir():
+            return
+        resolved = folder.resolve()
+        root = backups.resolve()
+        if root not in resolved.parents:
+            return
+        shutil.rmtree(folder)
+    except OSError as exc:
+        app_log.logger.warning(
+            "Could not remove the failed backup folder %s: %s",
+            folder,
+            exc,
+        )
 
 
 def ensure_backup() -> Path | None:
@@ -578,7 +588,8 @@ def ensure_backup() -> Path | None:
     ``-99``. Each name is claimed with ``mkdir(parents=True, exist_ok=False)``,
     which fails atomically when another process already took it. Nothing is
     copied until a folder is claimed. If the copy fails, that new folder is
-    removed and the error is re-raised.
+    removed and the error is re-raised. A failure to remove the folder is
+    logged and does not replace that error.
 
     Returns:
         The new backup directory, or None when this process already backed

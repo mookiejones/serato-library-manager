@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
+import app_log
 import library
 from tests.fixture import TempLibrary, open_database
 
@@ -247,6 +248,37 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(_sha256(temp.db), digest)
             self.assertTrue(temp.db.is_file())
             self.assertNotIn(str(temp.db.resolve()), library._backed_up)
+
+    def test_cleanup_lock_keeps_the_original_error(self) -> None:
+        """Keep the copy error when removing the folder is itself locked.
+
+        The copy raises ``OSError`` 28. Removing the folder raises
+        ``PermissionError``. ``ensure_backup`` must raise that same
+        ``OSError`` 28, and the log must name the folder that could not
+        be removed.
+
+        Returns:
+            None. The test fails if the lock error replaces the copy error
+            or the warning omits the folder path.
+        """
+        with TempLibrary() as temp:
+            disk_full = OSError(28, "No space left on device")
+            folder = temp.db.resolve().parent / "Backups" / f"serato-web-{STAMP}"
+            with _freeze_clock():
+                with mock.patch.object(library, "_backup_database", side_effect=disk_full):
+                    with mock.patch(
+                        "library.shutil.rmtree",
+                        side_effect=PermissionError(13, "Access is denied"),
+                    ):
+                        with self.assertLogs(app_log.LOGGER_NAME, level="WARNING") as recorded:
+                            with self.assertRaises(OSError) as caught:
+                                library.ensure_backup()
+            self.assertIs(caught.exception, disk_full)
+            self.assertEqual(caught.exception.errno, 28)
+            self.assertIsNone(caught.exception.__cause__)
+            self.assertIsNone(caught.exception.__context__)
+            self.assertNotIsInstance(caught.exception, PermissionError)
+            self.assertIn(str(folder), "\n".join(recorded.output))
 
     def test_failed_backup_cleanup_leaves_a_symlink(self) -> None:
         """Do not follow a backup-shaped symlink out of ``Backups``.
