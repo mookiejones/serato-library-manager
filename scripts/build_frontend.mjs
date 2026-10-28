@@ -8,7 +8,7 @@
  */
 
 import esbuild from "esbuild";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,17 +62,25 @@ if (!beforeJs.equals(afterJs) || !beforeMap.equals(afterMap)) {
 
 const expectedExpectError = 0;
 let expectError = 0;
-const { readdirSync } = await import("node:fs");
-const srcDir = join(root, "src");
-for (const name of readdirSync(srcDir)) {
-  if (!name.endsWith(".ts")) continue;
-  const text = readFileSync(join(srcDir, name), "utf8");
-  expectError += (text.match(/@ts-expect-error/g) || []).length;
-  if (text.includes("@ts-nocheck") || text.includes("@ts-ignore")) {
-    console.error(`${name} uses @ts-nocheck or @ts-ignore. Strict checking stays on.`);
-    process.exit(1);
+
+function countExpectErrors(dir) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      countExpectErrors(full);
+      continue;
+    }
+    if (!name.endsWith(".ts")) continue;
+    const text = readFileSync(full, "utf8");
+    expectError += (text.match(/@ts-expect-error/g) || []).length;
+    if (text.includes("@ts-nocheck") || text.includes("@ts-ignore")) {
+      console.error(`${full} uses @ts-nocheck or @ts-ignore. Strict checking stays on.`);
+      process.exit(1);
+    }
   }
 }
+
+countExpectErrors(join(root, "src"));
 if (expectError !== expectedExpectError) {
   console.error(`@ts-expect-error count is ${expectError}; the tracked count is ${expectedExpectError}.`);
   process.exit(1);

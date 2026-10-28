@@ -47,7 +47,7 @@ These are on `main` (1.1.0).
 - The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
 - Ask before sharing anonymous counts and crash reports. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
 
-**PREVIEW** means the work is not merged. The move of `static/app.js` to strict TypeScript is [issue #59](https://github.com/mookiejones/serato-library-manager/issues/59). It is not merged. The page is plain JavaScript.
+The page source is strict TypeScript in `src/`. `npm run build` writes the `static/app.js` the server loads. Node is not required to run the server. Node 22 or newer is required to typecheck and rebuild that file.
 
 ### Screenshots
 
