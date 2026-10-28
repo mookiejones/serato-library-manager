@@ -10,7 +10,7 @@ The lock line repeats the status under **Library**. When it says Serato is quit,
 
 ## What Save track writes
 
-**Save track** writes the library database. It does not rewrite the audio file. Finder, File Explorer, and other tag editors are separate. Cue points stay in the file. The section **Cues, loops, and beatgrid** says **Read from the audio file. These are not written back.**
+**Save track** writes the library database. It does not rewrite the audio file. Finder, File Explorer, and other tag editors are separate. Cue points stay in the file. The section **Cues, loops, and beatgrid** says **Read from the audio file. These are not written back.** An MP3 is read from its ID3 tag. A FLAC is read from its Vorbis comment. An M4A or MP4 is read from its Serato atom. Cue colors and the beatgrid come from that same read.
 
 If the file is missing, that section says **The file is not on disk, so cues cannot be read.** If the file has no Serato markers, it says **No Serato cues in this file.**
 
