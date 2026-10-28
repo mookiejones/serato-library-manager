@@ -9,7 +9,6 @@ write in a process copies the database into Library/Backups first.
 from __future__ import annotations
 
 import errno
-import hashlib
 import json
 import os
 import re
@@ -552,356 +551,19 @@ def _match_quiescent_header(source: Path, dest: Path) -> None:
         handle.write(updated)
 
 
-# A folder whose name ends with this suffix is a backup that did not finish.
-# The check is case-insensitive. A collision uses ``-failed-02`` and so on.
-BACKUP_FAILED_SUFFIX = "-failed"
-# Written inside a failed backup when every failed rename is blocked.
-# A restore must not offer a folder that contains this file.
-BACKUP_INCOMPLETE_NAME = "INCOMPLETE"
-# Written last, after every other file. Each line is a SHA-256 and a
-# relative path. ``is_complete`` requires this file and checks every hash.
-BACKUP_COMPLETE_NAME = "COMPLETE"
-# Status for an old backup that has no COMPLETE marker. It is not offered
-# as a finished backup. ``verify_legacy_backup`` checks one the user picked.
-LEGACY_BACKUP_STATUS = "legacy, unverified"
-# Held while a staging directory is being written. Cleanup will not remove
-# a directory whose lock is already taken.
-PARTIAL_LOCK_NAME = ".write-lock"
-# A staging directory younger than this is left alone. Its newest mtime
-# is what counts, so a file still being written keeps the directory.
-PARTIAL_STALE_SECONDS = 60 * 60
-
-
-def _real_dir(path: Path) -> bool:
-    """Return whether a path is a directory and not a shortcut.
-
-    Args:
-        path: Path to test.
-
-    Returns:
-        True for a real directory.
-    """
-    return path.is_dir() and not path.is_symlink()
-
-
-def _real_file(path: Path) -> bool:
-    """Return whether a path is a file and not a shortcut.
-
-    Args:
-        path: Path to test.
-
-    Returns:
-        True for a regular file.
-    """
-    return path.is_file() and not path.is_symlink()
-
-
-def _is_failed_name(name: str) -> bool:
-    """Return whether a directory name is a failed backup.
-
-    Args:
-        name: Directory name, not a path.
-
-    Returns:
-        True when the name ends with ``-failed`` or ``-failed-NN``, in any
-        letter case.
-    """
-    lowered = name.lower()
-    if lowered.endswith("-failed"):
-        return True
-    tail = lowered.rsplit("-failed-", 1)
-    return len(tail) == 2 and len(tail[1]) == 2 and tail[1].isdigit()
-
-
-def _is_staging_name(name: str) -> bool:
-    """Return whether a directory name is an unfinished staging folder.
-
-    Args:
-        name: Directory name, not a path.
-
-    Returns:
-        True for a hidden ``.partial`` folder.
-    """
-    return name.lower().endswith(".partial")
-
-
-def _relative_files(folder: Path) -> list[Path] | None:
-    """Return regular files under a folder, excluding the COMPLETE marker.
-
-    Args:
-        folder: Directory to walk.
-
-    Returns:
-        File paths relative to ``folder``, sorted by their POSIX path.
-        None when a shortcut is found or the walk cannot be read.
-    """
-    found: list[Path] = []
-    try:
-        for path in folder.rglob("*"):
-            if path.is_symlink():
-                return None
-            if not path.is_file():
-                continue
-            if path.name == BACKUP_COMPLETE_NAME and path.parent == folder:
-                continue
-            if path.name == PARTIAL_LOCK_NAME:
-                continue
-            found.append(path.relative_to(folder))
-    except OSError:
-        return None
-    return sorted(found, key=lambda item: item.as_posix())
-
-
-def _sha256_file(path: Path) -> str:
-    """Return the SHA-256 hex digest of a file.
-
-    Args:
-        path: File to read.
-
-    Returns:
-        The lowercase hex digest.
-    """
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _write_complete_marker(folder: Path) -> None:
-    """Write the COMPLETE marker after every other backup file.
-
-    Args:
-        folder: Staging directory whose files are already in place.
-
-    Raises:
-        OSError: If a file cannot be read or the marker cannot be written.
-    """
-    files = _relative_files(folder)
-    if files is None:
-        raise OSError("The backup contains a shortcut.")
-    lines = [f"{_sha256_file(folder / rel)}  {rel.as_posix()}\n" for rel in files]
-    marker = folder / BACKUP_COMPLETE_NAME
-    marker.write_text("".join(lines), encoding="utf-8")
-    _fsync_file(marker)
-
-
-def _complete_hashes_match(folder: Path) -> bool:
-    """Return whether COMPLETE lists every file and each hash matches.
-
-    Args:
-        folder: Directory that contains a COMPLETE marker.
-
-    Returns:
-        True when the marker and the files agree. A missing file, an extra
-        file, a shortcut, or a hash mismatch is false.
-    """
-    marker = folder / BACKUP_COMPLETE_NAME
-    try:
-        text = marker.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return False
-    listed: dict[str, str] = {}
-    for line in text.splitlines():
-        if not line:
-            continue
-        digest, separator, rel = line.partition("  ")
-        if separator != "  " or len(digest) != 64 or not rel or rel == BACKUP_COMPLETE_NAME:
-            return False
-        if "\\" in rel or rel.startswith("/") or any(
-            part in {"", ".", ".."} for part in rel.split("/")
-        ):
-            return False
-        try:
-            bytes.fromhex(digest)
-        except ValueError:
-            return False
-        if rel in listed:
-            return False
-        listed[rel] = digest.lower()
-    if not listed:
-        return False
-    files = _relative_files(folder)
-    if files is None:
-        return False
-    names = [path.as_posix() for path in files]
-    if names != sorted(listed):
-        return False
-    try:
-        for rel, digest in listed.items():
-            if _sha256_file(folder / rel) != digest:
-                return False
-    except OSError:
-        return False
-    return True
-
-
-def _rejected_backup_dir(backup_dir: Path) -> bool:
-    """Return whether a directory is never a finished backup.
-
-    Args:
-        backup_dir: Candidate directory.
-
-    Returns:
-        True for a shortcut, a missing path, a failed name, a staging
-        name, a folder that contains ``INCOMPLETE``, or an unreadable path.
-    """
-    if backup_dir.is_symlink() or not backup_dir.is_dir():
-        return True
-    if _is_failed_name(backup_dir.name) or _is_staging_name(backup_dir.name):
-        return True
-    return (backup_dir / BACKUP_INCOMPLETE_NAME).exists()
-
-
-def is_complete(backup_dir: Path) -> bool:
-    """Return whether a backup directory is safe to restore.
-
-    The signature is ``is_complete(backup_dir)`` and the argument is the
-    directory itself. The parent path is ignored, so the same check works
-    for a ``serato-web-`` folder beside ``master.sqlite`` and for a snapshot
-    directory anywhere else, including an app-data folder. No restore calls
-    this yet. The snapshot work in #62 will call it before listing or
-    restoring a snapshot directory.
-
-    True only when :data:`BACKUP_COMPLETE_NAME` exists and every hash it
-    lists matches the file with that relative path, and every other file
-    in the directory is listed. A missing marker means the directory is
-    not complete. A name ending in ``-failed`` or ``-failed-NN`` (any
-    letter case) and a hidden ``.partial`` directory are never complete.
-    ``INCOMPLETE`` is never complete. A shortcut or an unreadable path is
-    not complete.
-
-    An old backup with no marker is not complete. :func:`backup_status`
-    reports it as :data:`LEGACY_BACKUP_STATUS`. :func:`verify_legacy_backup`
-    is the check for one the user explicitly picked.
-
-    Args:
-        backup_dir: Candidate directory. For a snapshot store, pass the
-            store root after its COMPLETE marker has been written, not a
-            single manifest file.
-
-    Returns:
-        True when the COMPLETE marker verifies every file in the directory.
-    """
-    try:
-        if _rejected_backup_dir(backup_dir):
-            return False
-        marker = backup_dir / BACKUP_COMPLETE_NAME
-        if not _real_file(marker):
-            return False
-        return _complete_hashes_match(backup_dir)
-    except OSError:
-        return False
-
-
-def backup_status(backup_dir: Path) -> str:
-    """Describe a backup directory for a restore list.
-
-    Args:
-        backup_dir: Candidate directory.
-
-    Returns:
-        ``complete`` when :func:`is_complete` is true.
-        :data:`LEGACY_BACKUP_STATUS` (``legacy, unverified``) when the
-        folder is an old backup with ``master.sqlite`` and no COMPLETE
-        marker. ``incomplete`` for everything else, including ``-failed``
-        and ``.partial`` folders.
-    """
-    if is_complete(backup_dir):
-        return "complete"
-    if _is_legacy_backup(backup_dir):
-        return LEGACY_BACKUP_STATUS
-    return "incomplete"
-
-
-def _is_legacy_backup(backup_dir: Path) -> bool:
-    """Return whether a folder is an old backup with no COMPLETE marker.
-
-    Args:
-        backup_dir: Candidate directory.
-
-    Returns:
-        True when ``master.sqlite`` is a regular file and the folder has
-        neither marker, and it is not a failed or staging name.
-    """
-    try:
-        if _rejected_backup_dir(backup_dir):
-            return False
-        if (backup_dir / BACKUP_COMPLETE_NAME).exists():
-            return False
-        return _real_file(backup_dir / "master.sqlite")
-    except OSError:
-        return False
-
-
-def verify_legacy_backup(backup_dir: Path) -> None:
-    """Check an explicitly chosen legacy backup before it is restored.
-
-    Call this only when the user picked an unmarked folder.
-    :func:`is_complete` stays false for that folder. No restore calls this
-    yet. The snapshot work in #62 will call it before the pre-restore
-    snapshot when the chosen folder is legacy. The check copies
-    ``master.sqlite`` and any ``-wal`` file into a temporary directory and
-    runs ``PRAGMA integrity_check`` there, so the backup folder is not
-    opened and no ``-shm`` file is created beside it. The result must be
-    exactly ``ok``.
-
-    Args:
-        backup_dir: Folder the user picked. It must be a legacy backup.
-
-    Raises:
-        LibraryError: If the folder is not an unverified legacy backup,
-            the database cannot be opened read-only, or the integrity
-            check is not exactly ``ok``.
-    """
-    if not _is_legacy_backup(backup_dir):
-        raise LibraryError("That folder is not an unverified legacy backup.")
-    master = backup_dir / "master.sqlite"
-    try:
-        rows = _integrity_rows(master)
-    except sqlite3.Error as exc:
-        raise LibraryError(
-            "That legacy backup could not be checked, so it was not restored."
-        ) from exc
-    if rows != [("ok",)]:
-        raise LibraryError(
-            "That legacy backup did not pass its integrity check, so it was not restored."
-        )
-
-
-def _integrity_rows(master: Path) -> list[tuple[object, ...]]:
-    """Run ``PRAGMA integrity_check`` on a copy of a legacy database.
-
-    Args:
-        master: ``master.sqlite`` inside the legacy folder. It is not opened.
-
-    Returns:
-        Rows from the check on the temporary copy.
-
-    Raises:
-        sqlite3.Error: If the copy cannot be opened.
-        OSError: If the copy cannot be made.
-    """
-    import tempfile
-
-    wal = Path(str(master) + "-wal")
-    with tempfile.TemporaryDirectory() as raw:
-        copied = Path(raw) / "master.sqlite"
-        shutil.copyfile(master, copied)
-        if _real_file(wal):
-            shutil.copyfile(wal, Path(raw) / "master.sqlite-wal")
-        uri = f"file:{copied.resolve()}?mode=ro"
-        conn = sqlite3.connect(uri, uri=True)
-        try:
-            with closing(conn.cursor()) as cursor:
-                cursor.execute("PRAGMA integrity_check")
-                return list(cursor.fetchall())
-        finally:
-            conn.close()
-
+from serato_web.completeness import (
+    COMPLETE_NAME as BACKUP_COMPLETE_NAME,
+    FAILED_SUFFIX as BACKUP_FAILED_SUFFIX,
+    INCOMPLETE_NAME as BACKUP_INCOMPLETE_NAME,
+    LEGACY_STATUS as LEGACY_BACKUP_STATUS,
+    LOCK_NAME as PARTIAL_LOCK_NAME,
+    backup_status,
+    is_complete,
+    is_failed_name as _is_failed_name,
+    is_staging_name as _is_staging_name,
+    verify_legacy_backup,
+    write_complete_marker as _write_complete_marker,
+)
 
 def list_backups(directory: Path | None = None) -> list[Path]:
     """Return backup folders that are safe to restore.
@@ -1081,32 +743,31 @@ def ensure_backup() -> Path | None:
     parent = master.resolve().parent / "Backups"
     _cleanup_partial_backups(parent)
     staging, final_name = _claim_staging(parent, stamp)
+    lock: int | None = None
     try:
         lock = _lock_partial(staging)
-        try:
-            _backup_database(master, staging / "master.sqlite")
-            _match_quiescent_header(master, staging / "master.sqlite")
-            _fsync_file(staging / "master.sqlite")
-            root = master.resolve().parent / "root.sqlite"
-            if root.is_file() and _mirror_allowed(root):
-                _backup_database(root, staging / "root.sqlite")
-                _match_quiescent_header(root, staging / "root.sqlite")
-                _fsync_file(staging / "root.sqlite")
-            _write_complete_marker(staging)
-            _fsync_directory(staging)
-            folder = staging.with_name(final_name)
-            # os.replace is atomic on the same directory. File moves use
-            # os.rename so a cross-device fallback does not publish this folder.
-            os.replace(staging, folder)
-            _fsync_directory(parent)
-        finally:
-            _unlock_partial(lock)
-            for candidate in (staging, parent / final_name):
-                try:
-                    (candidate / PARTIAL_LOCK_NAME).unlink(missing_ok=True)
-                except OSError:
-                    pass
+        _backup_database(master, staging / "master.sqlite")
+        _match_quiescent_header(master, staging / "master.sqlite")
+        _fsync_file(staging / "master.sqlite")
+        root = master.resolve().parent / "root.sqlite"
+        if root.is_file() and _mirror_allowed(root):
+            _backup_database(root, staging / "root.sqlite")
+            _match_quiescent_header(root, staging / "root.sqlite")
+            _fsync_file(staging / "root.sqlite")
+        _write_complete_marker(staging)
+        _fsync_directory(staging)
+        # Windows refuses to rename a directory that still has an open file.
+        # Close the lock once, then delete it, before publish or cleanup.
+        _release_staging_lock(staging, lock)
+        lock = None
+        folder = staging.with_name(final_name)
+        # os.replace is atomic on the same directory. File moves use
+        # os.rename so a cross-device fallback does not publish this folder.
+        os.replace(staging, folder)
+        _fsync_directory(parent)
     except Exception:
+        _release_staging_lock(staging, lock)
+        lock = None
         _discard_failed_backup(staging, parent)
         raise
     _backed_up.add(key)
@@ -1226,10 +887,11 @@ def _lock_partial(folder: Path) -> int | None:
 
 
 def _unlock_partial(fd: int | None) -> None:
-    """Release a staging lock.
+    """Release a staging lock exactly once.
 
     Args:
-        fd: Descriptor from :func:`_lock_partial`, or None.
+        fd: Descriptor from :func:`_lock_partial`, or None. A second close
+            is ignored so a cleanup path cannot raise ``EBADF``.
     """
     if fd is None:
         return
@@ -1245,7 +907,24 @@ def _unlock_partial(fd: int | None) -> None:
             fcntl.flock(fd, fcntl.LOCK_UN)
     except OSError:
         pass
-    os.close(fd)
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _release_staging_lock(folder: Path, fd: int | None) -> None:
+    """Close the staging lock and delete the lock file.
+
+    Args:
+        folder: Directory that currently holds ``.write-lock``.
+        fd: Open descriptor, or None when it was already closed.
+    """
+    _unlock_partial(fd)
+    try:
+        (folder / PARTIAL_LOCK_NAME).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _newest_mtime(folder: Path) -> float:
@@ -1264,6 +943,11 @@ def _newest_mtime(folder: Path) -> float:
         except OSError:
             continue
     return newest
+
+
+# A staging directory younger than this is left alone. Its newest mtime
+# is what counts, so a file still being written keeps the directory.
+PARTIAL_STALE_SECONDS = 60 * 60
 
 
 def _cleanup_partial_backups(parent: Path) -> None:

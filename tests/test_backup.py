@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import hashlib
+import json
 import os
 import sqlite3
 import subprocess
@@ -474,8 +476,13 @@ class BackupTests(unittest.TestCase):
             escape.mkdir()
             (escape / "master.sqlite").write_bytes(b"db")
             digest = hashlib.sha256(b"db").hexdigest()
+            payload = {
+                "version": 1,
+                "algorithm": "sha256",
+                "hashes": {"../master.sqlite": digest, "/tmp/other": digest},
+            }
             (escape / library.BACKUP_COMPLETE_NAME).write_text(
-                f"{digest}  ../master.sqlite\n",
+                json.dumps(payload),
                 encoding="utf-8",
             )
             self.assertFalse(library.is_complete(escape))
@@ -521,6 +528,51 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(after, before)
             self.assertFalse((legacy / "master.sqlite-shm").exists())
             self.assertFalse(library.is_complete(legacy))
+
+    def test_publish_replace_failure_drops_the_lock_first(self) -> None:
+        """Close and delete ``.write-lock`` before a failed publish rename.
+
+        Returns:
+            None. The test fails if the copy error is lost or the lock file
+            is still in the backup tree.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            real = os.replace
+
+            def fail_publish(src: object, dst: object) -> None:
+                if str(src).endswith(".partial"):
+                    raise OSError(errno.EACCES, "denied")
+                real(src, dst)
+
+            with mock.patch("library.os.replace", side_effect=fail_publish):
+                with self.assertRaises(OSError) as caught:
+                    library.ensure_backup()
+            self.assertEqual(caught.exception.errno, errno.EACCES)
+            self.assertEqual(library.list_backups(parent), [])
+            locks = [path for path in parent.rglob(library.PARTIAL_LOCK_NAME) if path.is_file()]
+            self.assertEqual(locks, [])
+
+    def test_nested_write_lock_is_part_of_the_backup(self) -> None:
+        """Treat a ``.write-lock`` under a subfolder as a real file.
+
+        A lock at the top of the backup is ignored. The same name inside a
+        subdirectory is an extra file, so the marker no longer matches.
+
+        Returns:
+            None. The test fails if the nested lock is ignored.
+        """
+        with TempLibrary() as temp:
+            folder = library.ensure_backup()
+            self.assertIsInstance(folder, Path)
+            backup = cast(Path, folder)
+            (backup / library.PARTIAL_LOCK_NAME).write_bytes(b"\0")
+            self.assertTrue(library.is_complete(backup))
+            nested = backup / "nested"
+            nested.mkdir()
+            (nested / library.PARTIAL_LOCK_NAME).write_bytes(b"\0")
+            self.assertFalse(library.is_complete(backup))
+            self.assertEqual(library.list_backups(backup.parent), [])
 
     def test_tampered_backup_fails_hash_verification(self) -> None:
         """Reject a backup whose file no longer matches COMPLETE.
