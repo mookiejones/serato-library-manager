@@ -529,6 +529,20 @@ class BackupTests(unittest.TestCase):
             self.assertFalse((legacy / "master.sqlite-shm").exists())
             self.assertFalse(library.is_complete(legacy))
 
+    def test_backup_lock_ignores_a_patched_platform(self) -> None:
+        """Lock with the host, even when a test pretends to be another OS.
+
+        Returns:
+            None. The test fails if the lock imports a module this process
+            does not have.
+        """
+        with TempLibrary():
+            other = "win32" if sys.platform != "win32" else "linux"
+            with mock.patch("library.sys.platform", other):
+                folder = library.ensure_backup()
+            self.assertIsInstance(folder, Path)
+            self.assertTrue(library.is_complete(cast(Path, folder)))
+
     def test_publish_replace_failure_drops_the_lock_first(self) -> None:
         """Close and delete ``.write-lock`` before a failed publish rename.
 
@@ -671,9 +685,11 @@ class BackupTests(unittest.TestCase):
             library._write_complete_marker(uppercase)
             self.assertFalse(library.is_complete(uppercase))
             mixed = parent / "serato-web-old-Failed"
-            mixed.mkdir()
-            (mixed / "master.sqlite").write_bytes(b"old")
-            library._write_complete_marker(mixed)
+            # A case-insensitive volume already has this directory.
+            if os.path.normcase(str(mixed)) != os.path.normcase(str(uppercase)):
+                mixed.mkdir()
+                (mixed / "master.sqlite").write_bytes(b"old")
+                library._write_complete_marker(mixed)
             self.assertFalse(library.is_complete(mixed))
 
     def test_is_complete_verifies_a_snapshot_store_anywhere(self) -> None:

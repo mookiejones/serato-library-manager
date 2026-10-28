@@ -838,6 +838,12 @@ def _fsync_file(path: Path) -> None:
         os.close(fd)
 
 
+# The real operating system, captured before a test replaces
+# ``sys.platform`` to exercise another product path. File locks and
+# directory flushes follow the host, not that stand-in.
+_HOST_PLATFORM = sys.platform
+
+
 def _fsync_directory(path: Path) -> None:
     """Flush a directory entry on POSIX.
 
@@ -845,7 +851,7 @@ def _fsync_directory(path: Path) -> None:
         path: Directory to flush. Windows skips this. A directory cannot
             be opened for ``fsync`` there.
     """
-    if sys.platform == "win32":
+    if _HOST_PLATFORM == "win32":
         return
     fd = os.open(path, os.O_RDONLY)
     try:
@@ -869,21 +875,36 @@ def _lock_partial(folder: Path) -> int | None:
     except OSError:
         return None
     try:
-        if sys.platform == "win32":
-            import msvcrt
-
-            if os.fstat(fd).st_size < 1:
-                os.write(fd, b"\0")
-            os.lseek(fd, 0, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _acquire_lock(fd)
     except OSError:
         os.close(fd)
         return None
+    except BaseException:
+        os.close(fd)
+        raise
     return fd
+
+
+def _acquire_lock(fd: int) -> None:
+    """Lock an open descriptor with the host's file lock.
+
+    Args:
+        fd: Open descriptor for ``.write-lock``.
+
+    Raises:
+        OSError: If another process already holds the lock.
+    """
+    if _HOST_PLATFORM == "win32":
+        import msvcrt
+
+        if os.fstat(fd).st_size < 1:
+            os.write(fd, b"\0")
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 def _unlock_partial(fd: int | None) -> None:
@@ -896,7 +917,7 @@ def _unlock_partial(fd: int | None) -> None:
     if fd is None:
         return
     try:
-        if sys.platform == "win32":
+        if _HOST_PLATFORM == "win32":
             import msvcrt
 
             os.lseek(fd, 0, os.SEEK_SET)
