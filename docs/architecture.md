@@ -57,7 +57,7 @@ Container(related, "related.py", "Python", "Saved links and key, BPM, and crate 
 ContainerDb(master, "master.sqlite", "SQLite", "Library Serato displays")
 ContainerDb(root, "root.sqlite", "SQLite", "On-disk location database")
 ContainerDb(sidecar, "related.sqlite", "SQLite", "Links beside settings.json")
-Container(audio, "Audio file", "ID3 GEOB", "Markers2 and BeatGrid frames")
+Container(audio, "Audio file", "ID3, FLAC, MP4", "Markers2 and BeatGrid")
 
 Rel(dj, page, "Uses")
 Rel(page, server, "HTTP", "127.0.0.1:8765")
@@ -133,7 +133,7 @@ Empty text (album, genre, year, composer, remixer, label, grouping, comments, ke
 
 `history_entry.asset_id` is repointed when that column exists. The played name and file name on the history row stay as a snapshot of what was played. The same repoint is applied in a location database that has the column, using that database's asset ids. Duplicate rows are then removed from space membership, crate membership, and the asset table. The location database removes the same memberships and deletes the location asset row, so Serato does not recreate the duplicate from the drive. A duplicate that shares the kept track's location asset id is left in the drive database. A track whose location is not the main drive (`location_id` 3) is removed from the master library, and that other drive is left unchanged, matching `remove_library`. When several of those mirrors are skipped, `warning` says so once. A shared drive record, or a file that could not be moved to the Trash, is reported in addition to that sentence.
 
-Cue points are read with `tags.read_serato_tags`. They are not written back. When the kept file has no cues, loops, flips, or beatgrid and a duplicate file does, the plan includes `cue_warning`. The markers stay in the other audio file. Rewriting the ID3 tag can drop Serato's frames, so there is no copy step.
+Cue points are read with `tags.read_serato_tags`. They are not written back. The read includes ID3 GEOB frames and the Serato blocks in FLAC and M4A/MP4, so a duplicate in those formats warns too. When the kept file has no cues, loops, flips, or beatgrid and a duplicate file does, the plan includes `cue_warning`. The markers stay in the other audio file. Rewriting the tag can drop Serato's frames, so there is no copy step.
 
 `delete_files` defaults off. Turning it on also requires `confirm_delete_files` true. The move is refused, before `begin_write`, when a duplicate path is a symlink, a directory, the same file as the kept copy (including a hard link), named `master.sqlite` or `root.sqlite`, or inside the library database folder. A sibling folder whose name only starts with the library folder's name is not treated as inside it. Files that pass are moved to the Trash after the database commit: Finder on macOS, the Recycle Bin on Windows, and the FreeDesktop trash specification elsewhere. A failed move leaves the file on disk and returns a warning. The library change is already committed. A missing file is skipped. The response lists file names, not paths.
 
@@ -153,13 +153,15 @@ Suggestions rank other tracks in the space by Camelot key (same, relative, or on
 
 ### `tags.py`
 
-`read_serato_tags` reads. It scans the first 2,000,000 bytes and, for a longer file, the last 512,000 bytes. It collects ID3 GEOB frames named `Serato Markers2` and `Serato BeatGrid`. Reading a file does not rewrite it.
+`read_serato_tags` reads. It does not rewrite the file. ID3 is taken from the first 2,000,000 bytes and, for a longer file, the last 512,000 bytes. `serato_tags_from_regions` parses those windows. The frames are `Serato Markers2` and `Serato BeatGrid`. An export that already has the file open calls `serato_tags_from_regions` with the same windows.
+
+FLAC metadata is not limited to that window. While the file is open, every metadata block is visited from its 4-byte header. A picture or padding block is skipped with seek, so album art larger than 2 MB does not hide the markers and is not loaded. The Vorbis comment block is read in full, with no byte cap. The fields are `SERATO_MARKERS_V2` and `SERATO_BEATGRID`, matched without case sensitivity. An `.m4a`, `.mp4`, `.aac`, or `.alac` file, or a file whose first atom is `ftyp`, is walked by top-level atom size. An MP3 is not. The `mdat` audio is not loaded. Each `moov` body is read up to 16 MB. A larger `moov` is truncated and a warning is logged. Freeform `----` atoms whose mean is `com.serato.dj` are decoded, and the frame name inside the payload selects `Serato Markers2` or `Serato BeatGrid`. Serato names those atoms `markersv2` and `beatgrid`. Those FLAC and MP4 values are base64, without padding, of `application/octet-stream`, a null, a second null, the frame name, a null, and the same payload the GEOB frame stores. A newline may appear every 72 characters. Other `SERATO_*` blocks, including overview, are ignored.
 
 `plan_serato_geob` and `copy_serato_geob` copy those Serato frames onto another file only when that is safe. A plain ID3v2.3 tag can take the frames. An `.mp3` with no tag can take a new ID3v2.3 tag in front of the existing bytes. Other frames are kept as raw bytes. The audio after the tag is streamed unchanged. A destination that already has Serato frames is left alone. A source with none is skipped. Unsynchronisation, an extended header, a compressed or encrypted Serato frame, a tag larger than 16 MB, and FLAC, RIFF, AIFF, Ogg, or MP4 containers are refused. The destination is not modified in those cases. The copy writes a temporary file beside the destination and replaces it only after the audio bytes still match.
 
-Markers2 is base64 after a `01 01` header. Each entry is `CUE`, `LOOP`, or `FLIP`. A cue has index, start in milliseconds, color, and name. A loop adds end time and a locked flag. A flip has index, enabled, and name. Duplicate merge uses this read to decide whether to warn. It does not write a GEOB frame.
+Markers2 is base64 after a `01 01` header. Newlines and a missing `=` pad are accepted. Each parsed entry is `CUE`, `LOOP`, or `FLIP`. A cue has index, start in milliseconds, color, and name. A loop adds end time and a locked flag. A flip has index, enabled, and name. A `COLOR` or `BPMLOCK` entry in the same payload is skipped. Duplicate merge uses this read to decide whether to warn. It does not write a GEOB frame, a Vorbis comment, or an MP4 atom.
 
-BeatGrid version byte `1` yields markers. Each marker has a position in seconds. The last marker stores BPM. Earlier markers store a beat count. More than 4096 markers, or a payload shorter than the declared marker count, returns an empty list.
+BeatGrid version byte `1` yields markers. Each marker has a position in seconds. That position is the stored float. It is not rounded to three decimal places. The last marker stores BPM, rounded to two decimal places. Earlier markers store a beat count. A version this parser does not know, more than 4096 markers, or a payload shorter than the declared marker count sets `beatgrid_warning` and returns no markers.
 
 ### `rekordbox.py`
 
