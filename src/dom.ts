@@ -12,6 +12,8 @@ export interface ElementIds {
   count: HTMLParagraphElement;
   search: HTMLInputElement;
   detail: HTMLElement;
+  browser: HTMLElement;
+  "track-splitter": HTMLDivElement;
   status: HTMLParagraphElement;
   notice: HTMLParagraphElement;
   "crate-foot": HTMLParagraphElement;

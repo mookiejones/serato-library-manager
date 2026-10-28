@@ -522,7 +522,8 @@ export function renderShell() {
   el("mode-note").hidden = cratesMode || historyMode;
   const filesMode = state.mode === "files";
   const snapshotsMode = state.mode === "snapshots";
-  document.querySelector<HTMLElement>(".browser")!.hidden = filesMode || snapshotsMode;
+  el("browser").hidden = filesMode || snapshotsMode;
+  el("track-splitter").hidden = filesMode || snapshotsMode;
   el("detail").hidden = filesMode || snapshotsMode;
   el("files-panel").hidden = !filesMode;
   el("snapshots-panel").hidden = !snapshotsMode;

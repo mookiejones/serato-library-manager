@@ -78,7 +78,7 @@
     </aside>
 
     <main class="sheet">
-      <section class="browser">
+      <section id="browser" class="browser">
         <div class="browser-bar">
           <label class="search">
             <span class="visually-hidden">Search tracks</span>
@@ -122,6 +122,8 @@
         </div>
         <div id="list" class="list" tabindex="0" role="listbox" aria-label="Tracks"></div>
       </section>
+
+      <div id="track-splitter" class="splitter" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="browser" aria-label="Resize the track list" title="Drag to resize. Double-click to reset."></div>
 
       <section id="detail" class="detail" aria-live="polite">
         <p class="detail-empty">Select a track to read its attributes.</p>

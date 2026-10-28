@@ -25,8 +25,13 @@ CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "telemetry_consent", "window", "wizard_complete")
+SETTINGS_KEYS = ("install_id", "layout", "telemetry_consent", "window", "wizard_complete")
 WINDOW_FIELDS = ("x", "y", "width", "height")
+LAYOUT_FIELDS = ("track_list_width",)
+# The page clamps the track list to the sheet it sits in. These bounds only
+# keep a hand-edited file from storing a width no screen could show.
+TRACK_LIST_MIN_WIDTH = 240
+TRACK_LIST_MAX_WIDTH = 8192
 # The desktop window refuses a smaller frame. Origins may be negative
 # when a monitor sits left of or above the primary screen.
 WINDOW_MIN_WIDTH = 640
@@ -87,20 +92,24 @@ class Settings:
         window: Last saved frame, or None before the window has been placed.
         wizard_complete: True after setup finishes. False is unfinished,
             including a file written before this key existed.
+        track_list_width: Width of the track list beside the detail pane,
+            in CSS pixels. None is the default split.
     """
 
     install_id: str | None
     telemetry_consent: bool | None
     window: WindowGeometry | None = None
     wizard_complete: bool = False
+    track_list_width: int | None = None
 
     def as_json(self) -> dict[str, object]:
         """Return the settings object for the file.
 
         Returns:
             The completed telemetry pair when both fields are set, the
-            setup flag with that pair, and the window frame when one has
-            been saved. A window may be stored before the sharing choice.
+            setup flag with that pair, the window frame when one has been
+            saved, and the layout when a pane width has been saved. A window
+            or a layout may be stored before the sharing choice.
 
         Raises:
             ValueError: If the install id and the choice disagree, if
@@ -114,7 +123,9 @@ class Settings:
             raise ValueError("Refusing to write a partial settings file.")
         if not isinstance(self.wizard_complete, bool):
             raise ValueError("wizard_complete must be a boolean.")
-        if not has_id and self.window is None:
+        if self.track_list_width is not None:
+            _check_track_list_width(self.track_list_width)
+        if not has_id and self.window is None and self.track_list_width is None:
             raise ValueError("Refusing to write an empty settings file.")
         body: dict[str, object] = {}
         if has_id:
@@ -128,7 +139,31 @@ class Settings:
                 "width": self.window.width,
                 "height": self.window.height,
             }
+        if self.track_list_width is not None:
+            body["layout"] = {"track_list_width": self.track_list_width}
         return body
+
+
+def _check_track_list_width(value: object) -> int:
+    """Return a storable track list width.
+
+    Args:
+        value: Candidate width in CSS pixels.
+
+    Returns:
+        ``value`` unchanged.
+
+    Raises:
+        ValueError: If ``value`` is a bool, not an ``int``, or outside
+            ``TRACK_LIST_MIN_WIDTH..TRACK_LIST_MAX_WIDTH``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("layout.track_list_width must be an integer.")
+    if value < TRACK_LIST_MIN_WIDTH or value > TRACK_LIST_MAX_WIDTH:
+        raise ValueError(
+            f"layout.track_list_width is outside {TRACK_LIST_MIN_WIDTH}..{TRACK_LIST_MAX_WIDTH}."
+        )
+    return value
 
 
 def _env_path(name: str) -> Path | None:
@@ -296,6 +331,33 @@ def _parse_window(value: object) -> WindowGeometry | None:
     return WindowGeometry(parsed["x"], parsed["y"], parsed["width"], parsed["height"])
 
 
+def _parse_layout(value: object) -> int | None:
+    """Validate the ``layout`` object.
+
+    Args:
+        value: The ``layout`` member of the settings file.
+
+    Returns:
+        The saved track list width. None when the object is not a mapping,
+        the width is missing, or it is not an integer in range. The page
+        then draws the default split.
+    """
+    if not isinstance(value, dict):
+        logger.warning("Config key 'layout' must be a mapping — ignored")
+        return None
+    for key in value:
+        if key not in LAYOUT_FIELDS:
+            logger.warning("Unknown config key '%s' — ignored", f"layout.{key}")
+    if "track_list_width" not in value:
+        return None
+    return _window_int(
+        value["track_list_width"],
+        "layout.track_list_width",
+        TRACK_LIST_MIN_WIDTH,
+        TRACK_LIST_MAX_WIDTH,
+    )
+
+
 def _parse(payload: object) -> Settings:
     """Validate a decoded settings object.
 
@@ -329,6 +391,7 @@ def _parse(payload: object) -> Settings:
             logger.warning("Config key 'telemetry_consent' has wrong type — ignored")
             consent = None
     window = _parse_window(payload["window"]) if "window" in payload else None
+    track_list_width = _parse_layout(payload["layout"]) if "layout" in payload else None
     wizard_complete = False
     if "wizard_complete" in payload:
         raw_wizard = payload.get("wizard_complete")
@@ -341,6 +404,7 @@ def _parse(payload: object) -> Settings:
         telemetry_consent=consent,
         window=window,
         wizard_complete=wizard_complete,
+        track_list_width=track_list_width,
     )
 
 
@@ -438,6 +502,7 @@ def set_telemetry_consent(value: bool) -> Settings:
             telemetry_consent=value,
             window=current.window,
             wizard_complete=current.wizard_complete is True,
+            track_list_width=current.track_list_width,
         )
         save_settings(updated)
         return updated
@@ -476,6 +541,7 @@ def save_window_geometry(geometry: WindowGeometry) -> Settings:
             telemetry_consent=consent,
             window=geometry,
             wizard_complete=current.wizard_complete is True,
+            track_list_width=current.track_list_width,
         )
         save_settings(updated)
         return updated
@@ -510,12 +576,57 @@ def set_wizard_complete(value: bool) -> Settings:
                 telemetry_consent=current.telemetry_consent,
                 window=current.window,
                 wizard_complete=False,
+                track_list_width=current.track_list_width,
             )
         updated = Settings(
             install_id=current.install_id,
             telemetry_consent=current.telemetry_consent,
             window=current.window,
             wizard_complete=value,
+            track_list_width=current.track_list_width,
         )
+        save_settings(updated)
+        return updated
+
+
+def set_track_list_width(value: int | None) -> Settings:
+    """Store the track list width, or clear it back to the default split.
+
+    Args:
+        value: Width in CSS pixels, or None to forget the saved width.
+
+    Returns:
+        The settings after the change. Clearing a width when nothing else
+        is stored removes nothing and writes nothing.
+
+    Raises:
+        ValueError: If ``value`` is not None and not an integer in range.
+        OSError: If the settings file cannot be written.
+
+    A sharing choice is kept only when the install id and the boolean are
+    both stored, as in :func:`save_window_geometry`.
+    """
+    if value is not None:
+        _check_track_list_width(value)
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id
+        consent = current.telemetry_consent
+        if not isinstance(consent, bool) or install_id is None:
+            install_id = None
+            consent = None
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=consent,
+            window=current.window,
+            wizard_complete=current.wizard_complete is True,
+            track_list_width=value,
+        )
+        if install_id is None and current.window is None and value is None:
+            path = settings_path()
+            if path.is_file():
+                _retire_unreadable(path)
+                path.unlink(missing_ok=True)
+            return updated
         save_settings(updated)
         return updated

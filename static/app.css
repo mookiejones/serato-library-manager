@@ -51,7 +51,8 @@ select:focus-visible,
 textarea:focus-visible,
 .list:focus-visible,
 .crate:focus-visible,
-.twist:focus-visible {
+.twist:focus-visible,
+.splitter:focus-visible {
   outline: 2px solid var(--cadmium);
   outline-offset: 2px;
 }
@@ -255,8 +256,10 @@ textarea:focus-visible,
 }
 
 .sheet {
+  /* A saved width from the splitter replaces this default split. */
+  --track-list-width: 1.15fr;
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-columns: minmax(0, var(--track-list-width)) 9px minmax(300px, 0.85fr);
   min-width: 0;
   min-height: 0;
   margin: var(--space-3) var(--space-3) var(--space-3) 0;
@@ -273,8 +276,35 @@ textarea:focus-visible,
 }
 
 .detail {
-  border-left: 1px solid var(--rule);
   overflow: auto;
+}
+
+/* The 9px column is the hit area. The 1px rule is the visible divider. */
+.splitter {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  background: var(--rule);
+  transition: inset 120ms ease, background-color 120ms ease;
+}
+
+.splitter:hover::before,
+.splitter[data-dragging="true"]::before {
+  inset: 0 3px;
+  background: var(--cadmium);
+}
+
+.splitter:focus-visible { outline-offset: -2px; }
+
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .browser-bar {
@@ -917,6 +947,7 @@ dialog .check input {
 
 .files-panel[hidden],
 .browser[hidden],
+.splitter[hidden],
 .detail[hidden],
 #crate-actions[hidden],
 .files-field[hidden],
@@ -1042,7 +1073,8 @@ dialog .check input {
   .list { height: 52vh; flex: none; }
   .files-actions { order: 1; }
   .files-list { order: 2; flex: none; max-height: 46vh; }
-  .detail { border-left: 0; border-top: 1px solid var(--rule); }
+  .splitter { display: none; }
+  .detail { border-top: 1px solid var(--rule); }
   .detail h2 { font-size: 32px; }
 }
 

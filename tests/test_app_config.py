@@ -408,8 +408,113 @@ class WindowSettingsTests(unittest.TestCase):
         """
         app_config.set_telemetry_consent(False)
         app_config.save_window_geometry(app_config.WindowGeometry(1, 2, 640, 480))
+        app_config.set_track_list_width(520)
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(set(payload), set(app_config.SETTINGS_KEYS))
+
+
+class LayoutSettingsTests(unittest.TestCase):
+    """Check the track list width stored beside the other settings.
+
+    Each test uses a fresh config directory. Nothing is sent over the network.
+    """
+
+    def setUp(self) -> None:
+        """Create an empty config directory for one test.
+
+        Returns:
+            None.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = Path(self._tmp.name) / "config"
+        self.config.mkdir()
+        self._env = mock.patch.dict(os.environ, {app_config.CONFIG_ENV: str(self.config)})
+        self._env.start()
+
+    def tearDown(self) -> None:
+        """Remove the temporary config directory.
+
+        Returns:
+            None.
+        """
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_width_round_trips_and_keeps_the_other_fields(self) -> None:
+        """Save a width after the sharing choice and the window.
+
+        Returns:
+            None. The test fails if a later save drops a field.
+        """
+        app_config.set_telemetry_consent(False)
+        frame = app_config.WindowGeometry(0, 0, 1280, 800)
+        app_config.save_window_geometry(frame)
+        app_config.set_track_list_width(520)
+        loaded = app_config.load_settings()
+        self.assertEqual(loaded.track_list_width, 520)
+        self.assertIs(loaded.telemetry_consent, False)
+        self.assertEqual(loaded.window, frame)
+        app_config.set_wizard_complete(True)
+        app_config.save_window_geometry(frame)
+        app_config.set_telemetry_consent(True)
+        self.assertEqual(app_config.load_settings().track_list_width, 520)
+        stored = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["layout"], {"track_list_width": 520})
+
+    def test_width_before_a_choice_does_not_invent_one(self) -> None:
+        """Store a width on a first launch, then clear it.
+
+        Returns:
+            None. The test fails if a consent appears or the file stays.
+        """
+        app_config.set_track_list_width(400)
+        path = self.config / "settings.json"
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(stored, {"layout": {"track_list_width": 400}})
+        self.assertIsNone(app_config.load_settings().telemetry_consent)
+        app_config.set_track_list_width(None)
+        self.assertFalse(path.exists())
+        self.assertIsNone(app_config.load_settings().track_list_width)
+
+    def test_reset_keeps_the_window(self) -> None:
+        """Clear the width while a window frame is stored.
+
+        Returns:
+            None. The test fails if the reset drops the frame.
+        """
+        frame = app_config.WindowGeometry(4, 5, 900, 700)
+        app_config.save_window_geometry(frame)
+        app_config.set_track_list_width(600)
+        app_config.set_track_list_width(None)
+        stored = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertNotIn("layout", stored)
+        self.assertEqual(app_config.load_settings().window, frame)
+
+    def test_bad_widths_are_rejected(self) -> None:
+        """Refuse a bool, a float, and widths out of range.
+
+        Returns:
+            None. The test fails if one is written.
+        """
+        for value in (True, 512.0, "512", app_config.TRACK_LIST_MIN_WIDTH - 1,
+                      app_config.TRACK_LIST_MAX_WIDTH + 1):
+            with self.assertRaises(ValueError, msg=repr(value)):
+                app_config.set_track_list_width(value)  # type: ignore[arg-type]
+        self.assertFalse((self.config / "settings.json").exists())
+
+    def test_bad_stored_width_is_ignored(self) -> None:
+        """Drop a hand-edited width that is not an integer in range.
+
+        Returns:
+            None. The test fails if the loader keeps it.
+        """
+        path = self.config / "settings.json"
+        for layout in ({"track_list_width": True}, {"track_list_width": 10},
+                       {"track_list_width": "wide"}, [], {"other": 1}):
+            path.write_text(json.dumps({"layout": layout}), encoding="utf-8")
+            with self.assertLogs("serato.library.config", level="WARNING"):
+                loaded = app_config.load_settings()
+            self.assertIsNone(loaded.track_list_width, layout)
 
 
 class VersionTests(unittest.TestCase):

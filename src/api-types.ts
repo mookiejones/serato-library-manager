@@ -302,6 +302,7 @@ export interface SettingsPayload {
   telemetry_configured?: boolean;
   needs_consent_prompt?: boolean;
   wizard_complete?: boolean;
+  layout?: { track_list_width: number | null };
   app_version?: string;
   error?: string;
 }

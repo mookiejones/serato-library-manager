@@ -45,6 +45,84 @@
     return node;
   }
 
+  // src/splitter.ts
+  function clampWidth(width, available, minFirst, minSecond) {
+    const max = Math.max(minFirst, available - minSecond);
+    return Math.round(Math.min(Math.max(width, minFirst), max));
+  }
+  function mountSplitter(options) {
+    const { handle, container, first, property, minFirst, minSecond, onCommit } = options;
+    const step = options.step ?? 16;
+    let current = null;
+    const available = () => container.clientWidth - handle.offsetWidth;
+    const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
+    const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
+    function paint() {
+      if (current == null) container.style.removeProperty(property);
+      else container.style.setProperty(property, `${fitted(current)}px`);
+      const room = available();
+      handle.setAttribute("aria-valuemin", String(minFirst));
+      handle.setAttribute("aria-valuemax", String(Math.max(minFirst, Math.round(room - minSecond))));
+      handle.setAttribute("aria-valuenow", String(Math.round(shown())));
+    }
+    function move(width) {
+      current = fitted(width);
+      paint();
+    }
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = shown();
+      let moved = false;
+      handle.setPointerCapture?.(event.pointerId);
+      handle.dataset.dragging = "true";
+      document.body.classList.add("is-resizing");
+      const onMove = (next) => {
+        moved = true;
+        move(startWidth + next.clientX - startX);
+      };
+      const onEnd = () => {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
+        delete handle.dataset.dragging;
+        document.body.classList.remove("is-resizing");
+        if (moved) onCommit(current);
+      };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onEnd);
+      handle.addEventListener("pointercancel", onEnd);
+    });
+    handle.addEventListener("keydown", (event) => {
+      const jump = event.shiftKey ? step * 4 : step;
+      let next;
+      if (event.key === "ArrowLeft") next = shown() - jump;
+      else if (event.key === "ArrowRight") next = shown() + jump;
+      else if (event.key === "Home") next = minFirst;
+      else if (event.key === "End") next = available() - minSecond;
+      else return;
+      event.preventDefault();
+      const before = current;
+      move(next);
+      if (current !== before) onCommit(current);
+    });
+    handle.addEventListener("dblclick", () => {
+      current = null;
+      paint();
+      onCommit(null);
+    });
+    paint();
+    return {
+      set(width) {
+        current = width == null ? null : Math.round(width);
+        paint();
+      },
+      width: () => current,
+      refit: paint
+    };
+  }
+
   // src/state.ts
   var ROW = 36;
   var COLORS = [
@@ -761,13 +839,13 @@
     area.value = JSON.stringify(crate.rules, null, 2);
     area.disabled = !state.writable;
     area.setAttribute("aria-label", "Smart crate rules");
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "text-button";
-    save.textContent = "Save rules";
-    save.disabled = !state.writable;
-    save.addEventListener("click", () => saveRules(crate.id, area.value));
-    editor.append(area, save);
+    const save2 = document.createElement("button");
+    save2.type = "button";
+    save2.className = "text-button";
+    save2.textContent = "Save rules";
+    save2.disabled = !state.writable;
+    save2.addEventListener("click", () => saveRules(crate.id, area.value));
+    editor.append(area, save2);
     const bar = document.querySelector(".browser-bar");
     bar.after(editor);
     bar.after(line);
@@ -792,7 +870,8 @@
     el("mode-note").hidden = cratesMode || historyMode;
     const filesMode = state.mode === "files";
     const snapshotsMode = state.mode === "snapshots";
-    document.querySelector(".browser").hidden = filesMode || snapshotsMode;
+    el("browser").hidden = filesMode || snapshotsMode;
+    el("track-splitter").hidden = filesMode || snapshotsMode;
     el("detail").hidden = filesMode || snapshotsMode;
     el("files-panel").hidden = !filesMode;
     el("snapshots-panel").hidden = !snapshotsMode;
@@ -1086,11 +1165,11 @@
     lockInput.checked = Boolean(edit.is_beatgrid_locked);
     lock.append(lockInput, document.createTextNode("Beatgrid locked"));
     form.append(lock);
-    const save = document.createElement("button");
-    save.type = "submit";
-    save.className = "text-button wide";
-    save.textContent = "Save track";
-    form.append(save);
+    const save2 = document.createElement("button");
+    save2.type = "submit";
+    save2.className = "text-button wide";
+    save2.textContent = "Save track";
+    form.append(save2);
     for (const control of form.querySelectorAll("input, select, textarea, button")) control.disabled = !writable;
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -1486,12 +1565,12 @@
     mutual.type = "checkbox";
     mutual.checked = true;
     mutualLabel.append(mutual, document.createTextNode("Two-way link"));
-    const save = document.createElement("button");
-    save.type = "button";
-    save.className = "text-button";
-    save.textContent = "Save link";
-    save.addEventListener("click", () => {
-      save.disabled = true;
+    const save2 = document.createElement("button");
+    save2.type = "button";
+    save2.className = "text-button";
+    save2.textContent = "Save link";
+    save2.addEventListener("click", () => {
+      save2.disabled = true;
       saveRelated(track, section, {
         action: "add",
         asset: track.id,
@@ -1502,7 +1581,7 @@
         space: state.space
       }, query);
     });
-    form.append(chosen, noteLabel, ratingLabel, mutualLabel, save);
+    form.append(chosen, noteLabel, ratingLabel, mutualLabel, save2);
   }
   function relatedSuggestList(track, section, suggested) {
     const list = document.createElement("ul");
@@ -1517,13 +1596,13 @@
       reasons.className = "related-meta";
       reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
       main.append(name, reasons);
-      const save = document.createElement("button");
-      save.type = "button";
-      save.className = "text-button";
-      save.textContent = "Save";
-      save.setAttribute("aria-label", `Save link to ${item.title || "Untitled"}`);
-      save.addEventListener("click", () => {
-        save.disabled = true;
+      const save2 = document.createElement("button");
+      save2.type = "button";
+      save2.className = "text-button";
+      save2.textContent = "Save";
+      save2.setAttribute("aria-label", `Save link to ${item.title || "Untitled"}`);
+      save2.addEventListener("click", () => {
+        save2.disabled = true;
         saveRelated(track, section, {
           action: "add",
           asset: track.id,
@@ -1534,7 +1613,7 @@
           space: state.space
         }, "");
       });
-      row.append(main, save);
+      row.append(main, save2);
       list.append(row);
     }
     return list;
@@ -2184,6 +2263,40 @@
   bridge.selectTrack = selectTrack;
   bridge.selectEntry = selectEntry;
 
+  // src/layout.ts
+  var TRACK_LIST_MIN_WIDTH = 360;
+  var DETAIL_MIN_WIDTH = 300;
+  var SAVE_DELAY_MS = 400;
+  var splitter = null;
+  var changedHere = false;
+  var saveTimer;
+  function save(width) {
+    changedHere = true;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      postJSON("/api/settings", { layout: { track_list_width: width } }).catch(() => {
+        setNotice("Couldn't save the pane width. It goes back to the last saved width next time.");
+      });
+    }, SAVE_DELAY_MS);
+  }
+  function wireLayout() {
+    splitter = mountSplitter({
+      handle: el("track-splitter"),
+      container: el("browser").parentElement,
+      first: el("browser"),
+      property: "--track-list-width",
+      minFirst: TRACK_LIST_MIN_WIDTH,
+      minSecond: DETAIL_MIN_WIDTH,
+      onCommit: save
+    });
+    window.addEventListener("resize", () => splitter?.refit());
+  }
+  function applyLayout(payload) {
+    if (!splitter || changedHere) return;
+    const width = payload.layout?.track_list_width;
+    splitter.set(typeof width === "number" ? width : null);
+  }
+
   // src/dialogs.ts
   var rekordboxXml = "";
   var mergePreview = null;
@@ -2482,6 +2595,7 @@
     const payload = await readJSONOr(response, {});
     if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
     applyPrivacy(payload);
+    applyLayout(payload);
     if (!state.wizardComplete && openWizard(false, el("search"))) return;
     if (payload.needs_consent_prompt) showConsent();
   }
@@ -2852,6 +2966,7 @@
   wireVirtualScroll();
   wireDialogs();
   wireSnapshots();
+  wireLayout();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
   loadPrivacy().catch((error) => setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent."));
