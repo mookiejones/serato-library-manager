@@ -78,7 +78,7 @@ list.append(spacer);
  * @param {number|string|null|undefined} ms Length in milliseconds.
  * @returns {string} Minutes and zero-padded seconds, or an empty string.
  */
-function lengthLabel(ms: number | string | null | undefined) {
+export function lengthLabel(ms: number | string | null | undefined) {
   if (ms == null || ms === "") return "";
   const total = Math.floor(Number(ms) / 1000);
   const minutes = Math.floor(total / 60);
@@ -168,7 +168,7 @@ function colorHex(color: number | string | null | undefined) {
  * @param {object} b Second track or history row.
  * @returns {number} A negative, zero, or positive order for Array sort.
  */
-function compare(a: Track, b: Track) {
+export function compare(a: Track, b: Track) {
   const key = state.sort;
   const dir = state.sortDir;
   let av = a[key];
@@ -2527,7 +2527,7 @@ el("export-m3u").addEventListener("click", () => {
  * @param {boolean} report True asks for the loss report instead of the file.
  * @returns {string} The request path and query.
  */
-function rekordboxExportUrl(report: boolean) {
+export function rekordboxExportUrl(report: boolean) {
   const crate = state.mode === "crates" ? state.activeCrate : "all";
   const memory = el("rekordbox-memory").checked ? "1" : "0";
   const key = el("rekordbox-key").value;

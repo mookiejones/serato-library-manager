@@ -1,8 +1,8 @@
 /**
  * Typed lookups for the elements index.html ships.
  *
- * The casts are erased. A missing element still throws when the caller
- * reads a property, which is what the page did before the TypeScript move.
+ * A missing id throws before the caller reads a property. The real page
+ * includes every id, so the lookup still returns that element.
  */
 
 export interface ElementIds {
@@ -104,5 +104,7 @@ export interface ElementIds {
 }
 
 export function el<K extends keyof ElementIds>(id: K): ElementIds[K] {
-  return document.getElementById(id) as ElementIds[K];
+  const node = document.getElementById(id);
+  if (node == null) throw new Error(`Missing #${id}`);
+  return node as ElementIds[K];
 }

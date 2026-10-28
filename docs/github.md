@@ -32,12 +32,13 @@ There is no macOS test job. The suite mocks platform paths, and a macOS runner c
 
 The Windows test job runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. No tag is passed on the command line. That is the same environment path the release job uses, and it runs on `windows-latest` for every pull request. `v0.0.0` is not a published release.
 
-The frontend job runs on `ubuntu-latest` and `windows-latest`. It installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit`, runs ESLint so `any` is rejected, then rebuilds `static/app.js` and fails if that file or `static/app.js.map` differs from the committed copies. The check names are `frontend (ubuntu-latest)` and `frontend (windows-latest)`. On your machine:
+The frontend job runs on `ubuntu-latest` and `windows-latest`. It installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit`, runs ESLint so `any` is rejected, runs the Vitest suite (`npm test`), then rebuilds `static/app.js` and fails if that file or `static/app.js.map` differs from the committed copies. The check names are `frontend (ubuntu-latest)` and `frontend (windows-latest)`. On your machine:
 
 ```bash
 npm ci
 npx tsc --noEmit
 npx eslint src
+npm test
 node scripts/build_frontend.mjs --check
 ```
 

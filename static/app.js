@@ -29,7 +29,9 @@
 
   // src/dom.ts
   function el(id) {
-    return document.getElementById(id);
+    const node = document.getElementById(id);
+    if (node == null) throw new Error(`Missing #${id}`);
+    return node;
   }
 
   // src/state.ts

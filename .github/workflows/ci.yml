@@ -80,6 +80,9 @@ jobs:
       - name: Reject any
         run: npx eslint src
 
+      - name: Test the page
+        run: npm test
+
       - name: Rebuild the page and fail if the bundle is stale
         run: node scripts/build_frontend.mjs --check
 
