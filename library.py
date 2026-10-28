@@ -564,9 +564,28 @@ from serato_web.completeness import (
     is_complete,
     is_failed_name as _is_failed_name,
     is_staging_name as _is_staging_name,
-    verify_legacy_backup,
+    verify_legacy_backup as _verify_legacy_backup,
     write_complete_marker as _write_complete_marker,
 )
+
+
+def verify_legacy_backup(backup_dir: Path) -> None:
+    """Check a legacy backup and report a library error.
+
+    Args:
+        backup_dir: Folder the user picked.
+
+    Raises:
+        LibraryError: When the folder is not an unverified legacy backup
+            or the integrity check fails. The cause is the
+            :class:`serato_web.completeness.CompletenessError`. The status
+            is 400, so a request handler returns that status instead of a
+            server error.
+    """
+    try:
+        _verify_legacy_backup(backup_dir)
+    except CompletenessError as exc:
+        raise LibraryError(exc.message) from exc
 
 def list_backups(directory: Path | None = None) -> list[Path]:
     """Return backup folders that are safe to restore.

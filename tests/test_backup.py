@@ -748,10 +748,33 @@ class BackupTests(unittest.TestCase):
             self.assertFalse(library.is_complete(corrupt))
             self.assertEqual(library.list_backups(parent), [])
             library.verify_legacy_backup(legacy)
-            with self.assertRaises(completeness.CompletenessError) as caught:
+            with self.assertRaises(library.LibraryError) as caught:
                 library.verify_legacy_backup(corrupt)
+            self.assertEqual(caught.exception.status, 400)
+            self.assertIsInstance(caught.exception.__cause__, completeness.CompletenessError)
             self.assertIn("not restored", str(caught.exception))
-            self.assertTrue(issubclass(library.LibraryError, completeness.CompletenessError))
+
+    def test_legacy_failure_is_a_library_error(self) -> None:
+        """Turn a failed legacy check into ``LibraryError`` with status 400.
+
+        The request handler catches ``LibraryError`` and returns its status.
+        A bare ``CompletenessError`` would become a server error.
+
+        Returns:
+            None. The test fails if the status is missing or the cause is
+            not the completeness error.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            parent.mkdir()
+            folder = parent / "serato-web-20190101-000002"
+            folder.mkdir()
+            (folder / "master.sqlite").write_bytes(b"not a database")
+            with self.assertRaises(library.LibraryError) as caught:
+                library.verify_legacy_backup(folder)
+            self.assertEqual(caught.exception.status, 400)
+            self.assertIn("not restored", caught.exception.message)
+            self.assertIsInstance(caught.exception.__cause__, completeness.CompletenessError)
 
     def test_failed_rename_uses_the_next_suffix(self) -> None:
         """Use ``-failed-02`` when ``-failed`` is already taken.
@@ -800,6 +823,61 @@ class BackupTests(unittest.TestCase):
                 (mixed / "master.sqlite").write_bytes(b"old")
                 library._write_complete_marker(mixed)
             self.assertFalse(library.is_complete(mixed))
+
+    def test_case_insensitive_failed_name_uses_the_next_suffix(self) -> None:
+        """Fall back to ``-failed-02`` when ``-FAILED`` is the same directory.
+
+        The rename is patched to treat letter case as the same name, which
+        is how Windows compares paths. The existing folder is left in place.
+
+        Returns:
+            None. The test fails if the collision overwrites that folder
+            or the fallback name is not used.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            taken = parent / f".serato-web-{STAMP}.partial-FAILED"
+            taken.mkdir(parents=True)
+            (taken / "keep.txt").write_text("keep", encoding="utf-8")
+            root = temp.db.resolve().parent / "root.sqlite"
+            root.write_bytes(b"location")
+            real_rename = Path.rename
+            real_copy = library._backup_database
+
+            def copy_master_only(source: Path, dest: Path) -> None:
+                if Path(source).name == "root.sqlite":
+                    raise OSError(28, "No space left on device")
+                real_copy(source, dest)
+
+            def rename_folding_case(self: Path, target: Path) -> Path:
+                target = Path(target)
+                folded = os.path.abspath(target).casefold()
+                try:
+                    siblings = list(self.parent.iterdir())
+                except OSError:
+                    siblings = []
+                for child in siblings:
+                    same = os.path.abspath(child).casefold() == folded
+                    if same and child != self:
+                        raise FileExistsError(errno.EEXIST, "File exists", str(target))
+                return real_rename(self, target)
+
+            with _freeze_clock():
+                with mock.patch.object(library, "_backup_database", side_effect=copy_master_only):
+                    with mock.patch(
+                        "library.shutil.rmtree",
+                        side_effect=PermissionError(13, "Access is denied"),
+                    ):
+                        with mock.patch.object(Path, "rename", rename_folding_case):
+                            with self.assertRaises(OSError):
+                                library.ensure_backup()
+            second = parent / f".serato-web-{STAMP}.partial-failed-02"
+            self.assertTrue(second.is_dir())
+            self.assertNotEqual(os.path.normcase(str(second)), os.path.normcase(str(taken)))
+            self.assertEqual((taken / "keep.txt").read_text(encoding="utf-8"), "keep")
+            self.assertFalse(library.is_complete(taken))
+            self.assertFalse(library.is_complete(second))
+            self.assertEqual(library.list_backups(parent), [])
 
     def test_is_complete_verifies_a_snapshot_store_anywhere(self) -> None:
         """Require a verified COMPLETE marker in any directory.
