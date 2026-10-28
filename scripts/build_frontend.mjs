@@ -2,13 +2,14 @@
  * Bundle the page and the first-run wizard.
  *
  * Both outputs are IIFEs so index.html can keep plain script tags. The
- * sourcemap sits beside each bundle. --check rebuilds in place and exits
- * non-zero when a committed bundle or map differs. esbuild is pinned in
- * package.json so the bytes stay the same on Ubuntu and Windows.
+ * sourcemap sits beside each bundle. --check builds in memory with
+ * write:false and exits non-zero when a committed bundle or map differs.
+ * It does not write static/. esbuild is pinned in package.json so the
+ * bytes stay the same on Ubuntu and Windows.
  */
 
 import esbuild from "esbuild";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,17 +21,15 @@ const bundles = [
   { entry: "src/wizard-view.ts", outfile: "static/wizard.js", globalName: "SeratoWizard" },
 ];
 
-const before = new Map();
-if (check) {
-  for (const bundle of bundles) {
-    const js = join(root, bundle.outfile);
-    before.set(js, readFileSync(js));
-    before.set(`${js}.map`, readFileSync(`${js}.map`));
-  }
-}
-
-for (const bundle of bundles) {
-  await esbuild.build({
+/**
+ * Build one entry.
+ *
+ * @param {{ entry: string, outfile: string, globalName?: string }} bundle
+ * @param {boolean} write True writes the bundle and map under static/.
+ * @returns {Promise<import("esbuild").BuildResult>}
+ */
+function buildOne(bundle, write) {
+  return esbuild.build({
     absWorkingDir: root,
     entryPoints: [bundle.entry],
     bundle: true,
@@ -44,36 +43,77 @@ for (const bundle of bundles) {
     legalComments: "none",
     charset: "utf8",
     logLevel: "warning",
+    write,
   });
-  const mapfile = join(root, `${bundle.outfile}.map`);
-  const map = JSON.parse(readFileSync(mapfile, "utf8"));
+}
+
+/**
+ * Reject a sourcemap whose sources are not relative forward-slash paths.
+ *
+ * @param {string} outfile Bundle path used in the error.
+ * @param {string} text Sourcemap JSON.
+ * @returns {void}
+ */
+function checkMapSources(outfile, text) {
+  const map = JSON.parse(text);
   const sources = Array.isArray(map.sources) ? map.sources : [];
   if (!sources.length) {
-    console.error(`${bundle.outfile}.map has no sources`);
+    console.error(`${outfile}.map has no sources`);
     process.exit(1);
   }
   for (const source of sources) {
     if (typeof source !== "string" || source.includes("\\") || source.startsWith("/") || /^[A-Za-z]:/.test(source)) {
-      console.error(`${bundle.outfile}.map source is not a relative forward-slash path: ${source}`);
+      console.error(`${outfile}.map source is not a relative forward-slash path: ${source}`);
       process.exit(1);
     }
   }
 }
 
-if (!check) {
-  for (const bundle of bundles) {
-    console.log(`Wrote ${bundle.outfile} and ${bundle.outfile}.map`);
+/**
+ * Pick the in-memory output for one bundle path.
+ *
+ * @param {import("esbuild").OutputFile[]} files
+ * @param {string} outfile Repo-relative path, such as static/app.js.
+ * @returns {import("esbuild").OutputFile}
+ */
+function outputFor(files, outfile) {
+  const suffix = outfile.replaceAll("\\", "/");
+  const found = files.find((file) => file.path.replaceAll("\\", "/").endsWith(suffix));
+  if (!found) {
+    console.error(`esbuild did not return ${outfile}`);
+    process.exit(1);
   }
-} else {
+  return found;
+}
+
+if (check) {
   for (const bundle of bundles) {
-    const js = join(root, bundle.outfile);
-    const map = `${js}.map`;
-    const jsChanged = !before.get(js).equals(readFileSync(js));
-    const mapChanged = !before.get(map).equals(readFileSync(map));
+    const result = await buildOne(bundle, false);
+    const files = result.outputFiles ?? [];
+    const jsOut = outputFor(files, bundle.outfile);
+    const mapOut = outputFor(files, `${bundle.outfile}.map`);
+    const mapText = Buffer.from(mapOut.contents).toString("utf8");
+    checkMapSources(bundle.outfile, mapText);
+    const committedJs = readFileSync(join(root, bundle.outfile));
+    const committedMap = readFileSync(join(root, `${bundle.outfile}.map`));
+    const jsChanged = !Buffer.from(jsOut.contents).equals(committedJs);
+    const mapChanged = !Buffer.from(mapOut.contents).equals(committedMap);
     if (jsChanged || mapChanged) {
       console.error(`${bundle.outfile} is stale. Run npm run build and commit ${bundle.outfile} and ${bundle.outfile}.map.`);
       process.exit(1);
     }
+  }
+} else {
+  for (const bundle of bundles) {
+    const result = await buildOne(bundle, false);
+    const files = result.outputFiles ?? [];
+    const jsOut = outputFor(files, bundle.outfile);
+    const mapOut = outputFor(files, `${bundle.outfile}.map`);
+    const mapText = Buffer.from(mapOut.contents).toString("utf8");
+    checkMapSources(bundle.outfile, mapText);
+    writeFileSync(join(root, bundle.outfile), jsOut.contents);
+    writeFileSync(join(root, `${bundle.outfile}.map`), mapOut.contents);
+    console.log(`Wrote ${bundle.outfile} and ${bundle.outfile}.map`);
   }
 }
 

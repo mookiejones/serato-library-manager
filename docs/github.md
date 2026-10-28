@@ -32,7 +32,7 @@ There is no macOS test job. The suite mocks platform paths, and a macOS runner c
 
 The Windows test job runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. No tag is passed on the command line. That is the same environment path the release job uses, and it runs on `windows-latest` for every pull request. `v0.0.0` is not a published release.
 
-The frontend job runs on `ubuntu-latest` and `windows-latest`. It installs Node 22. `package.json` sets `engines.node` to `>=22`. The job installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit`, runs ESLint so `any` is rejected, runs the Vitest suite (`npm test`), then runs `node scripts/build_frontend.mjs --check`. That check rebuilds `static/app.js` and `static/wizard.js` and fails if either file or its sourcemap differs from the committed copy. The job does not start a browser. The check names are `frontend (ubuntu-latest)` and `frontend (windows-latest)`. On your machine:
+The frontend job runs on `ubuntu-latest` and `windows-latest`. It installs Node 22. `package.json` sets `engines.node` to `>=22`. The job installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit`, runs ESLint so `any` is rejected, runs the Vitest suite (`npm test`), then runs `node scripts/build_frontend.mjs --check`. That check builds `static/app.js` and `static/wizard.js` in memory, does not write `static/`, and fails if either file or its sourcemap differs from the committed copy. The job does not start a browser. The check names are `frontend (ubuntu-latest)` and `frontend (windows-latest)`. On your machine:
 
 ```bash
 npm ci

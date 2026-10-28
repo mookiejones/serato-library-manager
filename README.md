@@ -13,7 +13,7 @@ A local window for the Serato DJ Pro library on macOS and Windows. Source on `ma
   <img alt="Serato Library Manager: restore your library to any point in time, checked against the saved backup, on every drive." src="docs/images/hero-light.png" width="100%">
 </picture>
 
-The hero is a product illustration. The screenshots below are the app on main `9d2bb92`, and they show example data. The app has one theme, so there is no dark variant.
+The hero is a product illustration. The screenshots below show example data of the crates, snapshots, and Prepare views. The app has one theme, so there is no dark variant.
 
 ## Install
 

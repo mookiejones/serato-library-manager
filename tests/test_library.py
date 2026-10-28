@@ -11,7 +11,6 @@ from typing import cast
 from unittest import mock
 
 import library
-import snapshots
 from library import LibraryError, SeratoOpen
 from tests.fixture import TempLibrary, open_database
 
