@@ -388,6 +388,29 @@ class MarkerConversionTests(unittest.TestCase):
         self.assertEqual(huge[0]["Bpm"], "90.00")
         self.assertEqual(rekordbox.tempo_entries([]), [])
 
+    def test_segment_bpm_keeps_the_stored_position(self) -> None:
+        """Divide the span by the stored float, not by a three-decimal rounding.
+
+        Four beats across a position that rounds to 2.000 seconds is 120.00
+        only after that rounding. The stored float is slightly longer, so the
+        written BPM is lower.
+
+        Returns:
+            None. The test fails if the BPM matches the rounded span.
+        """
+        payload = bytes([1, 0]) + (2).to_bytes(4, "big")
+        payload += struct.pack(">f", 0.0) + (4).to_bytes(4, "big")
+        payload += struct.pack(">f", 2.0004) + struct.pack(">f", 100.0)
+        markers = tags._parse_beatgrid(payload)
+        end = float(markers[1]["position"])
+        self.assertNotEqual(round(end, 3), end)
+        entries = rekordbox.tempo_entries(markers)
+        full = f"{(4 * 60.0 / end):.2f}"
+        rounded = f"{(4 * 60.0 / round(end, 3)):.2f}"
+        self.assertNotEqual(full, rounded)
+        self.assertEqual(entries[0]["Bpm"], full)
+        self.assertEqual(entries[0]["Bpm"], "119.98")
+
 
 class ExportTests(unittest.TestCase):
     """Export a fixture library, then parse the XML back.
@@ -629,6 +652,125 @@ class ExportTests(unittest.TestCase):
             assert isinstance(prepare_root, dict)
             self.assertEqual(_node(prepare_root, "Prepare")["type"], "1")
             self.assertEqual(prepare["tracks"], [])
+
+    def test_empty_crate_entries_are_zero(self) -> None:
+        """Write Entries="0" for a crate that has no tracks.
+
+        The playlist node is still present. Its attribute matches the empty
+        child list.
+
+        Returns:
+            None. The test fails if the attribute is missing or not zero.
+        """
+        with TempLibrary():
+            created = library.crate_action({"action": "create", "name": "Empty"})
+            xml, _report = rekordbox.export_rekordbox("Serato Library", int(created["id"]))
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            playlists = document.find("PLAYLISTS")
+            assert playlists is not None
+            root = playlists.find("NODE")
+            assert root is not None
+            crate = root.find("NODE")
+            assert crate is not None
+            self.assertEqual(crate.get("Name"), "Empty")
+            self.assertEqual(crate.get("Type"), "1")
+            self.assertEqual(crate.get("Entries"), "0")
+            self.assertEqual(list(crate), [])
+
+    def test_xml_special_characters_round_trip(self) -> None:
+        """Keep & < > \" and ' in a title and an artist.
+
+        ElementTree escapes them in the file. Parsing the file returns the
+        original characters.
+
+        Returns:
+            None. The test fails if a character is dropped or double-escaped.
+        """
+        title = 'Tom & Jerry <3> "ok" \'yo\''
+        artist = "A & B <C> \"D\" 'E'"
+        with TempLibrary():
+            with open_database(library.MASTER) as conn:
+                conn.execute(
+                    "UPDATE asset SET name = ?, artist = ? WHERE id = 1",
+                    (title, artist),
+                )
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            self.assertIn("&amp;", xml)
+            self.assertIn("&lt;", xml)
+            self.assertIn("&gt;", xml)
+            self.assertIn("&quot;", xml)
+            self.assertIn("'yo'", xml)
+            self.assertIn("'E'", xml)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            match = next(track for track in tracks if track["track_id"] == "1")
+            self.assertEqual(match["name"], title)
+            self.assertEqual(match["artist"], artist)
+            again = ElementTree.fromstring(xml.encode("utf-8"))
+            self.assertEqual(
+                rekordbox.parse_rekordbox(ElementTree.tostring(again, encoding="unicode")),
+                parsed,
+            )
+
+    def test_a_track_without_cues_or_a_grid_has_no_marker_nodes(self) -> None:
+        """Omit POSITION_MARK and TEMPO when the file has neither.
+
+        The track stays in the collection. The audio file is plain bytes
+        with no Serato tag.
+
+        Returns:
+            None. The test fails if either child element is written.
+        """
+        with TempLibrary() as temp:
+            audio = temp.root / "plain.wav"
+            audio.write_bytes(b"not a tag")
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    """
+                    UPDATE asset
+                    SET name = 'Bare', artist = 'None', portable_id = ?, file_name = 'plain.wav'
+                    WHERE id = 2
+                    """,
+                    (str(audio),),
+                )
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            bare = next(item for item in collection.findall("TRACK") if item.get("Name") == "Bare")
+            self.assertEqual(bare.findall("POSITION_MARK"), [])
+            self.assertEqual(bare.findall("TEMPO"), [])
+
+    def test_controls_and_surrogates_are_stripped_from_title_and_artist(self) -> None:
+        """Drop C0 controls and unpaired surrogates from the track name fields.
+
+        SQLite refuses a lone surrogate, so the row is passed to the track
+        builder. The characters that remain are the visible text.
+
+        Returns:
+            None. The test fails if a control or a surrogate is still in the attribute.
+        """
+        element = rekordbox._track_element(
+            {
+                "id": 9,
+                "portable_id": "Music/plain.mp3",
+                "name": "A\x01&\x00B\ud800C",
+                "artist": "DJ\x0b\udfff <Band>",
+            },
+            memory_cues=False,
+            hot_loops=False,
+            key_notation="asis",
+            stats={},
+            unicode_names=[],
+            unreadable_names=[],
+            folder_cache={},
+        )
+        assert element is not None
+        self.assertEqual(element.get("Name"), "A&BC")
+        self.assertEqual(element.get("Artist"), "DJ <Band>")
+        self.assertNotIn("\ud800", element.get("Name") or "")
+        self.assertNotIn("\udfff", element.get("Artist") or "")
 
     def test_empty_library_bpm_uses_the_beatgrid(self) -> None:
         """Fill AverageBpm from the beatgrid when the library BPM is empty.

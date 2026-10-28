@@ -7,6 +7,7 @@ import http.client
 import json
 import threading
 import unittest
+import unittest.mock
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -275,6 +276,21 @@ class ApiTests(unittest.TestCase):
         status, missing = self.request("/api/export.rekordbox.xml?crate=999")
         self.assertEqual(status, 404)
         self.assertIn("not in this space", missing)
+        with unittest.mock.patch.object(server.app_log.logger, "warning") as warning:
+            status, known = self.request("/api/export.rekordbox.xml?crate=all&report=1&memory=0&hot_loops=yes")
+            self.assertEqual(status, 200)
+            self.assertEqual(warning.call_count, 0)
+            status, defaults = self.request("/api/export.rekordbox.xml?crate=all&report=1")
+            status, weird = self.request(
+                "/api/export.rekordbox.xml?crate=all&report=1&memory=banana&hot_loops=nope"
+            )
+            self.assertEqual(status, 200)
+            rendered = [call.args[0] % call.args[1:] for call in warning.call_args_list]
+        self.assertEqual(len(rendered), 2)
+        self.assertTrue(any("memory='banana'" in line and "Using on" in line for line in rendered))
+        self.assertTrue(any("hot_loops='nope'" in line and "Using off" in line for line in rendered))
+        self.assertTrue(json.loads(known)["xml"].startswith("<?xml"))
+        self.assertEqual(json.loads(weird)["xml"], json.loads(defaults)["xml"])
 
     def test_merge_preview_and_confirm(self) -> None:
         """Preview a duplicate merge, then confirm it over HTTP.

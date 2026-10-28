@@ -33,7 +33,10 @@ import library
 import tags
 
 
-_ILLEGAL_XML = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]")
+# XML 1.0 allows tab, newline, and carriage return. The other C0 controls,
+# unpaired surrogates, and the two noncharacters at the end of the BMP
+# cannot appear in a document.
+_ILLEGAL_XML = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]")
 # Cases B and C of the LAME/Xing header (pestrela). Serato's stored time
 # sits this far later than the time Rekordbox uses for the same MP3.
 # Cases A and D, and every file that is not an MP3, stay put.
@@ -1100,10 +1103,11 @@ def _xml_text(value: str) -> str:
     """Remove characters XML 1.0 cannot store in a document.
 
     Args:
-        value: Text that may contain control characters.
+        value: Text that may contain control characters or unpaired surrogates.
 
     Returns:
-        The same text without characters XML 1.0 forbids.
+        The same text without C0 controls other than tab, newline, and
+        carriage return, and without unpaired surrogates.
     """
     return _ILLEGAL_XML.sub("", value)
 

@@ -26,7 +26,7 @@ The steps in the app are on the [Playlists](guide/playlists.md) page.
 | Cue and loop colours | Serato marker colours | Red, green, and blue | Written as channels from 0 to 255. Rekordbox may snap them to its palette. The loss report says so when cues were written. |
 | Track colour | Serato track colour | `Colour` `0xRRGGBB` | Written in that form, for example `0xFF007F`. White is left out. Rekordbox's palette is eight colors, so another value may be ignored. The loss report says so. |
 | Beatgrid | Fixed grid | `TEMPO` markers | Kept. One marker becomes one `TEMPO`. The bar is 4/4. |
-| Flexible or Lucid grids (Serato 5) | Several markers | One `TEMPO` per marker | Written. BPM is two decimal places, so the grid can drift. The first marker is treated as a downbeat. If it is not, the bars in Rekordbox are shifted. The loss report names these tracks. A grid with more than 4096 markers, a truncated grid, or a version other than 1 is left out and named in the loss report. |
+| Flexible or Lucid grids (Serato 5) | Several markers | One `TEMPO` per marker | Written. The BPM uses the marker times stored in the file. Those times are not rounded to three decimals before the calculation. The written BPM is two decimal places, so the grid can drift. The first marker is treated as a downbeat. If it is not, the bars in Rekordbox are shifted. The loss report names these tracks. A grid with more than 4096 markers, a truncated grid, or a version other than 1 is left out and named in the loss report. |
 | Audio files | On disk | On disk | This export reads them and does not modify them. |
 
 ## Known limits
