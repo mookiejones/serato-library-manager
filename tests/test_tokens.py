@@ -23,14 +23,25 @@ HEX_COLOR = re.compile(
 )
 TOKEN_DECL = re.compile(r"(--[A-Za-z0-9-]+)\s*:\s*(#[0-9A-Fa-f]{6})\b")
 
-# Pairs the designer named. Manila is --color-card. Walnut is --color-bg.
+# Text needs 4.5:1. Manila is --color-card. Walnut is --color-bg.
+# The third item is the ratio rounded to two decimals.
 TEXT_PAIRS = (
-    ("safe on manila", "--color-safe", "--color-card"),
-    ("safe on safe-bg", "--color-safe", "--color-safe-bg"),
-    ("warn on manila", "--color-warn", "--color-card"),
-    ("warn on warn-bg", "--color-warn", "--color-warn-bg"),
-    ("safe-on-dark on walnut", "--color-safe-on-dark", "--color-bg"),
-    ("warn-on-dark on walnut", "--color-warn-on-dark", "--color-bg"),
+    ("safe-text on manila", "--color-safe-text", "--color-card", 5.43),
+    ("safe-text on safe-bg", "--color-safe-text", "--color-safe-bg", 5.34),
+    ("warn-text on manila", "--color-warn-text", "--color-card", 5.62),
+    ("warn-text on warn-bg", "--color-warn-text", "--color-warn-bg", 5.35),
+    ("safe-on-dark on walnut", "--color-safe-on-dark", "--color-bg", 8.00),
+    ("warn-on-dark on walnut", "--color-warn-on-dark", "--color-bg", 8.07),
+)
+
+# Borders, fills, and icons need 3:1. Warn on its tint is under that bar.
+NON_TEXT_PAIRS = (
+    ("safe on manila", "--color-safe", "--color-card", 4.20),
+    ("safe on safe-bg", "--color-safe", "--color-safe-bg", 4.13),
+    ("safe-border on manila", "--color-safe-border", "--color-card", 4.20),
+    ("safe-border on safe-bg", "--color-safe-border", "--color-safe-bg", 4.13),
+    ("warn on manila", "--color-warn", "--color-card", 3.10),
+    ("warn on warn-bg", "--color-warn", "--color-warn-bg", 2.95),
 )
 
 
@@ -94,39 +105,6 @@ def token_colors(text: str) -> dict[str, str]:
     for name, value in TOKEN_DECL.findall(text):
         found[name] = value.lower()
     return found
-
-
-def lightest_readable_mix(source: str, ink: str, backgrounds: tuple[str, ...]) -> str:
-    """Mix a color toward ink until it clears 4.5:1 on every background.
-
-    The mix is in sRGB, in steps of one thousandth. The lightest passing
-    mix is the one with the most of the source color. Rounding is to the
-    nearest channel, so the result is a real #rrggbb.
-
-    Args:
-        source: Starting #rrggbb color.
-        ink: The color mixed in, #rrggbb.
-        backgrounds: Surfaces the result must clear 4.5:1 against.
-
-    Returns:
-        The lightest #rrggbb that passes.
-
-    Raises:
-        AssertionError: If no mix in the sweep passes. Ink itself is the
-            darkest end of the sweep, so this means ink fails too.
-    """
-    source_rgb = _rgb(source)
-    ink_rgb = _rgb(ink)
-    for step in range(1000, -1, -1):
-        weight = step / 1000
-        mixed = tuple(
-            round(weight * source_rgb[channel] + (1 - weight) * ink_rgb[channel])
-            for channel in range(3)
-        )
-        color = "#{:02x}{:02x}{:02x}".format(*mixed)
-        if all(contrast(color, background) >= 4.5 for background in backgrounds):
-            return color
-    raise AssertionError(f"No mix of {source} toward {ink} clears 4.5:1")
 
 
 class TokenSheetTests(unittest.TestCase):
@@ -211,7 +189,7 @@ class TokenSheetTests(unittest.TestCase):
 
 
 class ContrastTests(unittest.TestCase):
-    """Measure the semantic text pairs and the derived border and warn text."""
+    """Measure text at 4.5:1 and borders, fills, and icons at 3:1."""
 
     def setUp(self) -> None:
         """Read the token sheet once for the contrast cases.
@@ -220,77 +198,62 @@ class ContrastTests(unittest.TestCase):
             None.
         """
         self.colors = token_colors(TOKENS.read_text(encoding="utf-8"))
+        self.sheet = TOKENS.read_text(encoding="utf-8")
 
-    def test_named_pairs_and_flags(self) -> None:
-        """Record contrast for safe, warn, and the on-dark pair.
+    def test_text_pairs_clear_body_contrast(self) -> None:
+        """Require 4.5:1 for every text token on its surface.
 
-        Body text needs 4.5:1. Large or bold text needs 3:1. The
-        designer's safe and warn colors are short of 4.5:1 on manila
-        and on their tints. Warn on its tint is also short of 3:1.
-        The on-dark colors clear 4.5:1 on walnut. The ratios are
-        rounded to two decimals.
+        Safe text and warn text are measured on manila and on their
+        tints. The on-dark tokens are measured on walnut. The ratios
+        are rounded to two decimals.
 
         Returns:
-            None. The test fails if a ratio or a flag set changes.
+            None. The test fails if a text pair drops under 4.5:1.
         """
-        ratios = {}
-        for label, foreground, background in TEXT_PAIRS:
-            ratios[label] = round(
-                contrast(self.colors[foreground], self.colors[background]),
-                2,
-            )
+        for label, foreground, background, expected in TEXT_PAIRS:
+            ratio = round(contrast(self.colors[foreground], self.colors[background]), 2)
+            self.assertEqual(ratio, expected, label)
+            self.assertGreaterEqual(ratio, 4.5, label)
+
+    def test_non_text_pairs_clear_ui_contrast(self) -> None:
+        """Require 3:1 for borders, fills, and icons.
+
+        Safe and the safe border use ``#3f7d4e``. They clear 3:1 on
+        manila and on the safe tint. Warn clears 3:1 on manila. Warn
+        on the warn tint is 2.95:1, which misses 3:1. That miss stays
+        in the result so a border on the tint cannot pass unnoticed.
+
+        Returns:
+            None. The test fails if a passing pair drops under 3:1 or
+            the warn-tint ratio changes.
+        """
+        self.assertEqual(self.colors["--color-safe"], "#3f7d4e")
+        self.assertEqual(self.colors["--color-safe-border"], "#3f7d4e")
+        self.assertEqual(self.colors["--color-warn"], "#b7791f")
+        self.assertEqual(self.colors["--color-safe-text"], "#356a41")
+        self.assertEqual(self.colors["--color-warn-text"], "#7f5417")
+        under = []
+        for label, foreground, background, expected in NON_TEXT_PAIRS:
+            ratio = round(contrast(self.colors[foreground], self.colors[background]), 2)
+            self.assertEqual(ratio, expected, label)
+            if ratio < 3:
+                under.append((label, ratio))
+            else:
+                self.assertGreaterEqual(ratio, 3, label)
+        self.assertEqual(under, [("warn on warn-bg", 2.95)])
+        text_colors = [
+            line.split(":", 1)[1].strip().rstrip(";")
+            for line in self.sheet.splitlines()
+            if line.strip().startswith("color:")
+        ]
         self.assertEqual(
-            ratios,
-            {
-                "safe on manila": 4.20,
-                "safe on safe-bg": 4.13,
-                "warn on manila": 3.10,
-                "warn on warn-bg": 2.95,
-                "safe-on-dark on walnut": 8.00,
-                "warn-on-dark on walnut": 8.07,
-            },
-        )
-        below_body = [label for label, ratio in ratios.items() if ratio < 4.5]
-        below_large = [label for label, ratio in ratios.items() if ratio < 3.0]
-        self.assertEqual(
-            below_body,
+            text_colors,
             [
-                "safe on manila",
-                "safe on safe-bg",
-                "warn on manila",
-                "warn on warn-bg",
+                "var(--color-safe-text)",
+                "var(--color-warn-text)",
+                "var(--color-danger)",
             ],
         )
-        self.assertEqual(below_large, ["warn on warn-bg"])
-
-    def test_derived_safe_border_and_warn_text(self) -> None:
-        """Keep the derived colors on the lightest mix that clears 4.5:1.
-
-        safe-border is safe mixed toward the ink text color. warn-text
-        is warn mixed the same way. Both must pass on manila and on the
-        matching tint. The stored hex is that mix, not a darker guess.
-
-        Returns:
-            None. The test fails if the sheet drifts from the mix.
-        """
-        manila = self.colors["--color-card"]
-        ink = self.colors["--color-text"]
-        safe_border = lightest_readable_mix(
-            self.colors["--color-safe"],
-            ink,
-            (self.colors["--color-safe-bg"], manila),
-        )
-        warn_text = lightest_readable_mix(
-            self.colors["--color-warn"],
-            ink,
-            (self.colors["--color-warn-bg"], manila),
-        )
-        self.assertEqual(self.colors["--color-safe-border"], safe_border)
-        self.assertEqual(self.colors["--color-warn-text"], warn_text)
-        self.assertGreaterEqual(contrast(safe_border, self.colors["--color-safe-bg"]), 4.5)
-        self.assertGreaterEqual(contrast(safe_border, manila), 4.5)
-        self.assertGreaterEqual(contrast(warn_text, self.colors["--color-warn-bg"]), 4.5)
-        self.assertGreaterEqual(contrast(warn_text, manila), 4.5)
 
     def test_warm_palette_values(self) -> None:
         """Fill the role tokens with the existing walnut and manila colors.

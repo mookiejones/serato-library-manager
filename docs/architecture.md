@@ -209,7 +209,7 @@ Merge copies opens a dialog. The radios choose the file to keep. The dialog then
 
 The rail ends with Settings. The first launch opens a dialog whose heading is "Share anonymous usage stats and crash reports?" **Don't share** is focused. Esc or closing the dialog saves a decline. Settings holds the same choice as a checkbox, plus **Open logs folder** and **Copy logs**. The page does not load a third-party analytics script, and it does not insert log text with `innerHTML`.
 
-`tokens.css` is the palette, type, spacing, and radius. The page loads it before `app.css`. The values are the walnut and manila colors the screen already used. `design/tokens.css` is the designer's dark reference and is not linked. `app.css` aliases the old names (`--walnut`, `--manila`, `--ink`, and the rest) to those tokens and is the layout for that screen. `--row` stays 36px and matches `ROW` in `app.js`.
+`tokens.css` is the palette, type, spacing, and radius. The page loads it before `app.css`. The values are the walnut and manila colors the screen already used. Safe and warn text on manila uses `--color-safe-text` and `--color-warn-text`. `--color-safe` and `--color-warn` are borders, fills, and icons. `design/tokens.css` is the designer's dark reference and is not linked. `app.css` aliases the old names (`--walnut`, `--manila`, `--ink`, and the rest) to those tokens and is the layout for that screen. `--row` stays 36px and matches `ROW` in `app.js`.
 
 ## Sharing and logs
 
