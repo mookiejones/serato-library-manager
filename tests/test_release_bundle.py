@@ -38,6 +38,24 @@ def _pe(machine: int) -> bytes:
     return bytes(data)
 
 
+def _zip_windows_exes(archive: Path, members: dict[str, bytes]) -> None:
+    """Write a zip of named Windows executables and nothing else.
+
+    Args:
+        archive: Zip path to create.
+        members: Zip member name to file bytes.
+
+    Returns:
+        None.
+
+    Writes ``archive``. The page files are omitted so a PE failure is
+    reached before the page comparison.
+    """
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for name, payload in members.items():
+            zipped.writestr(name, payload)
+
+
 def _zip_tree(root: Path, archive: Path) -> None:
     """Zip ``root`` with paths relative to its parent.
 
@@ -817,6 +835,97 @@ class PackageTests(unittest.TestCase):
             _zip_tree(root, wide)
             kind = release_bundle.assert_zip(wide, static, min_bytes=20, max_bytes=5_000_000)
         self.assertEqual(kind, "windows")
+
+    def test_windows_zip_requires_the_app_executable(self) -> None:
+        """Refuse a portable zip that has no ``Serato Library.exe``.
+
+        A page file alone is not a Windows bundle. The check must fail
+        before it compares page bytes.
+
+        Returns:
+            None. The test fails if a zip without the application executable passes.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "missing.zip"
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("Serato Library/static/index.html", b"<p>missing</p>")
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("no Serato Library executable", str(caught.exception))
+
+    def test_windows_zip_rejects_a_corrupt_pe(self) -> None:
+        """Refuse an application executable that is not a PE.
+
+        The member is named ``Serato Library.exe`` and starts with ``MZ``,
+        but it has no PE signature. No installer is built.
+
+        Returns:
+            None. The test fails if a corrupt header is treated as x64.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "corrupt.zip"
+            _zip_windows_exes(archive, {"Serato Library/Serato Library.exe": b"MZ" + b"\0" * 62})
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("has no PE header", str(caught.exception))
+
+    def test_windows_zip_rejects_arm64(self) -> None:
+        """Refuse an Arm64 application executable.
+
+        Machine ``0xaa64`` is a PE, and it is not the x64 build this
+        release ships. The portable zip must still fail.
+
+        Returns:
+            None. The test fails if Arm64 is accepted as x64.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "arm.zip"
+            _zip_windows_exes(archive, {"Serato Library/Serato Library.exe": _pe(0xAA64)})
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("machine 0xaa64 is not x64", str(caught.exception))
+
+    def test_windows_zip_rejects_a_32_bit_helper(self) -> None:
+        """Refuse a 32-bit helper next to a 64-bit application executable.
+
+        ``Serato Library.exe`` is machine ``0x8664``. ``helper.exe`` is
+        machine ``0x14c``. Every ``.exe`` in the zip has to be x64.
+
+        Returns:
+            None. The test fails if the helper is ignored.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "helper.zip"
+            _zip_windows_exes(
+                archive,
+                {
+                    "Serato Library/Serato Library.exe": _pe(0x8664),
+                    "Serato Library/helper.exe": _pe(0x14C),
+                },
+            )
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("helper.exe machine 0x14c is not x64", str(caught.exception))
 
     def test_first_install_names_the_files_and_the_volume_permission(self) -> None:
         """Document the release files and Removable Volumes beside Open Anyway.

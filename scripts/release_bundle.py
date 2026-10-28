@@ -479,8 +479,10 @@ def assert_zip(
 
     The publish job calls this without launching the app. The executable
     must be a regular file, the macOS binary must be marked executable,
-    and every bundled ``static`` file must match ``source``. A Windows
-    executable must be a 64-bit PE (machine ``0x8664``).
+    and every bundled ``static`` file must match ``source``. Every
+    Windows ``.exe`` in the archive, including a helper, must be a
+    64-bit PE (machine ``0x8664``). A missing application executable,
+    a corrupt PE, and any other machine id are refused.
 
     Args:
         archive: Zip file to inspect.
@@ -512,9 +514,7 @@ def assert_zip(
         if kind == "macos" and _unix_mode(exe_info) & 0o111 == 0:
             raise SystemExit(f"{exe_name} is not marked executable")
         if kind == "windows":
-            machine = pe_machine_bytes(zipped.read(exe_name), exe_name)
-            if machine != PE_MACHINE_AMD64:
-                raise SystemExit(f"{exe_name} machine {machine:#x} is not x64")
+            _require_windows_exes_x64(zipped, infos)
         prefixes = [
             info.filename[: -len("index.html")]
             for info in infos
@@ -534,6 +534,32 @@ def assert_zip(
                 if zipped.read(info) != (source / name).read_bytes():
                     raise SystemExit(f"{member} does not match source")
     return kind
+
+
+def _require_windows_exes_x64(zipped: zipfile.ZipFile, infos: list[zipfile.ZipInfo]) -> None:
+    """Require every Windows ``.exe`` member to be machine ``0x8664``.
+
+    Args:
+        zipped: Open archive. Members are read and not extracted.
+        infos: Members already rejected when their names are unsafe.
+
+    Raises:
+        SystemExit: If an ``.exe`` is a symlink, empty, not a PE, or any
+            machine other than 64-bit x86. That includes 32-bit ``0x14c``
+            and Arm64 ``0xaa64``.
+
+    The application executable is one of these members. A helper such as
+    ``helper.exe`` is held to the same machine id.
+    """
+    for info in infos:
+        name = info.filename
+        if name.endswith("/") or not name.lower().endswith(".exe"):
+            continue
+        if _is_symlink_member(info) or info.file_size <= 0:
+            raise SystemExit(f"{name} is not a regular executable")
+        machine = pe_machine_bytes(zipped.read(info), name)
+        if machine != PE_MACHINE_AMD64:
+            raise SystemExit(f"{name} machine {machine:#x} is not x64")
 
 
 def _zip_kind(names: list[str]) -> str:
@@ -1077,11 +1103,12 @@ def _file_names(directory: Path) -> list[str]:
 def check_binaries(directory: Path) -> None:
     """Check the four release files without launching them.
 
-    The publish job runs on Linux. It can read the Windows zip, the
-    application executable's PE header, and the UDIF trailer. It cannot
+    The publish job runs on Linux. It can read the Windows zip, every
+    ``.exe`` PE header in that zip, and the UDIF trailer. It cannot
     mount a disk image or start either app. The build jobs already did
-    that. The Inno stub is not required to be 64-bit. The script beside
-    this repository must select 64-bit install mode instead.
+    that. The Inno stub is not required to be 64-bit, and its payload
+    is not unpacked here. The script beside this repository must select
+    64-bit install mode instead.
 
     Args:
         directory: Folder that holds the downloaded artifacts and no checksum
