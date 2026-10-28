@@ -17,7 +17,15 @@ from http.server import ThreadingHTTPServer
 from xml.etree import ElementTree
 
 import server
-from server import blank, format_bpm, format_bool, format_color, format_when, require_space
+from server import (
+    blank,
+    format_beat_position,
+    format_bpm,
+    format_bool,
+    format_color,
+    format_when,
+    require_space,
+)
 from tests.fixture import TempLibrary, open_database
 import library
 from library import LibraryError
@@ -51,6 +59,23 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(format_when(0), "—")
         self.assertEqual(format_when(False), "—")
 
+    def test_beat_position_rounds_for_display(self) -> None:
+        """Show a beatgrid position to the millisecond and hide binary noise.
+
+        ``1.2300000190734863`` is the float32 value of 1.23 seconds. The
+        panel string is ``1.230``. A non-finite value is blank. Nothing
+        is written, and this string is not the export.
+
+        Returns:
+            None. The test fails if the long float is shown or a NaN becomes 0.
+        """
+        self.assertEqual(format_beat_position(1.2300000190734863), "1.230")
+        self.assertEqual(format_beat_position(float("nan")), "")
+        self.assertEqual(format_beat_position(float("inf")), "")
+        script = Path(__file__).resolve().parents[1].joinpath("static", "app.js").read_text(encoding="utf-8")
+        self.assertIn("beatSeconds(mark.position)", script)
+        self.assertIn("toFixed(3)", script)
+
     def test_require_space(self) -> None:
         """Default a missing space to Serato Library and reject an unknown one.
 
@@ -63,6 +88,26 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(require_space(None), "Serato Library")
         with self.assertRaises(LibraryError):
             require_space("Streaming")
+
+    def test_export_option_warns_on_an_unknown_value(self) -> None:
+        """Log a warning and keep the default when the query word is unknown.
+
+        ``yes`` is on and ``no`` is off. ``banana`` and ``nope`` are not
+        switches, so the warning names the parameter and the default.
+
+        Returns:
+            None. The test fails if the warning is missing or the default changes.
+        """
+        self.assertTrue(server.export_option("yes", default=False, name="memory"))
+        self.assertFalse(server.export_option("no", default=True, name="memory"))
+        with self.assertLogs("serato", level="WARNING") as caught:
+            self.assertTrue(server.export_option("banana", default=True, name="memory"))
+            self.assertFalse(server.export_option("nope", default=False, name="hot_loops"))
+        text = " ".join(caught.output)
+        self.assertIn("memory='banana'", text)
+        self.assertIn("Using on", text)
+        self.assertIn("hot_loops='nope'", text)
+        self.assertIn("Using off", text)
 
 
 class ApiTests(unittest.TestCase):
