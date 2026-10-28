@@ -19,7 +19,7 @@ The install step is required because the suite imports `sentry-sdk` and `posthog
 
 GitHub Actions runs the same discovery with `python` on Ubuntu (3.12 and 3.14) and Windows (3.12). [docs/github.md](docs/github.md) lists the workflows, the release tags, and the checks to require after they have gone green once.
 
-A desktop build uses `requirements-build.txt` and `python -m PyInstaller serato-library.spec`. Release builds are unsigned.
+A desktop build uses `requirements-build.txt` and `python -m PyInstaller serato-library.spec`. On macOS, `requirements-macos.txt` supplies the menu-bar frameworks. Release builds are unsigned. GitHub Releases is the only download. Signing runs only when the Apple or Windows secrets in `scripts/release_sign.py` are all set.
 
 ## What to update
 

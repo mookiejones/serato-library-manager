@@ -117,7 +117,7 @@ class BuildConfigTests(unittest.TestCase):
         """
         runtime = _pins(ROOT / "requirements.txt")
         build = _pins(ROOT / "requirements-build.txt")
-        for name in ("sentry-sdk", "posthog", "pywebview"):
+        for name in ("sentry-sdk", "posthog", "pillow", "pystray"):
             self.assertIn(name, runtime)
             self.assertEqual(runtime[name], build[name])
 

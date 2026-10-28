@@ -2,7 +2,8 @@
  * Serato library page.
  *
  * Loads crates, history, missing tracks, duplicates, stems, and files from
- * the local server on 127.0.0.1 port 8765. Track and crate edits are POST
+ * the local server on 127.0.0.1. server.py uses port 8765. The desktop
+ * app uses a free port, and this page calls the same origin. Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
  * /api/duplicates/merge. Rekordbox export is GET /api/export.rekordbox.xml.
  * File moves, renames, replacements, and deletes

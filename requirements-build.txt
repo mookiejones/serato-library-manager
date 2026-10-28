@@ -1,4 +1,5 @@
-pywebview==6.2.1
+pillow==13.0.0
+pystray==0.19.5
 sentry-sdk==2.73.0
 posthog==7.75.11
 pyinstaller==6.22.3

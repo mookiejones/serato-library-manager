@@ -13,7 +13,7 @@ A local page for the Serato DJ Pro library. The process reads `master.sqlite`. I
 
 On macOS the process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. On Windows that file is `%LOCALAPPDATA%\Serato\Library\master.sqlite`. `server.py` uses the Python standard library.
 
-A native window runs the same server:
+The desktop app runs the same server on a free port and opens the browser:
 
 ```bash
 python3 -m venv .venv
@@ -21,7 +21,7 @@ python3 -m venv .venv
 .venv/bin/python desktop.py
 ```
 
-Closing the window stops the server. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`. To build an app for the machine you are on, install `requirements-build.txt` in that environment and run `python -m PyInstaller serato-library.spec`. The result is `dist/Serato Library.app` on macOS, or `dist/Serato Library/` on Windows. The build is unsigned. Release builds, attestations, and the GitHub settings around them are in [docs/github.md](github.md).
+Quit from the menu bar on macOS or the notification-area icon on Windows. Closing the browser does not stop the server. A second launch opens the same page. On macOS, install `requirements-macos.txt` in that environment as well. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`. To build an app for the machine you are on, install `requirements-build.txt` in that environment and run `python -m PyInstaller serato-library.spec`. The result is `dist/Serato Library.app` on macOS, or `dist/Serato Library/` on Windows. The build is unsigned. Release disk images, the Windows installer, attestations, and the GitHub settings around them are in [docs/github.md](github.md).
 
 The first time the page opens, it asks whether to share anonymous usage stats and crash reports. The choice stays off until you accept. [PRIVACY.md](../PRIVACY.md) lists what can be sent.
 
@@ -39,7 +39,7 @@ The first time the page opens, it asks whether to share anonymous usage stats an
 3. Press F5.
 4. The debugger runs `server.py` in the integrated terminal.
 
-`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. "Python: Debug Tests" runs `unittest` discovery for `tests/`. Those launches use the system Python. The desktop window uses `.venv`. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
+`.vscode/launch.json` names that launch "Python: Run server.py". A second launch, "Python: Current File", debugs the open file. "Python: Debug Tests" runs `unittest` discovery for `tests/`. Those launches use the system Python. The desktop app uses `.venv`. Format on save is on. The explorer hides `__pycache__` and `*.pyc`.
 
 ## Containers
 
@@ -81,13 +81,13 @@ Rel(tags, audio, "Reads the tag header")
 
 ### `server.py`
 
-`serve` binds `ThreadingHTTPServer` to `127.0.0.1` port `8765` and exits when that port is already taken. `main` serves until Ctrl-C. The handler class is `Handler`. It logs each request and answers JSON with `Cache-Control: no-store`.
+`serve` binds `ThreadingHTTPServer` to `127.0.0.1`. Called with no arguments it uses port `8765` and exits when that port is already taken or the master database is missing. `serve(port=0)` asks the operating system for a free port. `require_library=False` skips the database check and does not start telemetry, which is the release smoke path. `main` serves until Ctrl-C on port 8765. The handler class is `Handler`. It logs each request and answers JSON with `Cache-Control: no-store`. `shutdown_token` on the server object starts as None.
 
-`app_root` locates `static/`. A PyInstaller build reads it from `sys._MEIPASS`. A source checkout reads the directory beside `server.py`.
+`app_root` locates `static/`. A PyInstaller build reads it from `sys._MEIPASS`. A source checkout reads the directory beside `server.py`. The menu icon is `packaging/menu-icon.png` beside that root.
 
-`desktop.py` imports `webview` (pywebview 6.2.1), calls `serve`, and opens `http://127.0.0.1:8765` in a native window. The window allows text selection. pywebview uses WKWebView on macOS and WebView2, through the WinForms backend, on Windows. The import stays in `desktop.py`, so the server and the tests do not require the package.
+`desktop.py` calls `serve(port=0)`, opens the default browser, and shows a pystray icon: a menu-bar item on macOS and a notification-area icon on Windows. The menu is Open and Quit. Quit shuts the server down and then stops telemetry. A lock file `instance.lock` in the config directory keeps a single instance. The page URL is written to `instance.port`. A second launch opens that URL when `/api/health` answers. pystray is imported only when the icon is shown. The macOS bundle sets `LSUIElement` so there is no Dock icon, and `NSRemovableVolumesUsageDescription` so macOS can ask before the app reads an external drive. That permission is Removable Volumes, not Full Disk Access.
 
-When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_check` runs first and `main` returns. The check confirms the bundled page through `server.app_root()`, writes `ok\n` to that path, and does not import pywebview, bind a port, open the library, or start telemetry. A relative path, a symlink, a directory, or a missing parent directory stops the process. The windowed build has no console, so the marker file is the signal the release check reads.
+When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_main` runs and `launch` does not. The check confirms the bundled page through `server.app_root()`, binds a free port without opening the library or telemetry, writes `http://127.0.0.1:<port>` and a shutdown token to the marker, and serves until `POST /api/shutdown` presents that token in `X-Serato-Library-Shutdown`. A relative path, a symlink, a directory, or a missing parent directory stops the process. The windowed build has no console, so the marker file is the signal the release check reads.
 
 `static_assets.py` lists local `src` and `href` files in `static/index.html`. Remote URLs, anchors, and data URLs are skipped. `serato-library.spec` exits before it analyzes the program when one of those files is missing. The release zip check compares the same files, byte for byte, with the source tree.
 
@@ -211,7 +211,7 @@ The rail ends with Settings. The first launch opens a dialog whose heading is "S
 
 ## Sharing and logs
 
-`telemetry.py` is the gate. `capture` returns false, and does not queue the event, unless the saved choice is the boolean `True` and `POSTHOG_KEY` is non-empty. `capture_exception` returns without sending unless the choice is `True` and `SENTRY_DSN` is non-empty. A missing package is the same as a missing key: that service stays off. Clients start in `activate`, which `serve` calls after the port is bound, and which `set_consent(True)` calls when the person opts in. `shutdown` runs when the server or the desktop window stops. The smoke path returns before `serve`, so it does not start a client.
+`telemetry.py` is the gate. `capture` returns false, and does not queue the event, unless the saved choice is the boolean `True` and `POSTHOG_KEY` is non-empty. `capture_exception` returns without sending unless the choice is `True` and `SENTRY_DSN` is non-empty. A missing package is the same as a missing key: that service stays off. Clients start in `activate`, which `serve` calls after the port is bound, and which `set_consent(True)` calls when the person opts in. `shutdown` runs when the server or the desktop app stops. The smoke path calls `serve` with `require_library=False`, so it does not start a client.
 
 Keys are read from the environment first, then from `_build_config.py`. The committed file sets `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` to empty strings. `scripts/write_build_config.py` overwrites that file for a release build. `POSTHOG_HOST` falls back to `https://us.i.posthog.com`. The script prints `yes` or `no`. It does not print the value.
 
@@ -229,6 +229,8 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 
 | Method | Path | Query or body | Result |
 |--------|------|---------------|--------|
+| GET | `/api/health` | none | `{"ok": true}`. Does not open the library |
+| POST | `/api/shutdown` | header `X-Serato-Library-Shutdown` | Stops the desktop server when the token matches. 404 when no token is set. 403 when it does not match |
 | GET | `/api/status` | none | Lock status |
 | GET | `/api/library` | `space` | Tracks, crates, rules, counts |
 | GET | `/api/track` | `id`, `space` | One track, or 404 |

@@ -11,7 +11,7 @@ The HTTP banner in `server.py` is `SeratoLibrary/1.0`. A release tag does not ch
 | CI | Push to `main`, and every pull request | Tests, then audits the requirements files |
 | CodeQL | Push to `main`, and every pull request | Analyzes the Python source. There is no autobuild |
 | Dependency review | Pull requests only | Reviews dependency changes. It does not comment on the pull request |
-| Release | Tag `v*.*.*`, or a manual run | Builds the desktop zips. A tag also publishes a GitHub Release |
+| Release | Tag `v*.*.*`, or a manual run | Builds the macOS disk images, the Windows installer, and the portable zip. A tag also publishes a GitHub Release |
 | Pages | Push to `main` when `docs/` or `.github/workflows/pages.yml` changes, a pull request that changes those paths, or a manual run | Builds the user guide with MkDocs. A push to `main` also publishes it. A pull request builds the site and does not publish it |
 
 A push to `main` runs CI and CodeQL once. When that push also changes `docs/` or the Pages workflow, Pages runs too. A pull request runs CI, CodeQL, and dependency review. A pull request that changes the guide also builds the site. The two events do not both fire for the same commit on a feature branch, because CI, CodeQL, and Pages listen to `push` only on `main`.
@@ -29,6 +29,8 @@ The test job is a matrix:
 - `tests (windows-latest, Python 3.12)`
 
 There is no macOS test job. The suite mocks platform paths, and a macOS runner costs ten times a Linux minute. Windows stays in the matrix because the app ships a Windows build.
+
+The Windows test job also runs `python scripts/release_bundle.py check-tag v0.0.0` with `shell: bash` after Python is installed. That exercises the release tag check on `windows-latest` for every pull request. A release tag is still required before the release job packs anything. The literal `v0.0.0` is not a published release.
 
 The test job installs `requirements.txt`, then runs the suite. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
 
@@ -57,38 +59,43 @@ The job name is `review dependency changes`. It needs only `contents: read`. A p
 
 ### Release
 
-`macos-latest` builds `Serato-Library-macos.zip`. That runner is Apple Silicon, so the app is arm64. `windows-latest` builds `Serato-Library-windows.zip` for 64-bit Windows. The two builds use Python 3.12 and `requirements-build.txt` (`pywebview==6.2.1`, `sentry-sdk==2.73.0`, `posthog==7.75.11`, and `pyinstaller==6.22.3`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only.
+GitHub Releases is the only download. The workflow does not publish a Homebrew formula, a winget package, or a website.
 
-After the build tools are installed, and before PyInstaller runs, `python scripts/write_build_config.py` writes `_build_config.py` from the `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` Actions secrets. The step prints whether each value was set. It does not print the value. A missing or empty secret writes an empty string, and that service stays off in the zip. Forks do not receive these secrets. The values are client keys and are inside the unsigned zip. The copy of `_build_config.py` in git stays empty. An environment variable of the same name overrides the baked file when someone runs from source. [PRIVACY.md](../PRIVACY.md) describes what a build with keys can send, and that sending stays off until the person opts in.
+`macos-latest` builds `Serato-Library-macos-arm64.dmg`. That runner is Apple silicon. `macos-15-intel` builds `Serato-Library-macos-x64.dmg`. PyInstaller does not produce a reliable universal binary from one Python install, so the two architectures are separate disk images. `macos-15-intel` is the GitHub-hosted Intel image and is scheduled to remain available through August 2027. `windows-latest` builds `Serato-Library-windows-setup.exe` with Inno Setup 6.7.3 and `Serato-Library-windows.zip`, the portable folder. The builds use Python 3.12, `requirements-build.txt` (`pillow==13.0.0`, `pystray==0.19.5`, `sentry-sdk==2.73.0`, `posthog==7.75.11`, and `pyinstaller==6.22.3`), and, on macOS, `requirements-macos.txt` (`pyobjc-framework-Cocoa==12.2.2` and `pyobjc-framework-Quartz==12.2.2`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only.
 
-The tag filter `v*.*.*` is a glob. `scripts/release_bundle.py check-tag` accepts only `vMAJOR.MINOR.PATCH`. `v1.2`, `1.2.3`, and `v1.2.3-rc.1` are refused.
+After the build tools are installed, and before PyInstaller runs, `python scripts/write_build_config.py` writes `_build_config.py` from the `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` Actions secrets. The step prints whether each value was set. It does not print the value. A missing or empty secret writes an empty string, and that service stays off in the build. Forks do not receive these secrets. The values are client keys and are inside the unsigned build. The copy of `_build_config.py` in git stays empty. An environment variable of the same name overrides the baked file when someone runs from source. [PRIVACY.md](../PRIVACY.md) describes what a build with keys can send, and that sending stays off until the person opts in.
 
-Windows runners default to PowerShell, which does not expand `${GITHUB_REF_NAME}`. Every `run` step that expands `${GITHUB_REF_NAME}` or `${GITHUB_REPOSITORY}`, and the publish script that redirects and globs, sets `shell: bash`. `pack` and `check-zips` are plain `python` commands. The archive is written with Python's `zipfile`, not a shell zip tool, so those steps stay on the runner's default shell.
+The tag filter `v*.*.*` is a glob. `scripts/release_bundle.py check-tag` accepts only `vMAJOR.MINOR.PATCH`. `v1.2`, `1.2.3`, `v1.2.3-rc.1`, and `refs/tags/v1.2.3` are refused. The release job passes the tag in `RELEASE_TAG`, set by the Actions `env:` map from `github.ref_name`, and the step sets `shell: bash`. It does not expand `GITHUB_REF_NAME` in the shell. Run 40214779889 failed on Windows because PowerShell expanded that shell form to an empty string. The Windows CI job runs `check-tag v0.0.0` under bash so that invocation is not limited to a tag push.
 
-On a tag push, each build job checks the tag, installs the build file, bakes `_build_config.py`, runs `python -m PyInstaller serato-library.spec`, then `python scripts/release_bundle.py pack`. `pack` checks the tree, zips it, unpacks that zip outside the repository, and launches the frozen executable with `SERATO_LIBRARY_SMOKE`. The smoke path writes `ok\n` and returns before a window, a port, the library, or telemetry. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the zip the command was writing.
+Signing is a dormant hook in `scripts/release_sign.py`. Apple Developer ID notarization reads `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_NOTARY_KEY_BASE64`, `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER_ID`. Windows Authenticode reads `WINDOWS_CERTIFICATE_PFX_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD`. Those secrets are not configured. When every secret for the runner's operating system is empty, the step prints `Signing skipped` and exits 0. When some are set and some are not, the step fails. The script does not print secret values. The Inno Setup script does not call SignTool.
 
-The build job then attests the zip with `actions/attest` and uploads it. That job's permissions are `contents: read`, `id-token: write`, and `attestations: write`.
+On a tag push, each build job checks the tag, installs the build file, bakes `_build_config.py`, runs `python -m PyInstaller serato-library.spec`, checks the frozen architecture, runs the signing hook, then packs. A macOS job runs `pack-dmg`, which writes a UDZO disk image containing `Serato Library.app` and an Applications link, mounts that image, copies the app outside the repository, and launches it with `SERATO_LIBRARY_SMOKE`. A Windows job runs `pack` for the portable zip, installs Inno Setup 6.7.3 after checking its SHA-256, compiles the installer, runs the signing hook on the installer, then installs it into a temporary directory and launches that copy. The smoke path binds `127.0.0.1` on a free port, writes the URL and a shutdown token to the marker, and does not open the library, a browser, a menu icon, or telemetry. The harness GET `/api/health` and POST `/api/shutdown` with the token. The launch environment keeps `PATH` and the operating-system variables the process needs. `HOME`, `USERPROFILE`, `LOCALAPPDATA`, and `APPDATA` are empty. `PYTHONPATH` is not passed through. A failure deletes the file the command was writing.
 
-`publish GitHub release` runs only when the ref is `refs/tags/v…`. It downloads both zips, runs `check-zips`, and runs `gh attestation verify` for each zip against this repository. It does not launch either app. A Linux runner cannot start the macOS bundle, and it does not start the Windows executable either. The job then refuses to continue if that release already exists. Otherwise it creates the release with `gh release create --generate-notes --verify-tag` and appends `scripts/release-notes-footer.md`. Its permissions are `contents: write` and `attestations: read`.
+The build job then attests each file with `actions/attest` and uploads it. That job's permissions are `contents: read`, `id-token: write`, and `attestations: write`.
 
-A manual run of the Release workflow (`workflow_dispatch`) builds and attests the zips and uploads them as artifacts. It does not publish a release.
+`publish GitHub release` runs only when the ref is `refs/tags/v…`. It downloads the four files, runs `check-binaries`, and runs `gh attestation verify` for each file against this repository. It does not launch any app. A Linux runner cannot mount the disk image or start the Windows executable. `check-binaries` checks the zip contents, the UDIF trailer, and the installer PE header. The job then writes `SHA256SUMS`, checks it, attests it, and verifies that attestation. It refuses to continue if that release already exists. Otherwise it creates the release with `gh release create --generate-notes --verify-tag` and appends `scripts/release-notes-footer.md`. The attached files are the two disk images, the installer, the portable zip, and `SHA256SUMS`. Its permissions are `contents: write`, `id-token: write`, and `attestations: write`.
 
-The size checks refuse a bundle under 8 MiB or over 250 MiB, and a zip under 4 MiB or over 180 MiB. The floor exists to catch a bundle that never collected the Python runtime. It is not a measurement of a healthy build. Page files are compared by content, which is the check that catches a missing stylesheet or script. After a real build, raise the floor so a healthy bundle is several times that number.
+A manual run of the Release workflow (`workflow_dispatch`) builds and attests the files and uploads them as artifacts. It does not publish a release.
 
-`pack` also refuses a zip that would overwrite an existing file, a symlink that leaves the bundle, an absolute link, a `..` entry, a zip-slip path, and an empty, newline, or NUL name. The macOS executable must be marked executable. The two expected names are `Serato-Library-macos.zip` and `Serato-Library-windows.zip`.
+The size checks refuse a bundle under 8 MiB or over 250 MiB, and a zip, disk image, or installer under 4 MiB or over 180 MiB. The floor exists to catch a bundle that never collected the Python runtime. It is not a measurement of a healthy build. Page files are compared by content, which is the check that catches a missing stylesheet or script. After a real build, raise the floor so a healthy bundle is several times that number.
+
+`pack` also refuses a zip that would overwrite an existing file, a symlink that leaves the bundle, an absolute link, a `..` entry, a zip-slip path, and an empty, newline, or NUL name. The macOS executable must be marked executable. The release names are `Serato-Library-macos-arm64.dmg`, `Serato-Library-macos-x64.dmg`, `Serato-Library-windows-setup.exe`, `Serato-Library-windows.zip`, and `SHA256SUMS`.
 
 ## What a download is
 
-The builds are unsigned. macOS Gatekeeper and Windows SmartScreen warn before the app opens. On macOS, right-click the app and choose Open. On Windows, open `Serato Library.exe` from the unzipped folder.
+The builds are unsigned. macOS Gatekeeper and Windows SmartScreen warn before the app opens. The steps, including Removable Volumes on a Mac, are in [First install](first-install.md).
 
 Confirm a download before you open it:
 
 ```bash
-gh attestation verify Serato-Library-macos.zip --repo mookiejones/serato-library-manager
+gh attestation verify Serato-Library-macos-arm64.dmg --repo mookiejones/serato-library-manager
+gh attestation verify Serato-Library-macos-x64.dmg --repo mookiejones/serato-library-manager
+gh attestation verify Serato-Library-windows-setup.exe --repo mookiejones/serato-library-manager
 gh attestation verify Serato-Library-windows.zip --repo mookiejones/serato-library-manager
+gh attestation verify SHA256SUMS --repo mookiejones/serato-library-manager
 ```
 
-Quit Serato DJ Pro before you edit the library. The window serves `127.0.0.1` only. The release does not contain a library.
+Quit Serato DJ Pro before you edit the library. The page is served on `127.0.0.1` only. The release does not contain a library.
 
 ## Cut a release
 
@@ -101,11 +108,11 @@ git push origin v1.0.0
 
 Use the next `vMAJOR.MINOR.PATCH` tag. Push the tag only when `main` is the commit you want to ship.
 
-To build without publishing, open Actions, choose Release, and run the workflow. Download the artifacts from that run. Those zips are the same shape as a release, and they carry attestations, but they are not attached to a GitHub Release.
+To build without publishing, open Actions, choose Release, and run the workflow. Download the artifacts from that run. Those files are the same shape as a release, and they carry attestations, but they are not attached to a GitHub Release. `SHA256SUMS` is written by the publish job, so a manual run has the disk images, the installer, and the zip, and does not have the checksum file.
 
 ## User guide
 
-The guide source is `docs/index.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
+The guide source is `docs/index.md`, `docs/first-install.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
 
 The published URL is `https://mookiejones.github.io/serato-library-manager/`.
 
