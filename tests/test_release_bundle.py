@@ -466,9 +466,37 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", text)
         self.assertIn("requirements-build.txt", text)
         self.assertIn("run: python scripts/write_build_config.py", text)
-        self.assertIn("secrets.SENTRY_DSN", text)
-        self.assertIn("secrets.POSTHOG_KEY", text)
-        self.assertIn("secrets.POSTHOG_HOST", text)
+        bake = text.split("- name: Bake telemetry keys", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("github.event_name == 'push'", bake)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", bake)
+        self.assertIn("secrets.SENTRY_DSN", bake)
+        self.assertIn("secrets.POSTHOG_KEY", bake)
+        self.assertIn("secrets.POSTHOG_HOST", bake)
+        self.assertNotIn("workflow_dispatch", bake)
+        mac_sign = text.split("- name: Sign the macOS app when secrets are present", 1)[1].split(
+            "\n      - ", 1
+        )[0]
+        self.assertIn("runner.os == 'macOS'", mac_sign)
+        self.assertIn("github.event_name != 'pull_request'", mac_sign)
+        self.assertIn("APPLE_CERTIFICATE_P12_BASE64", mac_sign)
+        self.assertNotIn("WINDOWS_", mac_sign)
+        win_sign = text.split("- name: Sign the Windows app when secrets are present", 1)[1].split(
+            "\n      - ", 1
+        )[0]
+        self.assertIn("runner.os == 'Windows'", win_sign)
+        self.assertIn("github.event_name != 'pull_request'", win_sign)
+        self.assertIn("WINDOWS_CERTIFICATE_PFX_BASE64", win_sign)
+        self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", win_sign)
+        self.assertNotIn("APPLE_", win_sign)
+        skipped = text.split("- name: Skip signing on a pull request", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", skipped)
+        self.assertNotIn("secrets.", skipped)
+        header = text.split("jobs:", 1)[0]
+        self.assertIn("pull_request:", header)
+        self.assertIn("packaging/**", header)
+        self.assertIn("serato-library.spec", header)
+        self.assertIn("scripts/release_*", header)
+        self.assertIn(".github/workflows/release.yml", header)
         self.assertIn("scripts/release_bundle.py pack", text)
         self.assertIn("scripts/release_bundle.py pack-dmg", text)
         self.assertIn("scripts/release_bundle.py check-binaries", text)
@@ -482,11 +510,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("contents: write", text)
         self.assertIn("RELEASE_TAG:", text)
         self.assertIn("release-flags", text)
-        self.assertNotIn("pull_request:", text)
         publish = text.split("name: publish GitHub release", 1)[1].split("steps:", 1)[0]
         self.assertIn("github.event_name == 'push'", publish)
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", publish)
         self.assertIn("&&", publish)
+        self.assertNotIn("pull_request", publish)
         installer = text.split("Sign the installer when secrets are present", 1)[1].split(
             "\n      - ", 1
         )[0]
