@@ -14,7 +14,7 @@ The Mac download is for Apple silicon. An Intel Mac is not in that zip.
 The builds are unsigned. macOS Gatekeeper and Windows SmartScreen warn before the app opens. That warning is expected.
 
 !!! note "What version 0.1.1 includes"
-    The GitHub Release named v0.1.1 was built before Duplicate Merge, Related Tracks, and Files. This guide describes the app in the repository now. Those three parts ship in the next release after 0.1.1. Crates, track details, History, Missing, the Duplicates list, Stems, Prepare, playlists, and Settings are in v0.1.1.
+    The GitHub Release named v0.1.1 was built before Duplicate Merge, Related Tracks, Files, and the Rekordbox export. This guide describes the app in the repository now. Those parts are not in the v0.1.1 zip. Crates, track details, History, Missing, the Duplicates list, Stems, Prepare, playlists, and Settings are in v0.1.1.
 
 ## macOS
 

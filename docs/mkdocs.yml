@@ -55,6 +55,8 @@ nav:
   - Start:
       - Install: guide/install.md
       - Safety and backups: guide/safety.md
+      - Is my library safe? (PREVIEW): is-my-library-safe.md
+      - Panic: panic.md
   - Your library:
       - Crates: guide/crates.md
       - Track details: guide/tags.md

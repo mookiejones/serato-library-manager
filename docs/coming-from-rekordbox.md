@@ -1,7 +1,5 @@
 # Moving between Serato and Rekordbox
 
-> **Status: preview.** Rekordbox XML export ships with [PR #39](https://github.com/mookiejones/serato-library-manager/pull/39). Until it merges, nothing here works yet.
-
 ## How it works
 
 1. **Rekordbox** reads the Serato library and the cue data in the audio files. This export leaves the library and the audio files unchanged.

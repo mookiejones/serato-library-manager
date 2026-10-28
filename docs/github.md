@@ -105,7 +105,7 @@ To build without publishing, open Actions, choose Release, and run the workflow.
 
 ## User guide
 
-The guide source is `docs/index.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
+The guide source is `docs/index.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, `docs/panic.md`, `docs/is-my-library-safe.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
 
 The published URL is `https://mookiejones.github.io/serato-library-manager/`.
 
