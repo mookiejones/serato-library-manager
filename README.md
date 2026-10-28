@@ -2,7 +2,6 @@
 
 [![CI](https://github.com/mookiejones/serato-library-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/mookiejones/serato-library-manager/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/mookiejones/serato-library-manager)](https://github.com/mookiejones/serato-library-manager/releases/latest)
-[![License](https://img.shields.io/github/license/mookiejones/serato-library-manager)](https://github.com/mookiejones/serato-library-manager)
 [![Python 3.12 and 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.14-3776AB)](https://github.com/mookiejones/serato-library-manager/blob/main/.github/workflows/ci.yml)
 
 A local window for the Serato DJ Pro library on macOS and Windows. Source on `main` is app version **1.1.0**. The page stays on this computer.
@@ -59,7 +58,7 @@ These are on `main` (1.1.0).
 
 <figure>
   <img alt="Snapshots view: reviewing a restore before anything is written" src="docs/images/screenshot-backups.png" width="100%">
-  <figcaption>Example data. Snapshots, reviewing a restore before anything is written.</figcaption>
+  <figcaption>Example data. Snapshots, reviewing a restore before anything is written. The Serato 4.1.0 (build 4.1.0.1) line is the test fixture, not a detected install.</figcaption>
 </figure>
 
 <figure>
