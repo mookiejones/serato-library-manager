@@ -94,7 +94,7 @@ A Files action stopped halfway, and the journal does not match the database. The
 
 1. Quit Serato DJ Pro.
 2. Quit Serato Library.
-3. Follow [Restore a backup](safety.md#restore-a-backup). Pick the newest `serato-web-` folder from before the interrupted change. A name ending in `-02` through `-99` is another copy from that same second, and a later number is a later copy.
+3. Follow [Restore a backup](safety.md#restore-a-backup). Pick the newest `serato-web-` folder from before the interrupted change that contains `COMPLETE`. A name ending in `-02` through `-99` is another copy from that same second, and a later number is a later copy. Skip a name that ends with `-failed` or `-failed-` and digits (any capitalization), a hidden name that ends with `.partial`, and a folder that contains `INCOMPLETE`. A folder with no `COMPLETE` file is legacy, unverified.
 4. Open Serato Library again.
 
 Do not delete `file-ops-journal.json` by hand before the restore.
