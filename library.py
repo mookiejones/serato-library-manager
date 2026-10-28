@@ -1166,9 +1166,15 @@ def _fsync_file(path: Path) -> None:
 
     Raises:
         OSError: If the file cannot be opened or flushed.
+
+    The handle is opened for writing. Windows rejects ``fsync`` on a
+    read-only handle.
     """
-    with path.open("rb") as handle:
-        os.fsync(handle.fileno())
+    fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _fsync_directory(path: Path) -> None:
