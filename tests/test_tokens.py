@@ -364,6 +364,7 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     (".text-button", ("--color-card",), 15, 400),
     (".actions button", ("--color-card",), 15, 400),
     (".rekordbox-option", ("--color-card",), 15, 400),
+    (".rekordbox-help", ("--color-card",), 11, 400),
     (".notice", ("--color-card",), 15, 400),
     (".columns button", ("--color-card",), 15, 400),
     ('.columns button[data-active="true"]', ("--color-card",), 15, 400),

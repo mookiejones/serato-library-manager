@@ -931,14 +931,14 @@ class ExportTests(unittest.TestCase):
         self.assertNotIn("checked", checkbox)
         self.assertEqual(checkbox.get("aria-describedby"), "rekordbox-hot-loops-help")
         self.assertEqual(page.label, "Hot loops")
-        self.assertEqual(page.help, "uses a free hot-cue pad")
+        self.assertEqual(page.help, "Uses a free hot-cue pad")
         self.assertLess(html.index('id="rekordbox-memory"'), html.index('id="rekordbox-hot-loops"'))
         self.assertLess(html.index('id="rekordbox-hot-loops"'), html.index('id="rekordbox-key"'))
         self.assertIn('getElementById("rekordbox-hot-loops")', script)
         self.assertIn("hot_loops=", script)
         self.assertIn("Hot loops", guide)
-        self.assertIn("uses a free hot-cue pad", guide)
-        self.assertIn("uses a free hot-cue pad", readme)
+        self.assertIn("Uses a free hot-cue pad", guide)
+        self.assertIn("Uses a free hot-cue pad", readme)
 
 
 class _HotLoopsMarkup(HTMLParser):

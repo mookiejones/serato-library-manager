@@ -440,7 +440,7 @@ class ApiTests(unittest.TestCase):
         self.assertIsInstance(page, str)
         assert isinstance(page, str)
         self.assertIn("Hot loops", page)
-        self.assertIn("uses a free hot-cue pad", page)
+        self.assertIn("Uses a free hot-cue pad", page)
         self.assertRegex(page, r'id="rekordbox-hot-loops"[^>]*type="checkbox"')
         self.assertNotRegex(page, r'id="rekordbox-hot-loops"[^>]*\bchecked\b')
 
