@@ -230,6 +230,154 @@ class DirectoryTests(unittest.TestCase):
         self.assertEqual(logs, Path.home() / ".local" / "state" / "serato-library" / "logs")
 
 
+class WindowSettingsTests(unittest.TestCase):
+    """Check the desktop window frame stored beside the sharing choice.
+
+    Each test uses a fresh config directory. Nothing is sent over the network.
+    """
+
+    def setUp(self) -> None:
+        """Create an empty config directory for one test.
+
+        Returns:
+            None.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = Path(self._tmp.name) / "config"
+        self.config.mkdir()
+        self._env = mock.patch.dict(os.environ, {app_config.CONFIG_ENV: str(self.config)})
+        self._env.start()
+
+    def tearDown(self) -> None:
+        """Remove the temporary config directory.
+
+        Returns:
+            None.
+        """
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_origin_zero_is_kept_and_consent_is_preserved(self) -> None:
+        """Keep x=0 and a saved decline across both writers.
+
+        The window is saved first, then the choice, then the window again.
+        Neither write drops the other. ``0`` stays ``0``.
+
+        Returns:
+            None. The test fails if a corner at the origin becomes missing.
+        """
+        frame = app_config.WindowGeometry(0, 0, 640, 480)
+        app_config.save_window_geometry(frame)
+        saved = app_config.set_telemetry_consent(False)
+        self.assertEqual(saved.window, frame)
+        self.assertIs(saved.telemetry_consent, False)
+        moved = app_config.save_window_geometry(app_config.WindowGeometry(8, 0, 800, 600))
+        self.assertIs(moved.telemetry_consent, False)
+        self.assertEqual(moved.install_id, saved.install_id)
+        assert moved.window is not None
+        self.assertEqual(moved.window.x, 8)
+        self.assertEqual(moved.window.y, 0)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(payload), {"install_id", "telemetry_consent", "window"})
+        self.assertEqual(set(payload["window"]), set(app_config.WINDOW_FIELDS))
+
+    def test_bool_coordinate_is_rejected(self) -> None:
+        """Ignore a boolean coordinate instead of storing it as 1.
+
+        The warning names ``window.x``. The sharing choice is still loaded.
+        The constructor also refuses a bool.
+
+        Returns:
+            None. The test fails if ``True`` is stored as an origin.
+        """
+        path = self.config / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "install_id": "11111111-1111-4111-8111-111111111111",
+                    "telemetry_consent": False,
+                    "window": {"x": True, "y": 0, "width": 800, "height": 600},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertIsNone(loaded.window)
+        self.assertIs(loaded.telemetry_consent, False)
+        self.assertTrue(any("window.x" in line for line in caught.output))
+        with self.assertRaises(ValueError):
+            app_config.WindowGeometry(True, 0, 800, 600)  # type: ignore[arg-type]
+
+    def test_partial_window_and_unknown_nested_key_are_dropped(self) -> None:
+        """Drop a frame that is missing a field, and warn on an extra key.
+
+        A complete frame with an unknown nested key keeps the four known
+        fields. The next save does not write the extra key.
+
+        Returns:
+            None. The test fails if a three-field frame is opened later.
+        """
+        path = self.config / "settings.json"
+        path.write_text(
+            json.dumps({"window": {"x": 1, "y": 2, "width": 800}}),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertIsNone(loaded.window)
+        self.assertTrue(any("window.height" in line for line in caught.output))
+        path.write_text(
+            json.dumps(
+                {
+                    "window": {
+                        "x": 4,
+                        "y": 5,
+                        "width": 900,
+                        "height": 700,
+                        "monitor": "left",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertEqual(loaded.window, app_config.WindowGeometry(4, 5, 900, 700))
+        self.assertTrue(any("window.monitor" in line for line in caught.output))
+        app_config.save_window_geometry(loaded.window)
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("monitor", saved["window"])
+        self.assertNotIn("install_id", saved)
+
+    def test_out_of_range_frame_is_ignored(self) -> None:
+        """Ignore a width below the minimum the window can open.
+
+        Returns:
+            None. The test fails if a 200px frame is returned.
+        """
+        path = self.config / "settings.json"
+        path.write_text(
+            json.dumps({"window": {"x": 0, "y": 0, "width": 200, "height": 600}}),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertIsNone(loaded.window)
+        self.assertTrue(any("window.width" in line for line in caught.output))
+
+    def test_settings_keys_match_a_full_file(self) -> None:
+        """Declare every key a full settings file contains.
+
+        Returns:
+            None. The test fails if a stored key is missing from the schema.
+        """
+        app_config.set_telemetry_consent(False)
+        app_config.save_window_geometry(app_config.WindowGeometry(1, 2, 640, 480))
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(payload), set(app_config.SETTINGS_KEYS))
+
+
 class VersionTests(unittest.TestCase):
     """The app version has one definition.
 

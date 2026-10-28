@@ -22,12 +22,12 @@ The builds are unsigned. macOS Gatekeeper and Windows SmartScreen warn before th
 
 Quit Serato DJ Pro if it is open and you plan to edit the library. Then open the app the way [First install](../first-install.md) describes.
 
-The browser opens a page titled **Serato library**. The address starts with `127.0.0.1`. The left side says **Library**. The status line starts as **Checking Serato**, then changes to one of these:
+A window titled **Serato Library** opens. The page is served on `127.0.0.1`. The left side says **Library**. The status line starts as **Checking Serato**, then changes to one of these:
 
 - **Serato is quit. Edits save to the library.**
 - **Serato DJ Pro is open. Edits stay off until it quits.** The process name in the sentence matches the program that has the library open.
 
-Closing the browser does not stop the app. Quit from the **Serato Library** menu-bar item on a Mac, or from the **Serato Library** icon in the Windows notification area. Choose **Quit**. A second double-click opens the same page. The page is served on `127.0.0.1` only. Nothing in the release is your library. The app reads the library Serato already keeps on this computer.
+Close the window to quit. A second double-click focuses the same window. The page is served on `127.0.0.1` only. Nothing in the release is your library. The app reads the library Serato already keeps on this computer.
 
 The first launch asks **Share anonymous usage stats and crash reports?** **Don't share** is selected. Read [Settings and privacy](settings.md) before you choose Share. Closing the dialog, or pressing Esc, saves **Don't share**.
 
@@ -61,6 +61,6 @@ If `master.sqlite` is missing, the app closes. The message is **Serato library n
 
 ## If the window does not open
 
-Another copy may already be running. Quit it from the menu bar or the notification area and try again. If you started `server.py` from a terminal, the message is **http://127.0.0.1:8765 is already in use. Quit the other Serato library server (server.py or the desktop app) and try again.**
+Another copy may already be running. Its window should come forward. If it does not, close the Serato Library window and try again. If you started `server.py` from a terminal, the message is **http://127.0.0.1:8765 is already in use. Quit the other Serato library server (server.py or the desktop app) and try again.**
 
 Gatekeeper, SmartScreen, and Removable Volumes steps are in [First install](../first-install.md) and [Troubleshooting](troubleshooting.md).

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,39 +25,103 @@ CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "telemetry_consent")
+SETTINGS_KEYS = ("install_id", "telemetry_consent", "window")
+WINDOW_FIELDS = ("x", "y", "width", "height")
+# The desktop window refuses a smaller frame. Origins may be negative
+# when a monitor sits left of or above the primary screen.
+WINDOW_MIN_WIDTH = 640
+WINDOW_MIN_HEIGHT = 480
+WINDOW_MAX_EDGE = 8192
+WINDOW_MIN_ORIGIN = -8192
+WINDOW_MAX_ORIGIN = 32768
+_WINDOW_LIMITS = (
+    ("x", WINDOW_MIN_ORIGIN, WINDOW_MAX_ORIGIN),
+    ("y", WINDOW_MIN_ORIGIN, WINDOW_MAX_ORIGIN),
+    ("width", WINDOW_MIN_WIDTH, WINDOW_MAX_EDGE),
+    ("height", WINDOW_MIN_HEIGHT, WINDOW_MAX_EDGE),
+)
 _UUID = uuid.UUID
+_settings_lock = threading.RLock()
 logger = logging.getLogger("serato.library.config")
 
 
 @dataclass(frozen=True)
+class WindowGeometry:
+    """Pixel size and position of the desktop window.
+
+    Attributes:
+        x: Left edge, in pixels. ``0`` is the primary screen's left edge.
+            A negative value is a monitor to the left.
+        y: Top edge, in pixels. ``0`` is the primary screen's top edge.
+        width: Window width, in pixels.
+        height: Window height, in pixels.
+    """
+
+    x: int
+    y: int
+    width: int
+    height: int
+
+    def __post_init__(self) -> None:
+        """Reject a bool or a coordinate outside the stored range.
+
+        Raises:
+            ValueError: If a field is not an ``int``, or it falls outside
+                the range the desktop window can open.
+        """
+        for name, low, high in _WINDOW_LIMITS:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"window.{name} must be an integer.")
+            if value < low or value > high:
+                raise ValueError(f"window.{name} is outside {low}..{high}.")
+
+
+@dataclass(frozen=True)
 class Settings:
-    """The sharing choice and the anonymous install id.
+    """The sharing choice, the anonymous install id, and the window frame.
 
     Attributes:
         install_id: Random UUID for this install, or None until one is saved.
         telemetry_consent: True, False, or None when the person has not chosen.
+        window: Last saved frame, or None before the window has been placed.
     """
 
     install_id: str | None
     telemetry_consent: bool | None
+    window: WindowGeometry | None = None
 
     def as_json(self) -> dict[str, object]:
-        """Return the full settings object for the file.
+        """Return the settings object for the file.
 
         Returns:
-            Both stored keys. Consent is a boolean and the id is present.
+            The completed telemetry pair when both fields are set, and the
+            window frame when one has been saved. A window may be stored
+            before the sharing choice.
 
         Raises:
-            ValueError: If either field is still unset. A partial file would
+            ValueError: If the install id and the choice disagree, or if
+                there is nothing to store. A partial telemetry pair would
                 stick on the next load and hide the prompt.
         """
-        if self.install_id is None or not isinstance(self.telemetry_consent, bool):
+        has_id = self.install_id is not None
+        has_consent = isinstance(self.telemetry_consent, bool)
+        if has_id != has_consent:
             raise ValueError("Refusing to write a partial settings file.")
-        return {
-            "install_id": self.install_id,
-            "telemetry_consent": self.telemetry_consent,
-        }
+        if not has_id and self.window is None:
+            raise ValueError("Refusing to write an empty settings file.")
+        body: dict[str, object] = {}
+        if has_id:
+            body["install_id"] = self.install_id
+            body["telemetry_consent"] = self.telemetry_consent
+        if self.window is not None:
+            body["window"] = {
+                "x": self.window.x,
+                "y": self.window.y,
+                "width": self.window.width,
+                "height": self.window.height,
+            }
+        return body
 
 
 def _env_path(name: str) -> Path | None:
@@ -165,6 +230,65 @@ def _valid_install_id(value: object) -> str | None:
     return str(parsed)
 
 
+def _window_int(value: object, dotted: str, low: int, high: int) -> int | None:
+    """Return a screen coordinate, or None when the value cannot be stored.
+
+    Args:
+        value: Candidate from the settings file.
+        dotted: Full path, such as ``window.x``, used in the warning.
+        low: Smallest accepted integer, inclusive.
+        high: Largest accepted integer, inclusive.
+
+    Returns:
+        The integer when ``value`` is an ``int`` inside the range. None
+        for a bool, a float, or any other type. ``0`` is a real origin
+        and is kept.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        logger.warning("Config key '%s' has wrong type — ignored", dotted)
+        return None
+    if value < low or value > high:
+        logger.warning("Config key '%s' is outside %s..%s — ignored", dotted, low, high)
+        return None
+    return value
+
+
+def _parse_window(value: object) -> WindowGeometry | None:
+    """Validate the ``window`` object.
+
+    Args:
+        value: The ``window`` member of the settings file.
+
+    Returns:
+        The frame when ``x``, ``y``, ``width``, and ``height`` are all
+        integers in range. None when the object is not a mapping or any
+        of those fields is missing or unusable. A partial frame is not
+        returned, because the next launch would open at ``0, 0``.
+    """
+    if not isinstance(value, dict):
+        logger.warning("Config key 'window' must be a mapping — ignored")
+        return None
+    for key in value:
+        if key not in WINDOW_FIELDS:
+            logger.warning("Unknown config key '%s' — ignored", f"window.{key}")
+    parsed: dict[str, int] = {}
+    complete = True
+    for name, low, high in _WINDOW_LIMITS:
+        dotted = f"window.{name}"
+        if name not in value:
+            logger.warning("Config key '%s' is missing — ignored", dotted)
+            complete = False
+            continue
+        number = _window_int(value[name], dotted, low, high)
+        if number is None:
+            complete = False
+            continue
+        parsed[name] = number
+    if not complete:
+        return None
+    return WindowGeometry(parsed["x"], parsed["y"], parsed["width"], parsed["height"])
+
+
 def _parse(payload: object) -> Settings:
     """Validate a decoded settings object.
 
@@ -174,7 +298,8 @@ def _parse(payload: object) -> Settings:
     Returns:
         The known fields. Unknown keys and wrong types are dropped. A
         missing consent stays None, which means sharing is off and the
-        prompt should be shown.
+        prompt should be shown. A missing window stays None, which means
+        the next launch is centered at the default size.
     """
     if not isinstance(payload, dict):
         logger.warning("Config file must be a mapping — ignored")
@@ -196,7 +321,8 @@ def _parse(payload: object) -> Settings:
         else:
             logger.warning("Config key 'telemetry_consent' has wrong type — ignored")
             consent = None
-    return Settings(install_id=install_id, telemetry_consent=consent)
+    window = _parse_window(payload["window"]) if "window" in payload else None
+    return Settings(install_id=install_id, telemetry_consent=consent, window=window)
 
 
 def load_settings() -> Settings:
@@ -273,17 +399,62 @@ def set_telemetry_consent(value: bool) -> Settings:
         value: True to allow anonymous reports. False to send nothing.
 
     Returns:
-        The settings that were written.
+        The settings that were written. A saved window frame is kept.
 
     Raises:
         ValueError: If ``value`` is not a boolean. Integers are rejected
             because ``bool`` is a subclass of ``int``.
         OSError: If the settings file cannot be written.
+
+    The file is read again under the settings lock immediately before the
+    write, so a window save that landed after the last read is not dropped.
     """
     if not isinstance(value, bool):
         raise ValueError("telemetry_consent must be a boolean.")
-    current = load_settings()
-    install_id = current.install_id or str(uuid.uuid4())
-    updated = Settings(install_id=install_id, telemetry_consent=value)
-    save_settings(updated)
-    return updated
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id or str(uuid.uuid4())
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=value,
+            window=current.window,
+        )
+        save_settings(updated)
+        return updated
+
+
+def save_window_geometry(geometry: WindowGeometry) -> Settings:
+    """Store the desktop window frame and keep a completed sharing choice.
+
+    Args:
+        geometry: Size and position to remember. Every field is checked
+            again here, including the bool exclusion, so a caller cannot
+            persist a frame the loader would drop.
+
+    Returns:
+        The settings that were written.
+
+    Raises:
+        ValueError: If ``geometry`` is not a :class:`WindowGeometry`.
+        OSError: If the settings file cannot be written.
+
+    A sharing choice is included only when both the install id and the
+    boolean are already stored. The read and the write share the settings
+    lock with :func:`set_telemetry_consent`.
+    """
+    if not isinstance(geometry, WindowGeometry):
+        raise ValueError("window must be a WindowGeometry.")
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id
+        consent = current.telemetry_consent
+        if not isinstance(consent, bool) or install_id is None:
+            install_id = None
+            consent = None
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=consent,
+            window=geometry,
+        )
+        save_settings(updated)
+        return updated

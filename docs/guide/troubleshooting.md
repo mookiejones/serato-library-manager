@@ -53,11 +53,10 @@ If you used the portable zip, run the exe from the extracted folder. Do not run 
 
 Another copy may already be running.
 
-1. On a Mac, use the **Serato Library** menu-bar item and choose **Quit**.
-2. On Windows, use the **Serato Library** icon in the notification area and choose **Quit**.
-3. Open the app again.
+1. Find the **Serato Library** window and close it.
+2. Open the app again.
 
-If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy. The desktop app uses a free port and does not show that message. A second double-click opens the page that is already running.
+A second double-click focuses the window that is already open. If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy. The desktop app uses a free port and does not show that message.
 
 ## Serato put my edit back
 

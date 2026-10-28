@@ -231,6 +231,7 @@ class ApiTests(unittest.TestCase):
         """
         status, page = self.request("/")
         self.assertEqual(status, 200)
+        self.assertIn("<title>Serato Library</title>", page)
         self.assertIn("Serato library", page)
         status, payload = self.request("/api/library")
         self.assertEqual(status, 200)
@@ -596,6 +597,55 @@ class ApiTests(unittest.TestCase):
                 httpd.shutdown()
                 thread.join(3)
             httpd.server_close()
+
+    def test_focus_requires_the_token(self) -> None:
+        """Bring the window forward only with the desktop focus token.
+
+        A missing token returns 404. A wrong token returns 403 and does
+        not call the callback. The matching token returns 200 and calls
+        it. The server keeps running.
+
+        Returns:
+            None. The test fails if a wrong token focuses the window.
+        """
+        httpd = server.serve(port=0, require_library=False)
+        focused: list[str] = []
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        base = f"http://{host}:{port}/api/focus"
+        try:
+            missing = urllib.request.Request(base, data=b"{}", method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(missing, timeout=5)
+            self.assertEqual(caught.exception.code, 404)
+            httpd.focus_token = "focus-token"
+            httpd.focus_window = lambda: focused.append("focused")
+            wrong = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.FOCUS_HEADER: "nope"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(wrong, timeout=5)
+            self.assertEqual(caught.exception.code, 403)
+            self.assertEqual(focused, [])
+            right = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.FOCUS_HEADER: "focus-token"},
+                method="POST",
+            )
+            with urllib.request.urlopen(right, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read().decode("utf-8")), {"ok": True})
+            self.assertEqual(focused, ["focused"])
+            self.assertTrue(thread.is_alive())
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(3)
 
     def test_taken_port_names_the_other_server(self) -> None:
         """Name the other server when port 8765 is already bound.

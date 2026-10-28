@@ -39,7 +39,7 @@ python3 -m venv .venv
 .venv/bin/python desktop.py
 ```
 
-`desktop.py` starts the local server, opens the default browser, and shows a menu-bar item on macOS or a tray icon on Windows. It does not embed a web view. On Windows, use `.venv\Scripts\python`. On macOS, also install `requirements-macos.txt`.
+`desktop.py` starts the local server and opens a native window titled Serato Library. The window uses the system web view (WebView2, WKWebView, or WebKitGTK / Qt WebKit) and does not bundle Chromium. On Windows, use `.venv\Scripts\python`. On macOS, also install `requirements-macos.txt`. On Linux, install WebKitGTK or Qt WebKit.
 
 `python3 server.py` serves `http://127.0.0.1:8765`. Press F5 in VS Code to run that launch.
 
@@ -68,7 +68,7 @@ npm run build
 
 GitHub Actions runs the same discovery with `python` on Ubuntu (3.12 and 3.14) and Windows (3.12). The Windows job also runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. [docs/github.md](docs/github.md) lists the workflows.
 
-A desktop build uses `requirements-build.txt` and `python -m PyInstaller serato-library.spec`. On macOS, `requirements-macos.txt` supplies the menu-bar frameworks. Release builds are unsigned. GitHub Releases is the only download. Signing runs only when the Apple or Windows secrets in `scripts/release_sign.py` are all set.
+A desktop build uses `requirements-build.txt` and `python -m PyInstaller serato-library.spec`. On macOS, `requirements-macos.txt` supplies the WKWebView frameworks. Release builds are unsigned. GitHub Releases is the only download. Signing runs only when the Apple or Windows secrets in `scripts/release_sign.py` are all set.
 
 Python has no separate linter. The page uses ESLint, which rejects `any`. The suites are `unittest` and Vitest.
 

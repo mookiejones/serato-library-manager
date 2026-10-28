@@ -49,9 +49,11 @@ ROOT = app_root()
 STATIC = ROOT / "static"
 HOST = "127.0.0.1"
 PORT = 8765
-# Required on POST /api/shutdown. A browser page on another origin cannot
-# set this header without a preflight, and this server does not allow one.
+# Required on POST /api/shutdown and POST /api/focus. A page on another
+# origin cannot set these headers without a preflight, and this server
+# does not allow one. Neither token is placed in the page.
 SHUTDOWN_HEADER = "X-Serato-Library-Shutdown"
+FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
@@ -1626,6 +1628,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.rfile.read(length)
             self._post_shutdown()
             return
+        if parsed.path == "/api/focus":
+            if length:
+                self.rfile.read(length)
+            self._post_focus()
+            return
         try:
             parsed_body: object = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
@@ -1744,6 +1751,33 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json({"ok": True})
         threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def _post_focus(self) -> None:
+        """Bring the desktop window forward when the caller presents its token.
+
+        The token is set only by the desktop app. ``server.py`` leaves it
+        unset, and this route then answers 404. A wrong token answers 403.
+        The comparison does not branch on the character that differed.
+        The callback runs on this thread. pywebview moves that call onto
+        the GUI thread.
+        """
+        expected = getattr(self.server, "focus_token", None)
+        if not isinstance(expected, str) or not expected:
+            self.send_json({"error": "That action is not available."}, status=404)
+            return
+        provided = self.headers.get(FOCUS_HEADER, "")
+        if not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
+            self.send_json({"error": "That action is not available."}, status=403)
+            return
+        callback = getattr(self.server, "focus_window", None)
+        if callable(callback):
+            try:
+                callback()
+            except Exception:
+                app_log.logger.exception("The window could not be focused")
+                self.send_json({"error": "The window could not be focused."}, status=500)
+                return
+        self.send_json({"ok": True})
 
     def _post_settings(self, payload: dict[str, object]) -> None:
         """Save the sharing choice.
@@ -2017,7 +2051,7 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
 
     Returns:
         A server that is listening and not yet serving. ``shutdown_token``
-        is None until the desktop app sets it.
+        and ``focus_token`` are None until the desktop app sets them.
 
     Raises:
         SystemExit: If the master database is required and missing, or the
@@ -2044,6 +2078,8 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
             "Quit the other Serato library server (server.py or the desktop app) and try again."
         ) from exc
     httpd.shutdown_token = None
+    httpd.focus_token = None
+    httpd.focus_window = None
     app_log.logger.info("Server listening on %s:%s", HOST, httpd.server_address[1])
     if require_library:
         telemetry.activate()
