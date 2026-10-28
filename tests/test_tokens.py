@@ -445,6 +445,7 @@ _DECORATIVE = {
     ".log-fallback",
     ".files-row",
     ".files-actions",
+    ".snapshot-card",
     ".swatch",
 }
 

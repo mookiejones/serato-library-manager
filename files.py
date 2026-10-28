@@ -252,6 +252,11 @@ def execute(payload: Mapping[str, object]) -> dict[str, object]:
     info = library.status()
     if info.get("open"):
         raise library.SeratoOpen(info)
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    if blocked:
+        raise library.LibraryError(blocked, 409)
     if recover_interrupted() == "blocked":
         raise library.LibraryError(
             "An interrupted file change does not match the library. Restore the copy in Library/Backups."
@@ -259,6 +264,7 @@ def execute(payload: Mapping[str, object]) -> dict[str, object]:
     built = _build(payload)
     if not built.ok:
         raise library.LibraryError(built.error or "That change was not saved.")
+    snapshots.snapshot_before_write()
     library.ensure_backup()
     journal = _journal_for(built)
     _write_journal(journal)

@@ -27,6 +27,7 @@ import files
 import library
 import rekordbox
 import related
+import snapshots
 import telemetry
 
 
@@ -1537,6 +1538,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/files":
                 self.send_json(files.list_directory(query_text(query, "path", "") or ""))
                 return
+            if parsed.path == "/api/snapshots":
+                self._get_snapshots(query)
+                return
             if parsed.path == "/api/export.m3u":
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
@@ -1582,6 +1586,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+        except snapshots.SnapshotError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+            return
         except library.LibraryError as exc:
             self.send_json({"error": exc.message}, status=exc.status)
             return
@@ -1644,50 +1651,60 @@ class Handler(BaseHTTPRequestHandler):
                     as_dict(_library_call("reveal", required_int(payload["id"])))
                 )
                 return
+            if parsed.path == "/api/snapshots":
+                with _lock:
+                    with snapshots.own_writes():
+                        self._post_snapshots(payload)
+                return
             with _lock:
-                merging = parsed.path == "/api/duplicates/merge"
-                preview = merging and payload.get("preview") is True
-                if not preview:
-                    invalidate()
-                if parsed.path == "/api/track":
-                    result = as_dict(
-                        _library_call(
-                            "save_track",
-                            required_int(payload["id"]),
-                            payload.get("fields") or {},
-                            require_space(optional_text(payload.get("space"))),
-                        )
-                    )
-                elif parsed.path == "/api/crate":
-                    result = as_dict(_library_call("crate_action", payload))
-                    if payload.get("action") == "create":
-                        telemetry.capture(telemetry.EVENT_CRATE_CREATED)
-                elif parsed.path == "/api/import.m3u":
-                    result = as_dict(
-                        _library_call(
-                            "import_m3u",
-                            require_space(optional_text(payload.get("space"))),
-                            optional_int(payload.get("parent")),
-                            text_or_empty(payload.get("name")),
-                            text_or_empty(payload.get("text")),
-                        )
-                    )
-                    telemetry.capture(telemetry.EVENT_CRATE_CREATED)
-                elif merging:
-                    result = as_dict(_library_call("merge_duplicates", payload))
+                with snapshots.own_writes():
+                    merging = parsed.path == "/api/duplicates/merge"
+                    preview = merging and payload.get("preview") is True
                     if not preview:
-                        telemetry.capture(telemetry.EVENT_DUPLICATES_MERGED)
-                elif parsed.path == "/api/files":
-                    if payload.get("confirm") is True:
-                        result = files.execute(payload)
+                        invalidate()
+                    if parsed.path == "/api/track":
+                        result = as_dict(
+                            _library_call(
+                                "save_track",
+                                required_int(payload["id"]),
+                                payload.get("fields") or {},
+                                require_space(optional_text(payload.get("space"))),
+                            )
+                        )
+                    elif parsed.path == "/api/crate":
+                        result = as_dict(_library_call("crate_action", payload))
+                        if payload.get("action") == "create":
+                            telemetry.capture(telemetry.EVENT_CRATE_CREATED)
+                    elif parsed.path == "/api/import.m3u":
+                        result = as_dict(
+                            _library_call(
+                                "import_m3u",
+                                require_space(optional_text(payload.get("space"))),
+                                optional_int(payload.get("parent")),
+                                text_or_empty(payload.get("name")),
+                                text_or_empty(payload.get("text")),
+                            )
+                        )
+                        telemetry.capture(telemetry.EVENT_CRATE_CREATED)
+                    elif merging:
+                        result = as_dict(_library_call("merge_duplicates", payload))
+                        if not preview:
+                            telemetry.capture(telemetry.EVENT_DUPLICATES_MERGED)
+                    elif parsed.path == "/api/files":
+                        if payload.get("confirm") is True:
+                            result = files.execute(payload)
+                        else:
+                            result = files.plan(payload)
                     else:
-                        result = files.plan(payload)
-                else:
-                    self.send_json(
-                        {"error": "That action is not available."}, status=404
-                    )
-                    return
+                        self.send_json(
+                            {"error": "That action is not available."}, status=404
+                        )
+                        return
             self.send_json(result)
+        except snapshots.SnapshotBlocked as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+        except snapshots.SnapshotError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
         except library.SeratoOpen as exc:
             detail: object = getattr(exc, "info")
             self.send_json({"error": exc.message, "serato": detail}, status=409)
@@ -1879,6 +1896,63 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json({"ok": True})
 
+    def _get_snapshots(self, query: dict[str, list[str]]) -> None:
+        """Return the snapshot list, or one restore plan.
+
+        Args:
+            query: Parsed query. ``id`` asks for a dry-run plan of that snapshot.
+        """
+        store = snapshots.current_store()
+        snapshot_id = query_text(query, "id", "") or ""
+        if snapshot_id:
+            self.send_json(store.plan(snapshot_id))
+            return
+        pending = store.pending_undo()
+        self.send_json({
+            "snapshots": store.list_snapshots(),
+            "pending_undo": pending,
+            "write_block": snapshots.write_block_message(),
+            "serato_running": store.serato_running(),
+        })
+
+    def _post_snapshots(self, payload: dict[str, object]) -> None:
+        """Create a snapshot, plan a restore, restore, or undo an outside change.
+
+        Args:
+            payload: JSON body with ``action`` of ``create``, ``plan``,
+                ``restore``, or ``undo``. ``restore`` also needs ``id`` and
+                ``confirm`` true. ``plan`` changes nothing.
+        """
+        store = snapshots.current_store()
+        action = payload.get("action")
+        if action == "create":
+            info = store.take("manual", "Snapshot taken in the app.")
+            self.send_json({"ok": True, "snapshot": info})
+            return
+        if action == "plan":
+            self.send_json(store.plan(str(payload.get("id") or "")))
+            return
+        if action == "undo":
+            if payload.get("confirm") is not True:
+                pending = store.pending_undo()
+                self.send_json({
+                    "ok": False,
+                    "preview": True,
+                    "pending_undo": pending,
+                    "error": "Confirm undo before it is saved." if pending else "There is no outside change to undo.",
+                })
+                return
+            self.send_json(store.undo_outside())
+            return
+        if action == "restore":
+            snapshot_id = str(payload.get("id") or "")
+            if payload.get("confirm") is not True:
+                self.send_json(store.plan(snapshot_id))
+                return
+            self.send_json(store.restore(snapshot_id))
+            return
+        self.send_json({"error": "That action is not available."}, status=404)
+
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.
 
@@ -1936,9 +2010,10 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
         port: TCP port. None uses 8765. ``0`` asks the operating system
             for a free port. The desktop app uses ``0``.
         require_library: When true, a missing master database stops the
-            process before the socket is opened, and telemetry starts
-            after the bind. The release smoke check passes false so a
-            runner without Serato can still answer ``/api/health``.
+            process before the socket is opened, and telemetry and the
+            snapshot watch start after the bind. The release smoke check
+            passes false so a runner without Serato can still answer
+            ``/api/health``.
 
     Returns:
         A server that is listening and not yet serving. ``shutdown_token``
@@ -1973,6 +2048,11 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
     if require_library:
         telemetry.activate()
         telemetry.note_app_opened()
+        try:
+            snapshots.current_store().check_version()
+        except snapshots.SnapshotError:
+            app_log.logger.exception("A version snapshot could not be saved.")
+        snapshots.start_watch()
     return httpd
 
 
@@ -1990,6 +2070,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        snapshots.stop_watch()
         telemetry.shutdown()
         httpd.server_close()
 

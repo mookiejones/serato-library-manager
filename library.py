@@ -303,7 +303,8 @@ def _unix_process_is_serato(pid: int) -> bool:
         pid: Process id from the lock table.
 
     Returns:
-        True when ps reports a command name that contains serato.
+        True when ps reports a command name that contains serato. An error,
+        a timeout, or a non-zero exit counts as running, so a write stops.
     """
     try:
         result = subprocess.run(
@@ -314,9 +315,9 @@ def _unix_process_is_serato(pid: int) -> bool:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return True
     if result.returncode != 0:
-        return False
+        return True
     return "serato" in result.stdout.lower()
 
 
@@ -327,7 +328,8 @@ def _windows_process_is_serato(pid: int) -> bool:
         pid: Process id from the lock table.
 
     Returns:
-        True when the tasklist image name contains serato.
+        True when the tasklist image name contains serato. An error, a
+        timeout, or a non-zero exit counts as running, so a write stops.
     """
     try:
         result = subprocess.run(
@@ -338,9 +340,9 @@ def _windows_process_is_serato(pid: int) -> bool:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return True
     if result.returncode != 0:
-        return False
+        return True
     return "serato" in result.stdout.lower()
 
 
@@ -368,7 +370,13 @@ def _status_rows(conn: sqlite3.Connection) -> dict[str, object]:
     for row in rows:
         pid = int(row["owner_process_id"] or 0)
         name = row["owner_process_name"] or "Serato DJ Pro"
-        if _process_is_serato(pid):
+        try:
+            running = _process_is_serato(pid)
+        except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+            running = True
+        except Exception:
+            running = True
+        if running:
             return {
                 "open": True,
                 "writable": False,
@@ -413,6 +421,14 @@ def status(path: Path | None = None) -> dict[str, object]:
             "message": "Serato DJ Pro has the library open. Edits stay off until it quits.",
         }
     info["file_manager"] = file_manager_name()
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    info["write_block"] = blocked
+    info["serato_running"] = snapshots.serato_dj_running()
+    if blocked and not info.get("open"):
+        info["writable"] = False
+        info["message"] = blocked
     return info
 
 
@@ -1030,6 +1046,8 @@ def begin_write() -> sqlite3.Connection:
     """Open a write transaction after Serato has quit.
 
     The first call in a process also copies the databases into Library/Backups.
+    Every call first saves a content-addressed snapshot, after Serato 5 has
+    been allowed to proceed.
 
     Returns:
         A connection inside BEGIN IMMEDIATE. The caller commits and closes it.
@@ -1041,6 +1059,12 @@ def begin_write() -> sqlite3.Connection:
     info = status()
     if info["open"]:
         raise SeratoOpen(info)
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    if blocked:
+        raise LibraryError(blocked, 409)
+    snapshots.snapshot_before_write()
     ensure_backup()
     conn = sqlite3.connect(Path(MASTER), timeout=1)
     conn.row_factory = sqlite3.Row

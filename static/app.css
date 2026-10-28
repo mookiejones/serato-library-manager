@@ -860,6 +860,37 @@ dialog .check input {
   flex-direction: column;
 }
 
+.snapshot-undo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: var(--manila-deep);
+  border-radius: 4px;
+}
+
+.snapshot-undo p {
+  margin: 0;
+  flex: 1;
+  min-width: 12rem;
+}
+
+.snapshot-undo button,
+#snapshots-list button {
+  min-height: 44px;
+}
+
+.snapshot-card {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.snapshot-card p {
+  margin: 0 0 4px;
+}
+
 .files-panel[hidden],
 .browser[hidden],
 .detail[hidden],

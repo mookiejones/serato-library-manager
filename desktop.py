@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 import app_config
 import app_log
 import server
+import snapshots
 import static_assets
 import telemetry
 
@@ -451,6 +452,7 @@ def launch() -> None:
                 httpd.shutdown()
                 thread.join(timeout=3)
             httpd.server_close()
+            snapshots.stop_watch()
             telemetry.shutdown()
     finally:
         holder.release()
