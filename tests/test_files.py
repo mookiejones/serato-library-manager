@@ -101,7 +101,8 @@ class FileManagerTests(unittest.TestCase):
         """
         song = str(self.song.resolve())
         other = str(self.other.resolve())
-        with sqlite3.connect(self.root_db) as conn:
+        conn = sqlite3.connect(self.root_db)
+        try:
             conn.executescript(ROOT_SCHEMA)
             conn.execute("INSERT INTO serato (revision) VALUES (1)")
             conn.execute(
@@ -113,6 +114,8 @@ class FileManagerTests(unittest.TestCase):
                 (song, song, song),
             )
             conn.commit()
+        finally:
+            conn.close()
         with open_database(self.library.db) as conn:
             conn.execute("ALTER TABLE asset ADD COLUMN file_path TEXT")
             conn.execute(

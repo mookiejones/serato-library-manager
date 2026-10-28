@@ -371,17 +371,20 @@ def _list_root(path: str | None) -> Path:
         return Path.home().resolve()
     if not isinstance(path, str) or "\x00" in path or len(path) > 4096:
         raise library.LibraryError("That request is not valid.")
-    directory = Path(path)
-    # Loopback listing. Null bytes and over-long paths are already refused.
-    # codeql[py/path-injection]
+    # Normalize first, then keep only an absolute path on its own drive.
+    # Filesystem checks happen after that, so a relative request cannot climb out.
+    normalized = os.path.normpath(os.path.abspath(path))
+    drive, _rest = os.path.splitdrive(normalized)
+    root = drive + os.sep if drive else os.path.abspath(os.sep)
+    if not normalized.startswith(root):
+        raise library.LibraryError("That folder could not be read.", 404)
+    directory = Path(normalized)
     if directory.is_symlink():
         raise library.LibraryError("Shortcuts are left alone.")
     try:
-        # codeql[py/path-injection]
         resolved = directory.resolve(strict=False)
     except OSError as exc:
         raise library.LibraryError("That folder could not be read.", 404) from exc
-    # codeql[py/path-injection]
     if not resolved.is_dir():
         raise library.LibraryError("That folder could not be read.", 404)
     return resolved
@@ -402,8 +405,6 @@ def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
     found: list[dict[str, object]] = []
     truncated = False
     try:
-        # The directory is the resolved folder from _list_root, not a raw query string.
-        # codeql[py/path-injection]
         with os.scandir(directory) as scanner:
             for entry in scanner:
                 if len(found) >= _SCAN_CAP:
@@ -1131,6 +1132,7 @@ def _commit_database(plan: Plan, journal: dict[str, object]) -> None:
     """
     del journal
     conn = library.begin_write()
+    schemas: dict[Path, str] = {}
     try:
         schemas = _attach(conn)
         if plan.action == "delete":
@@ -1149,6 +1151,11 @@ def _commit_database(plan: Plan, journal: dict[str, object]) -> None:
             pass
         raise
     finally:
+        for schema in schemas.values():
+            try:
+                conn.execute(f"DETACH DATABASE {_q(schema)}")
+            except sqlite3.Error:
+                pass
         conn.close()
 
 
