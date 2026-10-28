@@ -45,7 +45,7 @@ On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Lib
 
 ## GitHub
 
-GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The library server stays on `127.0.0.1`. GitHub Pages publishes the user guide only, as a static site. The developer guide is [docs/github.md](docs/github.md). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
+GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The library server stays on `127.0.0.1`. GitHub Pages publishes the user guide only, as a static site. The developer guide is [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3) project board. Feature ideas live in [issues labelled feature-gap](https://github.com/mookiejones/serato-library-manager/issues?q=label%3Afeature-gap). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
 
 ## Sharing
 
