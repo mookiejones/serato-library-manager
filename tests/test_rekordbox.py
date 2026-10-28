@@ -12,6 +12,7 @@ import io
 import struct
 import unicodedata
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -905,6 +906,106 @@ class ExportTests(unittest.TestCase):
         self.assertIn("outside slots 0–7", page)
         self.assertIn("treated as a downbeat", page)
         self.assertIn("26 ms earlier", page)
+
+    def test_page_renders_hot_loops(self) -> None:
+        """Show Hot loops, off, beside Memory cues, with its help line.
+
+        Reads the page, the script, and the user-guide export section.
+        No server is started. The checkbox has no checked attribute.
+        The script sends the box as the ``hot_loops`` query.
+
+        Returns:
+            None. The test fails if the label, the help line, or the query is missing.
+        """
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "guide" / "playlists.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        page = _HotLoopsMarkup()
+        page.feed(html)
+        page.close()
+        checkbox = page.checkbox
+        self.assertIsNotNone(checkbox)
+        assert checkbox is not None
+        self.assertEqual(checkbox.get("type"), "checkbox")
+        self.assertNotIn("checked", checkbox)
+        self.assertEqual(checkbox.get("aria-describedby"), "rekordbox-hot-loops-help")
+        self.assertEqual(page.label, "Hot loops")
+        self.assertEqual(page.help, "Uses a free hot-cue pad")
+        self.assertLess(html.index('id="rekordbox-memory"'), html.index('id="rekordbox-hot-loops"'))
+        self.assertLess(html.index('id="rekordbox-hot-loops"'), html.index('id="rekordbox-key"'))
+        source = (ROOT / "src" / "dialogs.ts").read_text(encoding="utf-8")
+        self.assertIn('el("rekordbox-hot-loops")', source)
+        self.assertIn("hot_loops=", source)
+        self.assertIn('el("rekordbox-hot-loops")', script)
+        self.assertIn("hot_loops=", script)
+        self.assertIn("Hot loops", guide)
+        self.assertIn("Uses a free hot-cue pad", guide)
+        self.assertIn("Uses a free hot-cue pad", readme)
+
+
+class _HotLoopsMarkup(HTMLParser):
+    """Collect the Hot loops checkbox, its label, and its help line."""
+
+    def __init__(self) -> None:
+        """Start with no control captured.
+
+        Returns:
+            None.
+        """
+        super().__init__()
+        self.checkbox: dict[str, str | None] | None = None
+        self.label = ""
+        self.help = ""
+        self._label_depth = 0
+        self._capture_at = 0
+        self._label_parts: list[str] = []
+        self._help_parts: list[str] = []
+        self._in_help = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Record the checkbox and the start of its label or help line.
+
+        Args:
+            tag: Element name.
+            attrs: Attribute pairs. A boolean attribute has value None.
+        """
+        attributes = dict(attrs)
+        if tag == "label":
+            self._label_depth += 1
+        if tag == "input" and attributes.get("id") == "rekordbox-hot-loops":
+            self.checkbox = attributes
+            self._capture_at = self._label_depth
+            self._label_parts = []
+        if attributes.get("id") == "rekordbox-hot-loops-help":
+            self._in_help = True
+            self._help_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        """Leave the label or the help line.
+
+        Args:
+            tag: Element name.
+        """
+        if tag == "label" and self._capture_at == self._label_depth and self._capture_at:
+            self.label = " ".join("".join(self._label_parts).split())
+            self._capture_at = 0
+        if tag == "label" and self._label_depth:
+            self._label_depth -= 1
+        if self._in_help:
+            self.help = " ".join("".join(self._help_parts).split())
+            self._in_help = False
+
+    def handle_data(self, data: str) -> None:
+        """Keep the label words and the help line.
+
+        Args:
+            data: Text node.
+        """
+        if self._capture_at:
+            self._label_parts.append(data)
+        if self._in_help:
+            self._help_parts.append(data)
 
 
 def _cue_payload(cues: list[tuple[int, int, bytes, str]], loops: list[tuple[int, int, int, bytes, str]] | None = None) -> bytes:

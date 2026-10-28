@@ -87,10 +87,19 @@
           <p id="count" class="count" aria-live="polite">Loading the library</p>
           <button id="export-m3u" type="button">Export</button>
           <button id="export-rekordbox" type="button" title="Download rekordbox.xml">Rekordbox</button>
-          <label class="rekordbox-option">
-            <input id="rekordbox-memory" type="checkbox" checked>
-            Memory cues
-          </label>
+          <span class="rekordbox-options">
+            <label class="rekordbox-option">
+              <input id="rekordbox-memory" type="checkbox" checked>
+              Memory cues
+            </label>
+            <span class="rekordbox-option rekordbox-hot-loops">
+              <label>
+                <input id="rekordbox-hot-loops" type="checkbox" aria-describedby="rekordbox-hot-loops-help">
+                Hot loops
+              </label>
+              <span id="rekordbox-hot-loops-help" class="rekordbox-help">Uses a free hot-cue pad</span>
+            </span>
+          </span>
           <label class="rekordbox-option">
             <span class="visually-hidden">Rekordbox key notation</span>
             <select id="rekordbox-key" aria-label="Rekordbox key notation">
