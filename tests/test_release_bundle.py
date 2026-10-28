@@ -317,7 +317,7 @@ class WorkflowTests(unittest.TestCase):
     def test_workflows_declare_permissions_and_timeouts(self) -> None:
         """Require every workflow to declare permissions, a timeout, and concurrency.
 
-        Reads the four workflow files. Each must limit ``contents`` and set
+        Reads the workflow files. Each must limit ``contents`` and set
         ``timeout-minutes`` so a job cannot inherit a broad token or hang.
 
         Returns:
@@ -326,7 +326,13 @@ class WorkflowTests(unittest.TestCase):
         workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
         self.assertEqual(
             [path.name for path in workflows],
-            ["ci.yml", "codeql.yml", "dependency-review.yml", "release.yml"],
+            [
+                "ci.yml",
+                "codeql.yml",
+                "dependency-review.yml",
+                "pages.yml",
+                "release.yml",
+            ],
         )
         for path in workflows:
             text = path.read_text(encoding="utf-8")

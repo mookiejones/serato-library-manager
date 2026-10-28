@@ -1,6 +1,10 @@
 # Serato web library
 
-A local page for the Serato DJ Pro library on macOS and Windows.
+A local window for the Serato DJ Pro library on macOS and Windows. The user guide is [on GitHub Pages](https://mookiejones.github.io/serato-library-manager/) and [in the repository](docs/index.md).
+
+[![Merge copies dialog. One file is selected to keep, and the plan lists crates and fields.](docs/media/duplicate-merge-poster.jpg)](docs/media/duplicate-merge.mp4)
+
+Select the picture to play the duplicate-merge recording. The steps are in the guide under Duplicates. On the published site the same recording plays in the page.
 
 ## Run
 
@@ -41,7 +45,7 @@ On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Lib
 
 ## GitHub
 
-GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The server stays on `127.0.0.1`. It is not a website and it is not published to GitHub Pages. The guide is [docs/github.md](docs/github.md). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
+GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The library server stays on `127.0.0.1`. GitHub Pages publishes the user guide only, as a static site. The developer guide is [docs/github.md](docs/github.md). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
 
 ## Sharing
 
@@ -60,4 +64,4 @@ The tests build a temporary database. They do not open the live Serato library. 
 
 ## Documentation
 
-The code reference is [docs/architecture.md](docs/architecture.md). Related-track storage is [docs/related-tracks.md](docs/related-tracks.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `files.py`, `related.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.
+The user guide is [docs/index.md](docs/index.md). The published copy is [https://mookiejones.github.io/serato-library-manager/](https://mookiejones.github.io/serato-library-manager/). The code reference is [docs/architecture.md](docs/architecture.md). Related-track storage is [docs/related-tracks.md](docs/related-tracks.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `files.py`, `related.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.

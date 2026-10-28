@@ -1,0 +1,82 @@
+site_name: Serato Library
+site_description: A local window for the Serato DJ Pro library on your computer.
+site_url: https://mookiejones.github.io/serato-library-manager/
+repo_url: https://github.com/mookiejones/serato-library-manager
+repo_name: mookiejones/serato-library-manager
+edit_uri: edit/main/docs/
+docs_dir: .
+use_directory_urls: false
+
+exclude_docs: |
+  architecture.md
+  github.md
+  related-tracks.md
+  serato-library-tools.md
+
+theme:
+  name: material
+  font: false
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Start:
+      - Install: guide/install.md
+      - Safety and backups: guide/safety.md
+  - Your library:
+      - Crates: guide/crates.md
+      - Track details: guide/tags.md
+      - History: guide/history.md
+      - Missing files: guide/missing.md
+      - Duplicates: guide/duplicates.md
+      - Stems: guide/stems.md
+      - Prepare: guide/prepare.md
+      - Playlists: guide/playlists.md
+      - Related tracks: guide/related.md
+      - Files: guide/files.md
+  - The app:
+      - Settings and privacy: guide/settings.md
+      - Troubleshooting: guide/troubleshooting.md
+  - For developers:
+      - Code reference: https://github.com/mookiejones/serato-library-manager/blob/main/docs/architecture.md
+      - GitHub and releases: https://github.com/mookiejones/serato-library-manager/blob/main/docs/github.md
+      - Related tracks file: https://github.com/mookiejones/serato-library-manager/blob/main/docs/related-tracks.md
+      - Research notes: https://github.com/mookiejones/serato-library-manager/blob/main/docs/serato-library-tools.md
+      - Privacy note: https://github.com/mookiejones/serato-library-manager/blob/main/PRIVACY.md
+
+plugins:
+  - search
+
+copyright: Serato DJ Pro is a product of Serato. This guide is for the separate Serato Library app.
