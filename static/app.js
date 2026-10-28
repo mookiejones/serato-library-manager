@@ -2201,6 +2201,37 @@
     const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
     return report ? `${base}&report=1` : base;
   }
+  var HOT_LOOPS_STORAGE_KEY = "serato-library.rekordbox-hot-loops";
+  function hotLoopsStorage() {
+    try {
+      const storage = window.localStorage;
+      if (storage == null) return null;
+      return storage;
+    } catch {
+      return null;
+    }
+  }
+  function restoreHotLoops() {
+    const box = el("rekordbox-hot-loops");
+    const storage = hotLoopsStorage();
+    if (storage == null) {
+      box.checked = false;
+      return;
+    }
+    try {
+      box.checked = storage.getItem(HOT_LOOPS_STORAGE_KEY) === "1";
+    } catch {
+      box.checked = false;
+    }
+  }
+  function rememberHotLoops() {
+    const storage = hotLoopsStorage();
+    if (storage == null) return;
+    try {
+      storage.setItem(HOT_LOOPS_STORAGE_KEY, el("rekordbox-hot-loops").checked ? "1" : "0");
+    } catch {
+    }
+  }
   function fillRekordboxReport(lines) {
     const list = el("rekordbox-report");
     list.replaceChildren();
@@ -2576,6 +2607,10 @@
     }
   }
   function wireDialogs() {
+    restoreHotLoops();
+    el("rekordbox-hot-loops").addEventListener("change", () => {
+      rememberHotLoops();
+    });
     el("export-rekordbox").addEventListener("click", () => {
       rekordboxXml = "";
       fetch(rekordboxExportUrl(true)).then((response) => response.json().then((body) => ({ ok: response.ok, body }))).then(({ ok, body }) => {

@@ -47,7 +47,9 @@ let filesTrigger: HTMLElement | null = null;
  *
  * The report form asks for the loss report as JSON. The file form is the
  * XML download, which starts only after the dialog is confirmed.
- * Hot loops is off until checked, which sends ``hot_loops=0``.
+ * Hot loops sends ``hot_loops=1`` while the box is checked and
+ * ``hot_loops=0`` while it is clear. The box starts clear.
+ * wireDialogs restores a stored choice before the person exports.
  *
  * @param {boolean} report True asks for the loss report instead of the file.
  * @returns {string} The request path and query.
@@ -59,6 +61,68 @@ export function rekordboxExportUrl(report: boolean) {
   const key = el("rekordbox-key").value;
   const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
   return report ? `${base}&report=1` : base;
+}
+
+/** localStorage key for the Hot loops checkbox. `1` is on and `0` is off. */
+export const HOT_LOOPS_STORAGE_KEY = "serato-library.rekordbox-hot-loops";
+
+/**
+ * Read localStorage, or null when the browser blocks it.
+ *
+ * A private window can throw on the property itself. That matches a
+ * missing store: the checkbox stays off.
+ *
+ * @returns {Storage|null} The store, or null when it cannot be opened.
+ */
+function hotLoopsStorage(): Storage | null {
+  try {
+    const storage = window.localStorage;
+    if (storage == null) return null;
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restore the Hot loops checkbox from localStorage.
+ *
+ * The page default is off. Only a stored `1` checks the box. A missing
+ * key, any other value, or a blocked store leaves it off. This does not
+ * write the store.
+ *
+ * @returns {void}
+ */
+export function restoreHotLoops(): void {
+  const box = el("rekordbox-hot-loops");
+  const storage = hotLoopsStorage();
+  if (storage == null) {
+    box.checked = false;
+    return;
+  }
+  try {
+    box.checked = storage.getItem(HOT_LOOPS_STORAGE_KEY) === "1";
+  } catch {
+    box.checked = false;
+  }
+}
+
+/**
+ * Save the Hot loops checkbox in localStorage.
+ *
+ * A blocked or full store is ignored. The checkbox still applies to this
+ * visit, and the export reads the box directly.
+ *
+ * @returns {void}
+ */
+export function rememberHotLoops(): void {
+  const storage = hotLoopsStorage();
+  if (storage == null) return;
+  try {
+    storage.setItem(HOT_LOOPS_STORAGE_KEY, el("rekordbox-hot-loops").checked ? "1" : "0");
+  } catch {
+    // QuotaExceededError or SecurityError. The export still uses the box.
+  }
 }
 
 /**
@@ -631,6 +695,10 @@ async function confirmFiles() {
  * @returns {void}
  */
 export function wireDialogs(): void {
+  restoreHotLoops();
+  el("rekordbox-hot-loops").addEventListener("change", () => {
+    rememberHotLoops();
+  });
   el("export-rekordbox").addEventListener("click", () => {
     rekordboxXml = "";
     fetch(rekordboxExportUrl(true))

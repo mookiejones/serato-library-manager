@@ -40,7 +40,7 @@ These are on `main` (1.1.0).
 
 - Browse crates, history, missing files, stems, and Prepare.
 - Merge duplicate copies into the file you keep. Cue points stay in the audio file.
-- Import and export M3U. Export `rekordbox.xml`. **Hot loops** is off until you check it. Uses a free hot-cue pad. What that file keeps is in [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md).
+- Import and export M3U. Export `rekordbox.xml`. **Hot loops** starts off, and this browser remembers that checkbox. Uses a free hot-cue pad. What that file keeps is in [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md).
 - Save related tracks in `related.sqlite` next to the app settings, not in Serato's library.
 - Rename, move, replace, and trash audio, and update the library path.
 - Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied.

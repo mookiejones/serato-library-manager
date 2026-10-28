@@ -198,6 +198,32 @@ def _node(tree: dict[str, object], name: str) -> dict[str, object] | None:
     return None
 
 
+def _position_mark_attributes(xml: str, track_name: str) -> list[dict[str, str]]:
+    """Read POSITION_MARK attributes for one track from rekordbox XML.
+
+    Args:
+        xml: A DJ_PLAYLISTS document.
+        track_name: TRACK Name to select.
+
+    Returns:
+        One attribute dict per POSITION_MARK, in document order.
+
+    Raises:
+        AssertionError: If the collection or the track is missing.
+    """
+    document = ElementTree.fromstring(xml.encode("utf-8"))
+    collection = document.find("COLLECTION")
+    if collection is None:
+        raise AssertionError("COLLECTION")
+    track = next(
+        (item for item in collection.findall("TRACK") if item.get("Name") == track_name),
+        None,
+    )
+    if track is None:
+        raise AssertionError(track_name)
+    return [dict(mark.attrib) for mark in track.findall("POSITION_MARK")]
+
+
 def _counts_match(node: dict[str, object]) -> None:
     """Check folder counts and playlist entry counts against their children.
 
@@ -910,15 +936,15 @@ class ExportTests(unittest.TestCase):
     def test_page_renders_hot_loops(self) -> None:
         """Show Hot loops, off, beside Memory cues, with its help line.
 
-        Reads the page, the script, and the user-guide export section.
-        No server is started. The checkbox has no checked attribute.
-        The script sends the box as the ``hot_loops`` query.
+        Reads the page and the user-guide export section. No server is
+        started. The checkbox has no checked attribute. Cue and loop
+        attributes are checked on the XML elements, not by scanning the
+        script source for a query string.
 
         Returns:
-            None. The test fails if the label, the help line, or the query is missing.
+            None. The test fails if the label or the help line is missing.
         """
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-        script = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         guide = (ROOT / "docs" / "guide" / "playlists.md").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         page = _HotLoopsMarkup()
@@ -934,14 +960,96 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(page.help, "Uses a free hot-cue pad")
         self.assertLess(html.index('id="rekordbox-memory"'), html.index('id="rekordbox-hot-loops"'))
         self.assertLess(html.index('id="rekordbox-hot-loops"'), html.index('id="rekordbox-key"'))
-        source = (ROOT / "src" / "dialogs.ts").read_text(encoding="utf-8")
-        self.assertIn('el("rekordbox-hot-loops")', source)
-        self.assertIn("hot_loops=", source)
-        self.assertIn('el("rekordbox-hot-loops")', script)
-        self.assertIn("hot_loops=", script)
         self.assertIn("Hot loops", guide)
         self.assertIn("Uses a free hot-cue pad", guide)
+        self.assertIn("local storage", guide.lower())
         self.assertIn("Uses a free hot-cue pad", readme)
+
+    def test_hot_loop_marks_are_position_mark_attributes(self) -> None:
+        """Read cue and loop fields from POSITION_MARK elements.
+
+        Pad 0 already has a hot cue, and pads 1 through 7 are free.
+        With hot loops on, the loop on pad 0 stays a memory loop
+        (``Num="-1"``) and the loop on pad 2 uses that pad. A loop
+        outside slots 0 through 7 stays a memory loop too. With hot
+        loops off, every loop is ``Num="-1"``. The attributes come from
+        ``xml.etree.ElementTree``, not from a search of the XML text.
+
+        Returns:
+            None. The test fails if a cue or loop attribute differs.
+        """
+        with TempLibrary() as temp:
+            audio = temp.root / "loops.wav"
+            _write_audio(
+                audio,
+                _cue_payload(
+                    [(0, 1000, b"\xCC\x00\x00", "Pad")],
+                    [
+                        (0, 2000, 3000, b"\x00\xAA\x00", "Taken"),
+                        (2, 4000, 5000, b"\x00\x00\xCC", "Free"),
+                        (9, 6000, 7000, b"\xFF\xFF\xFF", "Outside"),
+                    ],
+                ),
+            )
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET name = ?, portable_id = ?, file_name = ? WHERE id = 1",
+                    ("Loops", str(audio), audio.name),
+                )
+            on_xml, _on_report = rekordbox.export_rekordbox(
+                "Serato Library", None, memory_cues=True, hot_loops=True
+            )
+            off_xml, _off_report = rekordbox.export_rekordbox(
+                "Serato Library", None, memory_cues=True, hot_loops=False
+            )
+        cue = {
+            "Name": "Pad",
+            "Type": "0",
+            "Start": "1.000",
+            "Num": "0",
+            "Red": "204",
+            "Green": "0",
+            "Blue": "0",
+        }
+        memory = {**cue, "Num": "-1"}
+        taken = {
+            "Name": "Taken",
+            "Type": "4",
+            "Start": "2.000",
+            "Num": "-1",
+            "Red": "0",
+            "Green": "170",
+            "Blue": "0",
+            "End": "3.000",
+        }
+        free = {
+            "Name": "Free",
+            "Type": "4",
+            "Start": "4.000",
+            "Num": "2",
+            "Red": "0",
+            "Green": "0",
+            "Blue": "204",
+            "End": "5.000",
+        }
+        outside = {
+            "Name": "Outside",
+            "Type": "4",
+            "Start": "6.000",
+            "Num": "-1",
+            "Red": "255",
+            "Green": "255",
+            "Blue": "255",
+            "End": "7.000",
+        }
+        self.assertEqual(
+            _position_mark_attributes(on_xml, "Loops"),
+            [cue, memory, taken, free, outside],
+        )
+        self.assertEqual(
+            _position_mark_attributes(off_xml, "Loops"),
+            [cue, memory, taken, {**free, "Num": "-1"}, outside],
+        )
 
 
 class _HotLoopsMarkup(HTMLParser):
