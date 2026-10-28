@@ -5,8 +5,9 @@
   One screen: the space menu, the view switch, the crate or history rail,
   a virtualized track list, and the detail pane. The Duplicates view can
   merge a group into the copy you keep. Export writes an M3U playlist.
-  Rekordbox writes rekordbox.xml. The Files view browses folders
-  and previews a rename, move, replace, or delete before it is saved.
+  Rekordbox writes rekordbox.xml. Gig is a read-only ready score.
+  The Files view browses folders and previews a rename, move, replace,
+  or delete before it is saved.
   app.css and app.js are local files. The page talks only to the library
   server on 127.0.0.1. It does not open master.sqlite itself.
 -->
@@ -43,6 +44,7 @@
         <button type="button" data-view="duplicates" role="tab">Duplicates</button>
         <button type="button" data-view="stems" role="tab">Stems</button>
         <button type="button" data-view="files" role="tab">Files</button>
+        <button type="button" data-view="gig" role="tab">Gig</button>
       </div>
       <div id="crate-tools">
         <label class="rail-field">
@@ -132,6 +134,15 @@
           <button id="files-move-here" type="button" hidden>Move here</button>
           <button id="files-pick-cancel" type="button" hidden>Cancel</button>
         </div>
+      </section>
+
+      <section id="gig-panel" class="gig-panel" hidden aria-labelledby="gig-heading">
+        <h2 id="gig-heading" class="visually-hidden">Gig check</h2>
+        <div class="browser-bar">
+          <p id="gig-scope" class="files-path">Checking the library</p>
+          <button id="gig-refresh" type="button">Check again</button>
+        </div>
+        <div id="gig-report" class="gig-report" aria-live="polite" aria-busy="false"></div>
       </section>
     </main>
   </div>

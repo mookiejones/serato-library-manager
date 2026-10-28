@@ -12,7 +12,7 @@ The app talks only to this computer. It is not a website you log in to. Your tra
 
 - [Browse crates and tracks](guide/crates.md), and make, rename, color, and delete crates.
 - [Edit track details](guide/tags.md) that Serato stores in the library. Cue points stay in the audio file.
-- Read [History](guide/history.md), find [missing files](guide/missing.md), and see [stems](guide/stems.md).
+- Read [History](guide/history.md), find [missing files](guide/missing.md), run a [check before a gig](guide/gig-check.md), and see [stems](guide/stems.md).
 - [Merge duplicate copies](guide/duplicates.md) into the file you want to keep.
 - Send tracks to [Prepare](guide/prepare.md).
 - [Import and export M3U playlists](guide/playlists.md), and export rekordbox.xml for CDJs. [Moving between Serato and Rekordbox](coming-from-rekordbox.md) lists what that file keeps.

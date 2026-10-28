@@ -3,7 +3,8 @@
 
   The rail holds the space menu, the view switch, and the crate or history
   list. The sheet holds the track list and the detail pane, including
-  related tracks, or the Files folder list. Dialogs cover sharing,
+  related tracks, the Files folder list, or the read-only gig check.
+  Dialogs cover sharing,
   settings, duplicate merge, and a file change. --row is 36px,
   the same height app.js uses to decide which rows are inside the scroll
   window. This file does not fetch data or touch the Serato database.
@@ -307,6 +308,7 @@ textarea:focus-visible,
 #export-m3u,
 #export-rekordbox,
 #import-m3u,
+#gig-refresh,
 .text-button,
 .actions button {
   color: var(--ink);
@@ -841,7 +843,8 @@ dialog .check input {
   font: inherit;
 }
 
-.files-panel {
+.files-panel,
+.gig-panel {
   grid-column: 1 / -1;
   min-width: 0;
   min-height: 0;
@@ -849,7 +852,47 @@ dialog .check input {
   flex-direction: column;
 }
 
+#gig-refresh { min-height: 44px; }
+
+.gig-report {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 20px 28px;
+}
+
+.gig-score {
+  margin: 8px 0 0;
+  font-family: var(--display);
+  font-size: 56px;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.gig-verdict {
+  margin: 8px 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.gig-verdict.not-ready { color: var(--missing); }
+
+.gig-report h3 {
+  margin: 22px 0 8px;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.gig-report ul { margin: 0; padding-left: 1.2rem; }
+
+.gig-report li { margin: 4px 0; overflow-wrap: anywhere; }
+
+.gig-note { margin: 8px 0; }
+
 .files-panel[hidden],
+.gig-panel[hidden],
 .browser[hidden],
 .detail[hidden],
 #crate-actions[hidden],
@@ -976,6 +1019,7 @@ dialog .check input {
   .list { height: 52vh; flex: none; }
   .files-actions { order: 1; }
   .files-list { order: 2; flex: none; max-height: 46vh; }
+  .gig-report { max-height: 70vh; }
   .detail { border-left: 0; border-top: 1px solid var(--rule); }
   .detail h2 { font-size: 32px; }
 }

@@ -53,6 +53,8 @@ Container(server, "server.py", "Python HTTP server", "JSON API on 127.0.0.1 port
 Container(library, "library.py", "Python", "Reads and writes the Serato SQLite schema")
 Container(tags, "tags.py", "Python", "Reads cue, loop, flip, and beatgrid frames")
 Container(rekordbox, "rekordbox.py", "Python", "Writes DJ_PLAYLISTS XML")
+Container(gig, "gig_check.py", "Python", "Read-only ready score")
+Container(snaps, "snapshots.py", "Python", "Snapshot reader protocol")
 Container(related, "related.py", "Python", "Saved links and key, BPM, and crate suggestions")
 ContainerDb(master, "master.sqlite", "SQLite", "Library Serato displays")
 ContainerDb(root, "root.sqlite", "SQLite", "On-disk location database")
@@ -63,11 +65,17 @@ Rel(dj, page, "Uses")
 Rel(page, server, "HTTP", "127.0.0.1:8765")
 Rel(server, library, "Calls")
 Rel(server, rekordbox, "Calls")
+Rel(server, gig, "Calls")
 Rel(server, related, "Calls")
 Rel(rekordbox, library, "Reads tracks and crates")
 Rel(rekordbox, tags, "Reads markers")
+Rel(gig, library, "Reads")
+Rel(gig, snaps, "Asks")
+Rel(gig, tags, "Reads markers when a snapshot exists")
 Rel(server, page, "Serves files")
 Rel(library, master, "Reads and writes")
+Rel(gig, master, "Reads", "mode=ro")
+Rel(gig, audio, "Reads", "rb")
 Rel(library, root, "Mirrors a write")
 Rel(library, tags, "Reads markers")
 Rel(related, sidecar, "Reads and writes")
@@ -77,7 +85,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, `files.py`, `related.py`, `rekordbox.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `files.py`, `related.py`, `rekordbox.py`, `gig_check.py`, `snapshots.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -179,6 +187,26 @@ The beatgrid is one `TEMPO` per marker, including a Serato 5.0 grid with a marke
 
 Since Rekordbox 5.6.1, importing XML does not update a track that is already in the collection. In Rekordbox 6 and 7 the control is Preferences, Advanced, Database, rekordbox xml. Overwrite is Import to Collection, then Yes to load information from imported library. That replaces cues, the beatgrid, and tags. Device Library Plus and OneLibrary USB drives are not written. The export does not write the audio file or the database, and it does not record `tags_read`.
 
+### `gig_check.py`
+
+`run_gig_check` reads one space, or one crate and its subcrates, and returns a frozen `GigReport`. `python3 gig_check.py` prints the same report. `--database` selects a master file. `--space` selects the space. `--crate` is a crate id or `all`. The process exit is 0 when the report is ready, 1 when it is not or the library cannot be read, and 2 when `--crate` is not a number or `all`. The command does not write a file.
+
+The database is opened with a SQLite URI `mode=ro` and `PRAGMA query_only=ON`. Audio is opened with `rb`. A missing database is 404. A database SQLite will not open read-only is 409. The check does not call `begin_write`, does not copy a backup, and does not record telemetry.
+
+The score starts at 100. `ready` is true when the score is at least `READY_AT` (70) and `hard_red` is false. An absent drive, or any missing file in the selected scope, sets `hard_red`. That is not ready even when the score is still at least 70. The whole space is the selected scope when no crate is given. Tracks on an absent drive are `unavailable_drives`, one row per drive name, and are not listed as missing files. A relative path whose `connection.database_uri` sits on an absent drive is not resolved under the home directory.
+
+`holding_it_back` is the breakdown. Each line has `code`, `points`, `hard_red`, and `summary`. No snapshot in the last 7 days, measured from a timezone-aware `now`, removes `STALE_POINTS` (10) and the summary is `No snapshot in the last 7 days`. Streaming tracks, empty crates, and a non-empty diff against the latest snapshot remove points and leave the check ready when the score stays at least 70 and nothing is a hard red.
+
+Streaming is only `third_party_type` 6, Apple Music. `server.py` maps that value to Apple Music, and Serato's streaming page says Apple Music tracks are streamed. iTunes (`1`) and any other value are not treated as streaming. A normal crate with no tracks and no subcrates is listed with `Serato may delete this crate when it closes.` Serato's clean-up note describes empty crates disappearing after quit and does not name a version. The Serato DJ 4.0 crate article does not say they are deleted. Smart crates, the space root, a parent that still has a subcrate, and a crate on an absent drive are not listed as empty.
+
+`GET /api/gig-check` returns `report_to_dict`. `crate` uses the same rules as the M3U export. The page's Gig view reads `score`, `ready`, `holding_it_back`, `missing_files`, `unavailable_drives`, `streaming_tracks`, `empty_crates`, `snapshot_note`, and `changes`.
+
+### `snapshots.py`
+
+`SnapshotReader` is the protocol for issue #35. `list_snapshots` returns id, time, and label. `load` returns crates, cues, grids, and tags. `NoSnapshots` is the reader until a snapshot has been saved. Its list is empty, and the gig check then sets `snapshot_note` to `No snapshots yet` and `changes` to null. A test passes its own reader. `diff_snapshots` compares an older snapshot with a newer one and reports added and removed crates and tracks, edited crate membership, and paths whose cues, beatgrid, or tags differ. Cue and grid comparison is skipped when either side did not read them, so a missing file is not also reported as every cue being deleted. `track_key` is the asset id, a newline, and the stored path.
+
+When a snapshot exists, the check builds the current library as a snapshot and diffs it against the latest `taken_at`. Cues and the beatgrid come from `tags.read_serato_tags`, which opens the file with `rb`. Library text comes from the asset row. The diff is for the whole space, including when a crate was selected for the missing-file scope.
+
 ### `files.py`
 
 `files.py` renames a file, moves files, moves a folder, points a library track at a replacement file, and moves a file to the Trash. Crates, history, and Prepare stay attached because every stored path that resolves to the old file is rewritten. Cue points travel inside the audio file. A replacement copies them with `tags.copy_serato_geob` when that is safe, and the result says so when it is not. The old file stays on disk.
@@ -197,7 +225,7 @@ After the database commit, each moved file is passed to `library.update_related_
 
 ### `static/`
 
-`index.html` is one screen. The rail holds the status line, the space menu, and six views: Crates, History, Missing, Duplicates, Stems, and Files. Crate tools search, sort, create, and import an M3U. **Export** downloads an M3U. **Rekordbox** downloads `rekordbox.xml` for the selected crate, including its subcrates, or for the whole space when All tracks is selected. The sheet holds the track search, the virtualized list, and the detail pane. Files replaces that sheet with a folder list. Rename, move, replace, and delete open a dialog that previews the paths, crate names, and cue warning. Nothing is written until Confirm. Delete's confirm button is Move to Trash. Move asks for a destination folder first. Writes stay disabled while Serato is open.
+`index.html` is one screen. The rail holds the status line, the space menu, and seven views: Crates, History, Missing, Duplicates, Stems, Files, and Gig. Gig keeps the crate list and replaces the track sheet with a ready score. **Check again** runs `GET /api/gig-check` for the selected crate, or for the whole space when All tracks is selected. The report is text nodes. It does not post. Crate tools search, sort, create, and import an M3U. **Export** downloads an M3U. **Rekordbox** downloads `rekordbox.xml` for the selected crate, including its subcrates, or for the whole space when All tracks is selected. The sheet holds the track search, the virtualized list, and the detail pane. Files replaces that sheet with a folder list. Rename, move, replace, and delete open a dialog that previews the paths, crate names, and cue warning. Nothing is written until Confirm. Delete's confirm button is Move to Trash. Move asks for a destination folder first. Writes stay disabled while Serato is open.
 
 `app.js` keeps library state in `state`. The list paints only the rows inside the scroll window. Row height is 36 pixels. Track sort keys include name, artist, album, BPM, key, and the other columns the header exposes. Crate sort is custom order, name, or date added.
 
@@ -239,6 +267,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | POST | `/api/files` | `action`, paths, and `confirm` | A preview when `confirm` is not the boolean true. A save when it is |
 | GET | `/api/related` | `path`, optional `space`, `title`, `artist`, `length_ms` | Saved links and suggestions. See [related-tracks.md](related-tracks.md) |
 | POST | `/api/duplicates/merge` | `keep_id`, `space`, `preview`, `confirm`, `delete_files`, `confirm_delete_files` | Plan. `preview` true does not write. A merge needs `confirm` true. Moving files also needs `confirm_delete_files` true |
+| GET | `/api/gig-check` | `space`, `crate` | Ready score, Holding it back, missing paths, absent drives, streaming tracks, empty crates, and the snapshot note. `crate=all` checks the space. Nothing is written. A crate id that is not ASCII digits returns 400. A crate that is not in the space returns 404 |
 | GET | `/api/export.m3u` | `space`, `crate` | M3U file `crate.m3u`. `crate=all` exports the space |
 | GET | `/api/export.rekordbox.xml` | `space`, `crate`, optional `report`, `memory`, `key` | `rekordbox.xml`. `report=1` returns JSON with the loss report and the same XML. `crate=all` exports the space and its crates. A crate id exports that crate and its subcrates. A crate id that is not ASCII digits returns 400 |
 | POST | `/api/track` | `id`, `space`, `fields` | Saves track fields |

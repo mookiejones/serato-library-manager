@@ -1,8 +1,9 @@
 /**
  * Serato library page.
  *
- * Loads crates, history, missing tracks, duplicates, stems, and files from
- * the local server on 127.0.0.1 port 8765. Track and crate edits are POST
+ * Loads crates, history, missing tracks, duplicates, stems, files, and the
+ * read-only gig check from the local server on 127.0.0.1 port 8765.
+ * Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
  * /api/duplicates/merge. Rekordbox export is GET /api/export.rekordbox.xml.
  * File moves, renames, replacements, and deletes
@@ -77,6 +78,7 @@ const state = {
   filesError: "",
   filesMessage: "",
   filesTruncated: false,
+  gigToken: 0,
 };
 
 const crateList = document.getElementById("crate-list");
@@ -687,22 +689,26 @@ function renderColumns() {
  */
 function renderShell() {
   const cratesMode = state.mode === "crates";
+  const gigMode = state.mode === "gig";
   const historyMode = state.mode === "history";
-  document.getElementById("crate-tools").hidden = !cratesMode;
+  const showCrates = cratesMode || gigMode;
+  document.getElementById("crate-tools").hidden = !showCrates;
   document.getElementById("crate-actions").hidden = !cratesMode;
-  crateList.hidden = !cratesMode;
+  crateList.hidden = !showCrates;
   sessionList.hidden = !historyMode;
   modeNote.hidden = cratesMode || historyMode;
   const filesMode = state.mode === "files";
-  document.querySelector(".browser").hidden = filesMode;
-  document.getElementById("detail").hidden = filesMode;
+  document.querySelector(".browser").hidden = filesMode || gigMode;
+  document.getElementById("detail").hidden = filesMode || gigMode;
   document.getElementById("files-panel").hidden = !filesMode;
+  document.getElementById("gig-panel").hidden = !gigMode;
   if (state.mode === "missing") modeNote.textContent = "Tracks Serato has marked missing in this space.";
   if (state.mode === "duplicates") {
     modeNote.textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
   }
   if (state.mode === "stems") modeNote.textContent = "Tracks with a stems analysis state.";
   if (filesMode) modeNote.textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
+  if (gigMode) modeNote.textContent = "Read-only. This check does not change the library.";
   for (const button of document.querySelectorAll("#views button")) {
     button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
   }
@@ -718,6 +724,10 @@ function renderShell() {
   if (filesMode) {
     const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
     crateFoot.textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
+    return;
+  }
+  if (gigMode) {
+    crateFoot.textContent = state.activeCrate === "all" ? "Whole space" : "Selected crate";
     return;
   }
   const pool = state.mode === "history" ? state.entries : footerTracks();
@@ -760,6 +770,11 @@ function renderList() {
   renderShell();
   if (state.mode === "files") {
     renderFiles();
+    return;
+  }
+  if (state.mode === "gig") {
+    document.querySelector(".rules")?.remove();
+    renderCrates();
     return;
   }
   renderColumns();
@@ -918,6 +933,7 @@ function selectCrate(id) {
   if (id !== "all") expandAncestors(id);
   list.scrollTop = 0;
   renderList();
+  if (state.mode === "gig") loadGigCheck().catch((error) => showGigFailure(error));
 }
 
 /**
@@ -2466,7 +2482,7 @@ async function loadLibrary() {
 }
 
 /**
- * Switch among crates, history, missing, duplicates, stems, and files.
+ * Switch among crates, history, missing, duplicates, stems, files, and gig.
  *
  * History sorts by start time descending and loads sessions once.
  * Duplicates load when this space has not been scanned yet. Files loads
@@ -2493,7 +2509,170 @@ function setMode(mode) {
     state.filesLoading = true;
     loadFolder(state.filesPath || "").catch((error) => failFiles(error));
   }
+  if (mode === "gig") loadGigCheck().catch((error) => showGigFailure(error));
   renderList();
+}
+
+/**
+ * Ask for a read-only gig check of the open space and crate.
+ *
+ * GET /api/gig-check does not write. A newer selection ignores a late
+ * response. The report is painted with text nodes.
+ *
+ * @returns {Promise<void>}
+ */
+async function loadGigCheck() {
+  const token = ++state.gigToken;
+  const report = document.getElementById("gig-report");
+  const scope = document.getElementById("gig-scope");
+  report.setAttribute("aria-busy", "true");
+  scope.textContent = "Checking the library";
+  report.replaceChildren();
+  const waiting = document.createElement("p");
+  waiting.className = "gig-note";
+  waiting.textContent = "Checking the library…";
+  report.append(waiting);
+  const crate = state.activeCrate === "all" ? "all" : String(state.activeCrate);
+  const response = await fetch(
+    `/api/gig-check?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (token !== state.gigToken) return;
+  report.setAttribute("aria-busy", "false");
+  if (!response.ok) throw new Error(payload.error || "The gig check could not be read.");
+  renderGigReport(payload);
+}
+
+/**
+ * Show a gig-check failure in the report, not in the track detail.
+ *
+ * @param {Error} error Failure from loadGigCheck.
+ * @returns {void}
+ */
+function showGigFailure(error) {
+  const report = document.getElementById("gig-report");
+  report.setAttribute("aria-busy", "false");
+  const failure = document.createElement("p");
+  failure.className = "detail-error";
+  failure.textContent = error.message || "The gig check could not be read.";
+  report.replaceChildren(failure);
+}
+
+/**
+ * Add a heading and a list to the gig report.
+ *
+ * An empty list is skipped. Text is set with textContent.
+ *
+ * @param {HTMLElement} parent Report element.
+ * @param {string} heading Section title.
+ * @param {string[]} lines Lines to show. Long lists keep the first 100.
+ * @returns {void}
+ */
+function appendGigList(parent, heading, lines) {
+  if (!lines.length) return;
+  const title = document.createElement("h3");
+  title.textContent = heading;
+  const list = document.createElement("ul");
+  const shown = lines.slice(0, 100);
+  for (const line of shown) {
+    const item = document.createElement("li");
+    item.textContent = line;
+    list.append(item);
+  }
+  parent.append(title, list);
+  if (lines.length > shown.length) {
+    const more = document.createElement("p");
+    more.className = "gig-note";
+    more.textContent = `And ${lines.length - shown.length} more.`;
+    parent.append(more);
+  }
+}
+
+/**
+ * Paint the ready score and the Holding it back breakdown.
+ *
+ * Color is not the only signal: the verdict is the word Ready or Not ready.
+ * Nothing is written.
+ *
+ * @param {object} payload JSON from GET /api/gig-check.
+ * @returns {void}
+ */
+function renderGigReport(payload) {
+  const report = document.getElementById("gig-report");
+  const scope = document.getElementById("gig-scope");
+  const crateName = payload.scope && payload.scope.crate_name;
+  scope.textContent = crateName ? `Checking ${crateName}. Nothing is written.` : "Checking the whole space. Nothing is written.";
+  report.replaceChildren();
+  const scoreLabel = document.createElement("p");
+  scoreLabel.className = "visually-hidden";
+  scoreLabel.textContent = "Ready score";
+  const score = document.createElement("p");
+  score.className = "gig-score";
+  score.textContent = String(payload.score);
+  const verdict = document.createElement("p");
+  verdict.className = payload.ready ? "gig-verdict" : "gig-verdict not-ready";
+  verdict.textContent = payload.ready ? "Ready" : "Not ready";
+  const holdingTitle = document.createElement("h3");
+  holdingTitle.textContent = "Holding it back";
+  report.append(scoreLabel, score, verdict, holdingTitle);
+  const holding = payload.holding_it_back || [];
+  if (!holding.length) {
+    const clear = document.createElement("p");
+    clear.className = "gig-note";
+    clear.textContent = "Nothing is holding it back.";
+    report.append(clear);
+  } else {
+    const list = document.createElement("ul");
+    for (const line of holding) {
+      const item = document.createElement("li");
+      item.textContent = line.summary;
+      list.append(item);
+    }
+    report.append(list);
+  }
+  appendGigList(report, "Missing files", (payload.missing_files || []).map((item) => item.path));
+  appendGigList(
+    report,
+    "Unavailable drives",
+    (payload.unavailable_drives || []).map((drive) => `${drive.name}: ${drive.track_count} tracks unavailable`)
+  );
+  appendGigList(
+    report,
+    "Streaming tracks",
+    (payload.streaming_tracks || []).map((item) => `${item.service}: ${item.title}`)
+  );
+  appendGigList(
+    report,
+    "Empty crates",
+    (payload.empty_crates || []).map((item) => `${item.name} — ${item.warning}`)
+  );
+  const since = document.createElement("h3");
+  since.textContent = "Since last gig";
+  const note = document.createElement("p");
+  note.className = "gig-note";
+  note.textContent = payload.snapshot_note || "";
+  report.append(since, note);
+  const changes = payload.changes;
+  if (changes) {
+    const groups = [
+      ["Crates added", changes.crates_added || []],
+      ["Crates removed", changes.crates_removed || []],
+      ["Crates edited", changes.crates_edited || []],
+      ["Tracks added", changes.tracks_added || []],
+      ["Tracks removed", changes.tracks_removed || []],
+      ["Cues edited", changes.cues_edited || []],
+      ["Beatgrids edited", changes.grids_edited || []],
+      ["Tags edited", changes.tags_edited || []],
+    ];
+    if (!groups.some(([, lines]) => lines.length)) {
+      const same = document.createElement("p");
+      same.className = "gig-note";
+      same.textContent = "Nothing changed since the last snapshot.";
+      report.append(same);
+    } else {
+      for (const [heading, lines] of groups) appendGigList(report, heading, lines);
+    }
+  }
 }
 
 // Wire the page controls. These listeners call the functions above; they
@@ -2515,6 +2694,7 @@ document.getElementById("reload").addEventListener("click", () => {
   const jobs = [loadLibrary()];
   if (state.mode === "history") jobs.push(loadHistory());
   if (state.mode === "duplicates") jobs.push(loadDuplicates());
+  if (state.mode === "gig") jobs.push(loadGigCheck());
   Promise.all(jobs).catch(showFailure);
 });
 
@@ -2624,6 +2804,7 @@ spaceSelect.addEventListener("change", () => {
   state.duplicateGroups = [];
   loadLibrary().then(() => {
     if (state.mode === "duplicates") return loadDuplicates();
+    if (state.mode === "gig") return loadGigCheck();
     return null;
   }).catch(showFailure);
 });
@@ -2631,6 +2812,10 @@ spaceSelect.addEventListener("change", () => {
 document.getElementById("views").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (button?.dataset.view) setMode(button.dataset.view);
+});
+
+document.getElementById("gig-refresh").addEventListener("click", () => {
+  loadGigCheck().catch((error) => showGigFailure(error));
 });
 
 document.querySelector(".sort-crates").addEventListener("click", (event) => {
