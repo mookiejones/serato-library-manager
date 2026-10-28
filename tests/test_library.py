@@ -36,8 +36,29 @@ class LibraryTests(unittest.TestCase):
             info = library.status()
         self.assertTrue(info["writable"])
         self.assertFalse(info["open"])
+        self.assertFalse(info["serato_running"])
+        self.assertEqual(info["message"], "Serato is quit. Edits save to the library.")
         self.assertEqual(info["file_manager"], library.file_manager_name())
         self.assertIn(temp.db.name, "master.sqlite")
+
+    def test_status_matches_a_running_serato_dj_process(self) -> None:
+        """Report Serato open when the process check says it is running.
+
+        The database lock table is empty. The sidebar message and the
+        wizard block both follow ``serato_dj_running``, so they cannot
+        disagree. Nothing is written.
+
+        Returns:
+            None. The test fails if the library stays writable or the
+            message still says Serato is quit.
+        """
+        with TempLibrary():
+            with mock.patch("snapshots.serato_dj_running", return_value=True):
+                info = library.status()
+        self.assertTrue(info["serato_running"])
+        self.assertTrue(info["open"])
+        self.assertFalse(info["writable"])
+        self.assertEqual(info["message"], "Serato DJ is open. Edits stay off until it quits.")
 
     def test_status_blocks_a_live_serato_process(self) -> None:
         """Refuse a write while a Serato process holds the lock.

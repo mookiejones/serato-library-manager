@@ -249,13 +249,18 @@
     </div>
     <p id="snapshot-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
-  <!-- Designer: replace #wizard-art. No illustration is shipped. -->
+  <!-- Designer: put an SVG or img in the matching wizard-art slot. Empty slots stay hidden. -->
   <dialog id="wizard" aria-labelledby="wizard-title" aria-describedby="wizard-body">
-    <p id="wizard-step" class="wizard-step"></p>
+    <p id="wizard-step" class="wizard-step">
+      <span id="wizard-step-label"></span>
+      <span id="wizard-segments" class="wizard-segments" aria-hidden="true"></span>
+    </p>
     <p id="wizard-announce" class="visually-hidden" aria-live="polite"></p>
-    <div id="wizard-art" class="wizard-art" data-art-slot="welcome" hidden>
-      <p>Art placeholder</p>
-    </div>
+    <div class="wizard-art" data-art-slot="welcome" hidden></div>
+    <div class="wizard-art" data-art-slot="library" hidden></div>
+    <div class="wizard-art" data-art-slot="snapshot" hidden></div>
+    <div class="wizard-art" data-art-slot="consent" hidden></div>
+    <div class="wizard-art" data-art-slot="done" hidden></div>
     <h2 id="wizard-title" tabindex="-1"></h2>
     <p id="wizard-body"></p>
     <p id="wizard-next" class="dialog-note" hidden></p>
@@ -275,10 +280,12 @@
       <button id="wizard-yes" class="wizard-choice" type="button">Yes, share</button>
     </div>
     <div class="wizard-actions">
-      <button id="wizard-back" class="wizard-quiet" type="button">Back</button>
-      <button id="wizard-secondary" class="wizard-quiet" type="button">Choose a folder</button>
+      <div class="wizard-actions-start">
+        <button id="wizard-back" class="wizard-quiet" type="button">Back</button>
+        <button id="wizard-cancel" class="wizard-quiet" type="button">Cancel</button>
+        <button id="wizard-secondary" class="wizard-quiet" type="button">Choose a folder</button>
+      </div>
       <button id="wizard-primary" type="button">Get started</button>
-      <button id="wizard-cancel" class="wizard-quiet" type="button">Cancel</button>
     </div>
   </dialog>
   <script src="/wizard.js"></script>

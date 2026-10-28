@@ -76,7 +76,6 @@ def describe_library() -> dict[str, object]:
         could be read, ``places`` for extra disks that hold crates, and
         ``serato_running``. No filesystem path is included.
     """
-    running = snapshots.serato_dj_running()
     master = Path(library.MASTER)
     if not master.is_file():
         return {
@@ -86,11 +85,16 @@ def describe_library() -> dict[str, object]:
             "summary": NOT_FOUND_SUMMARY,
             "next": NOT_FOUND_NEXT,
             "places": [],
-            "serato_running": running,
+            "serato_running": snapshots.serato_dj_running(),
+            "status_message": None,
+            "status_writable": False,
         }
+    info = _status_for_wizard(master)
+    running = info.get("serato_running") is True
     volume = volume_label(master)
     count = _track_count(master)
     places = _extra_places(volume)
+    message = info.get("message")
     return {
         "found": True,
         "volume": volume,
@@ -99,6 +103,8 @@ def describe_library() -> dict[str, object]:
         "next": None,
         "places": places,
         "serato_running": running,
+        "status_message": message if isinstance(message, str) else None,
+        "status_writable": info.get("writable") is True,
     }
 
 
@@ -141,7 +147,35 @@ def accept_folder(folder: str) -> dict[str, object]:
         "next": nxt,
         "places": [],
         "serato_running": running,
+        "status_message": None,
+        "status_writable": False,
     }
+
+
+def _status_for_wizard(master: Path) -> dict[str, object]:
+    """Read the same lock status the sidebar shows.
+
+    Args:
+        master: Library file that exists.
+
+    Returns:
+        The status dict. A read failure still reports whether Serato DJ
+        is running, so the wizard and the sidebar do not disagree.
+    """
+    try:
+        return library.status(master)
+    except (library.LibraryError, sqlite3.Error, OSError):
+        running = snapshots.serato_dj_running()
+        return {
+            "serato_running": running,
+            "writable": not running,
+            "open": running,
+            "message": (
+                "Serato DJ is open. Edits stay off until it quits."
+                if running
+                else "Serato is quit. Edits save to the library."
+            ),
+        }
 
 
 def browse_folders(folder: str | None) -> dict[str, object]:

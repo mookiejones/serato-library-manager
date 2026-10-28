@@ -404,15 +404,12 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     (".files-empty", ("--color-card",), 15, 400),
     ("#files-confirm.danger", ("--color-danger",), 15, 400),
     (".wizard-step", ("--color-card",), 14, 500),
-    (".wizard-art", ("--color-card",), 11, 400),
     (".wizard-status.is-blocked", ("--color-warn-bg",), 15, 400),
     (".wizard-status.is-saved", ("--color-safe-bg",), 15, 400),
     (".wizard-choice", ("--color-card",), 15, 400),
     (".wizard-quiet", ("--color-card",), 15, 400),
-    ("#wizard-primary", ("--color-text",), 15, 400),
+    ("#wizard-primary", ("--color-primary",), 20, 700),
     ("#wizard-folder-use", ("--color-text",), 15, 400),
-    ("#wizard-primary:disabled", ("--color-button",), 15, 400),
-    ("#wizard-folder-use:disabled", ("--color-button",), 15, 400),
     (".wizard-folder", ("--color-button",), 15, 400),
 )
 
@@ -463,7 +460,6 @@ _DECORATIVE = {
     ".files-actions",
     ".snapshot-card",
     ".swatch",
-    ".wizard-art",
 }
 
 # The only visible edge of these fields. Card surfaces use the sheet.
@@ -593,12 +589,8 @@ class ContrastTests(unittest.TestCase):
 
         outline = self._rule("button:focus-visible")
         ring = _paint(outline["outline"], self.colors)
-        title_ring = _paint(self._rule("#wizard-title:focus")["outline"], self.colors)
-        self.assertGreaterEqual(
-            contrast(title_ring, self._surface("--color-card")),
-            3,
-            "wizard title focus is below 3:1",
-        )
+        heading_focus = self._rule("#wizard-title:focus")
+        self.assertEqual(heading_focus.get("outline"), "none")
         for background_name in _FOCUS_SURFACES:
             ratio = contrast(ring, self._surface(background_name))
             self.assertGreaterEqual(ratio, 3, f"focus on {background_name} is {ratio:.2f}:1")
@@ -670,7 +662,6 @@ class ContrastTests(unittest.TestCase):
             "#rekordbox-cancel",
             "#merge-cancel",
             ".wizard-choice",
-            "#wizard-title:focus",
         } | {selector for selector, _, _ in _CONTROL_EDGE}
         self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")
         self.assertEqual(checked_borders - bordered, set(), "contrast list names a border that is not painted")

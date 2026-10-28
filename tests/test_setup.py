@@ -249,6 +249,8 @@ class SetupApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         assert isinstance(payload, dict)
         self.assertIs(payload["serato_running"], True)
+        self.assertEqual(payload["status_message"], "Serato DJ is open. Edits stay off until it quits.")
+        self.assertIs(payload["status_writable"], False)
         status, chosen = _request(
             self.base,
             "/api/setup",
@@ -298,7 +300,9 @@ class MissingLibraryServerTests(unittest.TestCase):
                     status, page = _request_text(base, "/")
                     self.assertEqual(status, 200)
                     self.assertIn("Get started", page)
-                    self.assertIn("Art placeholder", page)
+                    self.assertIn('data-art-slot="welcome"', page)
+                    self.assertIn('data-art-slot="done"', page)
+                    self.assertNotIn("Art placeholder", page)
                     status, payload = _request(base, "/api/setup")
                     self.assertEqual(status, 200)
                     assert isinstance(payload, dict)

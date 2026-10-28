@@ -263,6 +263,7 @@ var SeratoWizard = (() => {
     if (token !== generation) return;
     summary = setup?.summary ?? "Couldn't look for your library.";
     nextText = setup?.next ?? "Choose Check again.";
+    if (setup) publishStatus(setup);
     const library = setup === null ? "error" : setup.found ? "found" : "missing";
     model = createWizard({
       needsConsent: settings.needs_consent_prompt,
@@ -331,6 +332,7 @@ var SeratoWizard = (() => {
     } else {
       summary = setup.summary;
       nextText = setup.next;
+      publishStatus(setup);
       model = reduceWizard(model, { type: "serato", running: setup.seratoRunning });
       model = reduceWizard(model, { type: "library", status: setup.found ? "found" : "missing" });
     }
@@ -448,6 +450,7 @@ var SeratoWizard = (() => {
       }
       summary = setup.summary;
       nextText = setup.next;
+      publishStatus(setup);
       model = reduceWizard(model, { type: "serato", running: setup.seratoRunning });
       model = reduceWizard(model, { type: "library", status: setup.found ? "found" : "missing" });
       if (setup.found) {
@@ -491,7 +494,9 @@ var SeratoWizard = (() => {
   }
   function paint(moveFocus) {
     const position = stepPosition(model);
-    text("wizard-step").textContent = `Step ${position.index} of ${position.count}`;
+    text("wizard-step-label").textContent = `Step ${position.index} of ${position.count}`;
+    paintSegments(position.index, position.count);
+    paintArt();
     text("wizard-title").textContent = HEADINGS[model.step];
     const body = bodyText();
     const bodyNode = text("wizard-body");
@@ -507,7 +512,6 @@ var SeratoWizard = (() => {
     statusNode.hidden = status.text.length === 0;
     statusNode.className = status.kind ? `wizard-status is-${status.kind}` : "wizard-status";
     paintProgress();
-    element("wizard-art").hidden = model.step !== "welcome";
     element("wizard-consent").hidden = model.step !== "consent";
     element("wizard-folders").hidden = !(folderOpen && model.step === "library");
     const back = button("wizard-back");
@@ -557,6 +561,36 @@ var SeratoWizard = (() => {
     if (statusNote) return { text: statusNote, kind: "" };
     return { text: "", kind: "" };
   }
+  function paintSegments(current, count) {
+    const host = element("wizard-segments");
+    host.replaceChildren();
+    for (let index = 1; index <= count; index += 1) {
+      const segment = document.createElement("span");
+      segment.className = "wizard-segment";
+      if (index < current) segment.dataset.state = "done";
+      else if (index === current) segment.dataset.state = "current";
+      else segment.dataset.state = "upcoming";
+      host.append(segment);
+    }
+  }
+  function paintArt() {
+    const slots = document.querySelectorAll(".wizard-art");
+    slots.forEach((slot) => {
+      const current = slot.dataset.artSlot === model.step;
+      const hasArt = slot.querySelector("svg, img") !== null;
+      slot.hidden = !(current && hasArt);
+    });
+  }
+  function publishStatus(setup) {
+    if (setup.statusMessage.length === 0) return;
+    options.onStatus?.({
+      message: setup.statusMessage,
+      writable: setup.statusWritable,
+      open: setup.seratoRunning,
+      serato_running: setup.seratoRunning,
+      process: setup.seratoRunning ? "Serato DJ" : null
+    });
+  }
   function paintProgress() {
     const node = element("wizard-progress");
     if (!(node instanceof HTMLProgressElement)) return;
@@ -568,14 +602,14 @@ var SeratoWizard = (() => {
   }
   function ensurePoll() {
     stopPoll();
-    if (model.step !== "snapshot" || model.context.snapshot === "saved") return;
+    if (!wizardDialog().open) return;
     pollTimer = window.setInterval(() => {
       void refreshSerato();
     }, 2e3);
   }
   async function refreshSerato() {
     if (polling) return;
-    if (model.step !== "snapshot" || model.context.snapshot === "saved") {
+    if (!wizardDialog().open) {
       stopPoll();
       return;
     }
@@ -584,7 +618,8 @@ var SeratoWizard = (() => {
     try {
       const setup = await loadSetup();
       if (token !== generation || !setup) return;
-      if (model.step !== "snapshot") return;
+      publishStatus(setup);
+      if (model.step !== "snapshot" || model.context.snapshot === "saved") return;
       const wasBlocked = snapshotBlocked(model);
       model = reduceWizard(model, { type: "serato", running: setup.seratoRunning });
       if (snapshotBlocked(model) !== wasBlocked) paint(false);
@@ -645,7 +680,9 @@ var SeratoWizard = (() => {
       found: value.found,
       summary: value.summary,
       next: typeof value.next === "string" ? value.next : "",
-      seratoRunning: value.serato_running === true
+      seratoRunning: value.serato_running === true,
+      statusMessage: typeof value.status_message === "string" ? value.status_message : "",
+      statusWritable: value.status_writable === true
     };
   }
   function readBrowse(value) {

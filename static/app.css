@@ -1055,35 +1055,50 @@ dialog .check input {
 }
 
 .wizard-step {
-  margin: 0 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
   color: var(--color-text-muted);
   font-size: var(--font-heading);
   font-weight: 500;
 }
 
-.wizard-art {
-  min-height: 96px;
-  margin: 0 0 var(--space-4);
-  padding: var(--space-4);
-  border: 1px dashed var(--color-control-edge);
-  border-radius: var(--radius-card);
-  color: var(--color-text-muted);
-  font-size: var(--font-caption);
-  text-align: center;
+.wizard-segments {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.wizard-segment {
+  width: var(--space-5);
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-control-edge);
+}
+
+.wizard-segment[data-state="current"],
+.wizard-segment[data-state="done"] {
+  background: var(--color-primary);
 }
 
 .wizard-art:not([hidden]) {
-  display: grid;
-  place-items: center;
+  display: block;
+  box-sizing: border-box;
+  height: 160px;
+  margin: 0 0 var(--space-4);
+  overflow: hidden;
 }
 
-.wizard-art p {
-  margin: 0;
+.wizard-art svg,
+.wizard-art img {
+  display: block;
+  width: 100%;
+  height: 160px;
 }
 
 #wizard-title:focus {
-  outline: 2px solid var(--color-primary);
-  outline-offset: var(--space-1);
+  outline: none;
 }
 
 .wizard-status {
@@ -1135,7 +1150,15 @@ dialog .check input {
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   align-items: center;
+  justify-content: space-between;
   margin-top: var(--space-5);
+}
+
+.wizard-actions-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
 }
 
 .wizard-quiet {
@@ -1148,7 +1171,6 @@ dialog .check input {
   text-underline-offset: 3px;
 }
 
-#wizard-primary,
 #wizard-folder-use {
   min-height: 44px;
   padding: var(--space-2) var(--space-4);
@@ -1158,14 +1180,19 @@ dialog .check input {
 }
 
 #wizard-primary {
+  min-height: 44px;
   margin-left: auto;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-card);
+  background: var(--color-primary);
+  color: var(--color-card);
+  font-size: var(--font-title);
+  font-weight: 700;
 }
 
-#wizard-primary:disabled,
-#wizard-folder-use:disabled {
-  background: var(--color-button);
-  color: var(--color-text);
-  cursor: default;
+#wizard-primary:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .wizard-folder-name {
