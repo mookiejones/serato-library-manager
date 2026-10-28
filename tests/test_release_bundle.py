@@ -477,20 +477,36 @@ class WorkflowTests(unittest.TestCase):
             "\n      - ", 1
         )[0]
         self.assertIn("runner.os == 'macOS'", mac_sign)
-        self.assertIn("github.event_name != 'pull_request'", mac_sign)
         self.assertIn("APPLE_CERTIFICATE_P12_BASE64", mac_sign)
         self.assertNotIn("WINDOWS_", mac_sign)
         win_sign = text.split("- name: Sign the Windows app when secrets are present", 1)[1].split(
             "\n      - ", 1
         )[0]
         self.assertIn("runner.os == 'Windows'", win_sign)
-        self.assertIn("github.event_name != 'pull_request'", win_sign)
         self.assertIn("WINDOWS_CERTIFICATE_PFX_BASE64", win_sign)
         self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", win_sign)
         self.assertNotIn("APPLE_", win_sign)
-        skipped = text.split("- name: Skip signing on a pull request", 1)[1].split("\n      - ", 1)[0]
-        self.assertIn("github.event_name == 'pull_request'", skipped)
+        build = text.split("\n  build:\n", 1)[1].split("\n  release-build:", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", build)
+        build_perms = build.split("permissions:", 1)[1].split("strategy:", 1)[0]
+        self.assertEqual(build_perms.strip(), "contents: read")
+        self.assertNotIn("secrets.", build)
+        self.assertNotIn("id-token", build)
+        self.assertNotIn("attestations", build)
+        skipped = build.split("- name: Skip signing on a pull request", 1)[1].split("\n      - ", 1)[0]
         self.assertNotIn("secrets.", skipped)
+        release_build = text.split("\n  release-build:\n", 1)[1].split("\n  attest:", 1)[0]
+        self.assertIn("github.event_name != 'pull_request'", release_build)
+        self.assertIn("actions: write", release_build.split("strategy:", 1)[0])
+        self.assertNotIn("id-token", release_build.split("strategy:", 1)[0])
+        attest = text.split("\n  attest:\n", 1)[1].split("\n  publish:", 1)[0]
+        self.assertIn("id-token: write", attest)
+        self.assertIn("attestations: write", attest)
+        self.assertIn("actions: read", attest)
+        self.assertNotIn("actions: write", attest)
+        self.assertIn("workflow_dispatch", attest)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", attest)
+        self.assertNotIn("pull_request", attest)
         header = text.split("jobs:", 1)[0]
         self.assertIn("pull_request:", header)
         self.assertIn("packaging/**", header)

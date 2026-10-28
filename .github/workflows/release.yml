@@ -21,13 +21,11 @@ concurrency:
 jobs:
   build:
     name: build (${{ matrix.artifact }})
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
       contents: read
-      actions: write
-      id-token: write
-      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -58,35 +56,12 @@ jobs:
             requirements-build.txt
             requirements-macos.txt
 
-      # The tag is passed in RELEASE_TAG by the Actions env map, which is
-      # set before the shell starts. Run 40214779889 failed on Windows because
-      # PowerShell expanded the shell form of GITHUB_REF_NAME to an empty
-      # string (Tag must look like v1.2.3, got ''). Do not switch this step
-      # back to shell expansion of that variable.
-      - name: Require a release tag
-        if: github.event_name == 'push'
-        shell: bash
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: python scripts/release_bundle.py check-tag
-
       - name: Install build tools
         run: python -m pip install -r requirements-build.txt
 
       - name: Install macOS tray frameworks
         if: runner.os == 'macOS'
         run: python -m pip install -r requirements-macos.txt
-
-      # Tag pushes only. A workflow_dispatch build keeps the empty
-      # _build_config.py that is committed, so a manual run embeds no keys.
-      - name: Bake telemetry keys
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
-          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
-        shell: bash
-        run: python scripts/write_build_config.py
 
       - name: Build the app
         run: python -m PyInstaller serato-library.spec
@@ -95,33 +70,8 @@ jobs:
         shell: bash
         run: python scripts/release_bundle.py assert-arch dist "${{ matrix.arch }}"
 
-      # SIGNING HOOK (dormant). The secrets are not configured.
-      # scripts/release_sign.py skips signing and exits 0 when every secret
-      # for this OS is empty. A partial set fails the job.
-      - name: Sign the macOS app when secrets are present
-        if: runner.os == 'macOS' && github.event_name != 'pull_request'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
-          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-        run: python scripts/release_sign.py dist
-
-      - name: Sign the Windows app when secrets are present
-        if: runner.os == 'Windows' && github.event_name != 'pull_request'
-        shell: bash
-        env:
-          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: python scripts/release_sign.py dist
-
-      # A pull request must not receive signing secrets. The script exits 0
-      # and prints "Signing skipped" when the environment has none.
+      # No secrets are passed. The script prints "Signing skipped" and exits 0.
       - name: Skip signing on a pull request
-        if: github.event_name == 'pull_request'
         shell: bash
         run: python scripts/release_sign.py dist
 
@@ -145,16 +95,8 @@ jobs:
         shell: bash
         run: python scripts/release_bundle.py build-setup dist Serato-Library-windows-setup.exe
 
-      - name: Sign the installer when secrets are present
-        if: matrix.kind == 'windows' && github.event_name != 'pull_request'
-        shell: bash
-        env:
-          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: python scripts/release_sign.py Serato-Library-windows-setup.exe
-
       - name: Skip installer signing on a pull request
-        if: matrix.kind == 'windows' && github.event_name == 'pull_request'
+        if: matrix.kind == 'windows'
         shell: bash
         run: python scripts/release_sign.py Serato-Library-windows-setup.exe
 
@@ -163,23 +105,129 @@ jobs:
         shell: bash
         run: python scripts/release_bundle.py smoke-setup Serato-Library-windows-setup.exe
 
-      - name: Attest the disk image
-        if: matrix.kind == 'dmg' && github.event_name != 'pull_request'
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: ${{ matrix.artifact }}
+  # Tag pushes and manual runs only. actions: write is required to upload
+  # the built files so a later job can download them. A pull request never
+  # runs this job, so that scope never appears on a pull_request token.
+  release-build:
+    name: release-build (${{ matrix.artifact }})
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+            kind: dmg
+            artifact: Serato-Library-macos-arm64.dmg
+          - runner: macos-15-intel
+            arch: x64
+            kind: dmg
+            artifact: Serato-Library-macos-x64.dmg
+          - runner: windows-latest
+            arch: x64
+            kind: windows
+            artifact: Serato-Library-windows.zip
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Attest the portable zip
-        if: matrix.kind == 'windows' && github.event_name != 'pull_request'
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          subject-path: Serato-Library-windows.zip
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+            requirements-macos.txt
 
-      - name: Attest the Windows installer
-        if: matrix.kind == 'windows' && github.event_name != 'pull_request'
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: Serato-Library-windows-setup.exe
+      - name: Require a release tag
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/release_bundle.py check-tag
+
+      - name: Install build tools
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Install macOS tray frameworks
+        if: runner.os == 'macOS'
+        run: python -m pip install -r requirements-macos.txt
+
+      - name: Bake telemetry keys
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+        shell: bash
+        run: python scripts/write_build_config.py
+
+      - name: Build the app
+        run: python -m PyInstaller serato-library.spec
+
+      - name: Require the frozen architecture
+        shell: bash
+        run: python scripts/release_bundle.py assert-arch dist "${{ matrix.arch }}"
+
+      - name: Sign the macOS app when secrets are present
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: python scripts/release_sign.py dist
+
+      - name: Sign the Windows app when secrets are present
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: python scripts/release_sign.py dist
+
+      - name: Verify, write, and launch the disk image
+        if: matrix.kind == 'dmg'
+        shell: bash
+        run: python scripts/release_bundle.py pack-dmg dist "${{ matrix.artifact }}" "${{ matrix.arch }}"
+
+      - name: Verify, zip, and launch the portable build
+        if: matrix.kind == 'windows'
+        shell: bash
+        run: python scripts/release_bundle.py pack dist Serato-Library-windows.zip
+
+      - name: Install Inno Setup 6.7.3
+        if: matrix.kind == 'windows'
+        shell: bash
+        run: python scripts/release_bundle.py install-inno
+
+      - name: Build the Windows installer
+        if: matrix.kind == 'windows'
+        shell: bash
+        run: python scripts/release_bundle.py build-setup dist Serato-Library-windows-setup.exe
+
+      - name: Sign the installer when secrets are present
+        if: matrix.kind == 'windows'
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: python scripts/release_sign.py Serato-Library-windows-setup.exe
+
+      - name: Install the Windows installer and smoke it
+        if: matrix.kind == 'windows'
+        shell: bash
+        run: python scripts/release_bundle.py smoke-setup Serato-Library-windows-setup.exe
 
       - name: Upload the disk image
         if: matrix.kind == 'dmg'
@@ -205,9 +253,33 @@ jobs:
           path: Serato-Library-windows-setup.exe
           if-no-files-found: error
 
+  attest:
+    name: attest build provenance
+    needs: release-build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: Serato-Library-*
+          path: dist-zips
+          merge-multiple: true
+
+      - name: Attest the disk images and Windows files
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist-zips/Serato-Library-*
+
   publish:
     name: publish GitHub release
-    needs: build
+    needs: attest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
