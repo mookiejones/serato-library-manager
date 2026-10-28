@@ -20,6 +20,7 @@ from unittest import mock
 import app_log
 import files
 import library
+import serato_web.completeness as completeness
 from tests.fixture import TempLibrary, open_database
 
 STAMP = "20261028-153045"
@@ -406,22 +407,36 @@ class BackupTests(unittest.TestCase):
             (live / "master.sqlite").write_bytes(b"live")
             lock_path = live / library.PARTIAL_LOCK_NAME
             script = (
-                "import os, sys, time\n"
+                "import os, sys\n"
                 "fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o644)\n"
-                "if os.name == 'nt':\n"
-                "    import msvcrt\n"
-                "    os.write(fd, b'\\0')\n"
-                "    os.lseek(fd, 0, os.SEEK_SET)\n"
-                "    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)\n"
-                "else:\n"
-                "    import fcntl\n"
-                "    fcntl.flock(fd, fcntl.LOCK_EX)\n"
-                "sys.stdout.write('ready\\n')\n"
-                "sys.stdout.flush()\n"
-                "time.sleep(30)\n"
+                "try:\n"
+                "    if os.name == 'nt':\n"
+                "        import msvcrt\n"
+                "        os.write(fd, b'\\0')\n"
+                "        os.lseek(fd, 0, os.SEEK_SET)\n"
+                "        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)\n"
+                "    else:\n"
+                "        import fcntl\n"
+                "        fcntl.flock(fd, fcntl.LOCK_EX)\n"
+                "    sys.stdout.write('ready\\n')\n"
+                "    sys.stdout.flush()\n"
+                "    sys.stdin.readline()\n"
+                "finally:\n"
+                "    if os.name == 'nt':\n"
+                "        import msvcrt\n"
+                "        try:\n"
+                "            os.lseek(fd, 0, os.SEEK_SET)\n"
+                "            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)\n"
+                "        except OSError:\n"
+                "            pass\n"
+                "    try:\n"
+                "        os.close(fd)\n"
+                "    except OSError:\n"
+                "        pass\n"
             )
             proc = subprocess.Popen(
                 [sys.executable, "-c", script, str(lock_path)],
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 text=True,
             )
@@ -437,10 +452,21 @@ class BackupTests(unittest.TestCase):
                 library.ensure_backup()
                 self.assertEqual((live / "master.sqlite").read_bytes(), b"live")
             finally:
-                proc.kill()
-                proc.wait(timeout=5)
+                if proc.poll() is None and proc.stdin is not None:
+                    try:
+                        proc.stdin.write("\n")
+                        proc.stdin.flush()
+                    except OSError:
+                        proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
                 if proc.stdout is not None:
                     proc.stdout.close()
+                if proc.stdin is not None:
+                    proc.stdin.close()
 
     def test_complete_marker_rejects_bad_contents(self) -> None:
         """Reject an extra file, a missing file, a bad marker, and a path escape.
@@ -528,6 +554,88 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(after, before)
             self.assertFalse((legacy / "master.sqlite-shm").exists())
             self.assertFalse(library.is_complete(legacy))
+
+    def test_failed_suffix_accepts_any_digit_length(self) -> None:
+        """Treat ``-failed`` plus any run of digits as a failed name.
+
+        Returns:
+            None. The test fails if a short, long, or padded suffix is offered
+            as a finished backup.
+        """
+        self.assertTrue(completeness.is_failed_name("serato-web-old-failed-7"))
+        self.assertTrue(completeness.is_failed_name("serato-web-old-FAILED-100"))
+        self.assertTrue(completeness.is_failed_name("serato-web-old-failed-002"))
+        self.assertTrue(completeness.is_failed_name("serato-web-old-failed"))
+        self.assertFalse(completeness.is_failed_name("serato-web-old-failed-2a"))
+        self.assertFalse(completeness.is_failed_name("serato-web-old-failed-backup"))
+        with tempfile.TemporaryDirectory() as raw:
+            parent = Path(raw)
+            for name in ("copy-failed-7", "copy-FAILED-100", "copy-failed-002"):
+                folder = parent / name
+                folder.mkdir()
+                (folder / "master.sqlite").write_bytes(b"db")
+                library._write_complete_marker(folder)
+                self.assertFalse(library.is_complete(folder))
+                self.assertEqual(library.backup_status(folder), "incomplete")
+
+    def test_unknown_marker_key_and_text_line_are_not_complete(self) -> None:
+        """Reject an extra JSON key and the old text-line marker.
+
+        A text-line ``COMPLETE`` file is invalid. It is not a legacy backup,
+        because the marker file is present.
+
+        Returns:
+            None. The test fails if either folder is complete or legacy.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            extra = root / "extra-key"
+            extra.mkdir()
+            (extra / "master.sqlite").write_bytes(b"db")
+            library._write_complete_marker(extra)
+            payload = json.loads((extra / library.BACKUP_COMPLETE_NAME).read_text(encoding="utf-8"))
+            payload["note"] = "extra"
+            (extra / library.BACKUP_COMPLETE_NAME).write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            self.assertFalse(library.is_complete(extra))
+            self.assertEqual(library.backup_status(extra), "incomplete")
+
+            lines = root / "text-lines"
+            lines.mkdir()
+            (lines / "master.sqlite").write_bytes(b"db")
+            digest = hashlib.sha256(b"db").hexdigest()
+            (lines / library.BACKUP_COMPLETE_NAME).write_text(
+                f"{digest}  master.sqlite\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(library.is_complete(lines))
+            self.assertEqual(library.backup_status(lines), "incomplete")
+            self.assertNotEqual(library.backup_status(lines), library.LEGACY_BACKUP_STATUS)
+
+    def test_completeness_imports_without_library(self) -> None:
+        """Import the completeness module in a process that has not loaded library.
+
+        Returns:
+            None. The test fails if that import pulls in ``library``.
+        """
+        root = Path(__file__).resolve().parents[1]
+        script = (
+            "import sys\n"
+            "import serato_web.completeness\n"
+            "assert 'library' not in sys.modules\n"
+            "print(serato_web.completeness.CompletenessError.__name__)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("CompletenessError", result.stdout)
 
     def test_backup_lock_ignores_a_patched_platform(self) -> None:
         """Lock with the host, even when a test pretends to be another OS.
@@ -640,9 +748,10 @@ class BackupTests(unittest.TestCase):
             self.assertFalse(library.is_complete(corrupt))
             self.assertEqual(library.list_backups(parent), [])
             library.verify_legacy_backup(legacy)
-            with self.assertRaises(library.LibraryError) as caught:
+            with self.assertRaises(completeness.CompletenessError) as caught:
                 library.verify_legacy_backup(corrupt)
             self.assertIn("not restored", str(caught.exception))
+            self.assertTrue(issubclass(library.LibraryError, completeness.CompletenessError))
 
     def test_failed_rename_uses_the_next_suffix(self) -> None:
         """Use ``-failed-02`` when ``-failed`` is already taken.

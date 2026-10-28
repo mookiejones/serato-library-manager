@@ -16,10 +16,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
-from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
 
@@ -34,6 +34,28 @@ LEGACY_STATUS = "legacy, unverified"
 MARKER_VERSION = 1
 MARKER_ALGORITHM = "sha256"
 _HEX = frozenset("0123456789abcdef")
+_FAILED_NAME = re.compile(r"-failed(-\d+)?$", re.IGNORECASE)
+_MARKER_KEYS = frozenset({"version", "algorithm", "hashes"})
+
+
+class CompletenessError(Exception):
+    """Raised when a backup folder cannot be checked.
+
+    ``library.LibraryError`` subclasses this. Importing this module does
+    not import ``library``.
+
+    Attributes:
+        message: Text for the caller.
+    """
+
+    def __init__(self, message: str) -> None:
+        """Store the message.
+
+        Args:
+            message: Text for the caller.
+        """
+        super().__init__(message)
+        self.message = message
 
 
 def is_failed_name(name: str) -> bool:
@@ -43,14 +65,11 @@ def is_failed_name(name: str) -> bool:
         name: Directory name, not a path.
 
     Returns:
-        True when the name ends with ``-failed`` or ``-failed-NN``, in any
-        letter case.
+        True when the name ends with ``-failed`` or ``-failed-`` and one
+        or more digits, in any letter case. ``-failed-7``, ``-FAILED-100``,
+        and ``-failed-002`` all count.
     """
-    lowered = name.lower()
-    if lowered.endswith(FAILED_SUFFIX):
-        return True
-    tail = lowered.rsplit(f"{FAILED_SUFFIX}-", 1)
-    return len(tail) == 2 and len(tail[1]) == 2 and tail[1].isdigit()
+    return _FAILED_NAME.search(name) is not None
 
 
 def is_staging_name(name: str) -> bool:
@@ -225,7 +244,7 @@ def _hashes_match(folder: Path, payload: object) -> bool:
         True when version, algorithm, and every file hash agree, with no
         extra or missing files.
     """
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or set(payload) != _MARKER_KEYS:
         return False
     if payload.get("version") != MARKER_VERSION or payload.get("algorithm") != MARKER_ALGORITHM:
         return False
@@ -268,26 +287,22 @@ def _rejected(path: Path) -> bool:
     return (path / INCOMPLETE_NAME).exists()
 
 
-def is_complete(snapshot_or_backup: Path | Mapping[str, object]) -> bool:
+def is_complete(snapshot_or_backup: Path) -> bool:
     """Return whether a snapshot or backup directory is finished.
 
-    The signature accepts a directory. A mapping is complete only when it
-    already carries ``complete`` true and a ``sha256`` string, which is the
-    shape a snapshot summary can pass without reading the disk again. No
-    restore calls this yet. The snapshot work in #62 will.
+    The check always reads the directory. No restore calls this yet.
+    The snapshot work in #62 will.
 
     Args:
-        snapshot_or_backup: Directory to check, or a summary mapping.
+        snapshot_or_backup: Directory to check.
 
     Returns:
         True only when ``COMPLETE`` exists and every listed hash matches
-        the file set exactly. A missing marker, a ``.partial`` name, a
-        ``-failed`` name, traversal, an absolute path, or a hash that is
-        not 64 lowercase hex characters is false.
+        the file set exactly. A missing marker, a text-line marker, an
+        extra key, a ``.partial`` name, a ``-failed`` name, traversal, an
+        absolute path, or a hash that is not 64 lowercase hex characters
+        is false.
     """
-    if isinstance(snapshot_or_backup, Mapping):
-        digest = snapshot_or_backup.get("sha256")
-        return snapshot_or_backup.get("complete") is True and _valid_digest(digest)
     path = Path(snapshot_or_backup)
     try:
         if _rejected(path):
@@ -356,23 +371,21 @@ def verify_legacy_backup(backup_dir: Path) -> None:
         backup_dir: Folder the user picked. It must be a legacy backup.
 
     Raises:
-        LibraryError: If the folder is not an unverified legacy backup,
+        CompletenessError: If the folder is not an unverified legacy backup,
             the copy cannot be checked, or the integrity check is not
             exactly ``ok``.
     """
-    from library import LibraryError
-
     if not _is_legacy_backup(backup_dir):
-        raise LibraryError("That folder is not an unverified legacy backup.")
+        raise CompletenessError("That folder is not an unverified legacy backup.")
     master = backup_dir / "master.sqlite"
     try:
         rows = _integrity_rows(master)
     except sqlite3.Error as exc:
-        raise LibraryError(
+        raise CompletenessError(
             "That legacy backup could not be checked, so it was not restored."
         ) from exc
     if rows != [("ok",)]:
-        raise LibraryError(
+        raise CompletenessError(
             "That legacy backup did not pass its integrity check, so it was not restored."
         )
 

@@ -170,7 +170,10 @@ def _as_float(value: object) -> float:
     )
 
 
-class LibraryError(Exception):
+from serato_web.completeness import CompletenessError
+
+
+class LibraryError(CompletenessError):
     """Raised when a library request cannot be completed.
 
     Attributes:
@@ -745,29 +748,32 @@ def ensure_backup() -> Path | None:
     staging, final_name = _claim_staging(parent, stamp)
     lock: int | None = None
     try:
-        lock = _lock_partial(staging)
-        _backup_database(master, staging / "master.sqlite")
-        _match_quiescent_header(master, staging / "master.sqlite")
-        _fsync_file(staging / "master.sqlite")
-        root = master.resolve().parent / "root.sqlite"
-        if root.is_file() and _mirror_allowed(root):
-            _backup_database(root, staging / "root.sqlite")
-            _match_quiescent_header(root, staging / "root.sqlite")
-            _fsync_file(staging / "root.sqlite")
-        _write_complete_marker(staging)
-        _fsync_directory(staging)
-        # Windows refuses to rename a directory that still has an open file.
-        # Close the lock once, then delete it, before publish or cleanup.
-        _release_staging_lock(staging, lock)
-        lock = None
-        folder = staging.with_name(final_name)
-        # os.replace is atomic on the same directory. File moves use
-        # os.rename so a cross-device fallback does not publish this folder.
-        os.replace(staging, folder)
-        _fsync_directory(parent)
+        try:
+            lock = _lock_partial(staging)
+            _backup_database(master, staging / "master.sqlite")
+            _match_quiescent_header(master, staging / "master.sqlite")
+            _fsync_file(staging / "master.sqlite")
+            root = master.resolve().parent / "root.sqlite"
+            if root.is_file() and _mirror_allowed(root):
+                _backup_database(root, staging / "root.sqlite")
+                _match_quiescent_header(root, staging / "root.sqlite")
+                _fsync_file(staging / "root.sqlite")
+            _write_complete_marker(staging)
+            _fsync_directory(staging)
+            # Windows refuses to rename a directory that still has an open file.
+            # Close the lock once, then delete it, before publish or cleanup.
+            _release_staging_lock(staging, lock)
+            lock = None
+            folder = staging.with_name(final_name)
+            # os.replace is atomic on the same directory. File moves use
+            # os.rename so a cross-device fallback does not publish this folder.
+            os.replace(staging, folder)
+            _fsync_directory(parent)
+        finally:
+            if lock is not None:
+                _release_staging_lock(staging, lock)
+                lock = None
     except Exception:
-        _release_staging_lock(staging, lock)
-        lock = None
         _discard_failed_backup(staging, parent)
         raise
     _backed_up.add(key)
@@ -870,19 +876,18 @@ def _lock_partial(folder: Path) -> int | None:
         An open file descriptor, or None when another process holds the lock.
     """
     path = folder / PARTIAL_LOCK_NAME
+    fd: int | None = None
     try:
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
-    except OSError:
-        return None
-    try:
         _acquire_lock(fd)
+        held = fd
+        fd = None
+        return held
     except OSError:
-        os.close(fd)
         return None
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def _acquire_lock(fd: int) -> None:
