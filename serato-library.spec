@@ -2,7 +2,9 @@
 """Build a windowed Serato Library app for the machine running PyInstaller.
 
 The static files are the directory server.py serves. The spec fails when
-index.html points at a local file that is not in that directory.
+index.html points at a local file that is not in that directory, or when
+the menu icon is missing. On macOS it also fails when the menu-bar
+frameworks are not installed.
 """
 
 import importlib.util
@@ -12,11 +14,19 @@ from pathlib import Path
 root = Path(SPECPATH)
 sys.path.insert(0, str(root))
 
+import app_config
 from static_assets import missing_static_files
 
 missing = missing_static_files(root / "static")
+icon = root / "packaging" / "menu-icon.png"
+if not icon.is_file():
+    missing.append("packaging/menu-icon.png")
 if missing:
     raise SystemExit("Missing build inputs: " + ", ".join(missing))
+
+if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("pystray") is None:
+    raise SystemExit("Missing build inputs: PIL and pystray")
+
 
 def telemetry_hiddenimports():
     """Return telemetry modules PyInstaller would otherwise miss.
@@ -51,22 +61,40 @@ def telemetry_hiddenimports():
     return names
 
 
-# pywebview picks its backend at runtime. The windowed build must still
-# bundle the one this OS imports: WKWebView on macOS, WebView2 through
-# WinForms on Windows, and GTK elsewhere.
+hidden = ["pystray", "pystray._base", "PIL", "PIL.Image", "six"]
+binaries = []
 if sys.platform == "darwin":
-    hidden = ["webview.platforms.cocoa"]
+    frameworks = ("objc", "AppKit", "Foundation", "CoreFoundation", "PyObjCTools")
+    absent = [name for name in ("AppKit", "Foundation", "objc") if importlib.util.find_spec(name) is None]
+    if absent:
+        raise SystemExit("Missing macOS tray frameworks: " + ", ".join(absent))
+    from PyInstaller.utils.hooks import collect_dynamic_libs
+
+    for name in frameworks:
+        binaries += collect_dynamic_libs(name)
+    hidden += [
+        "pystray._darwin",
+        "AppKit",
+        "Foundation",
+        "objc",
+        "CoreFoundation",
+        "PyObjCTools",
+        "PyObjCTools.MachSignals",
+    ]
 elif sys.platform == "win32":
-    hidden = ["webview.platforms.edgechromium", "webview.platforms.winforms"]
+    hidden += ["pystray._win32", "pystray._util.win32"]
 else:
-    hidden = ["webview.platforms.gtk"]
+    hidden += ["pystray._xorg", "pystray._appindicator", "pystray._gtk"]
 hidden.extend(telemetry_hiddenimports())
 
 a = Analysis(
     ["desktop.py"],
     pathex=[str(root)],
-    binaries=[],
-    datas=[(str(root / "static"), "static")],
+    binaries=binaries,
+    datas=[
+        (str(root / "static"), "static"),
+        (str(icon), "packaging"),
+    ],
     hiddenimports=hidden,
     hookspath=[],
     hooksconfig={},
@@ -107,4 +135,13 @@ if sys.platform == "darwin":
         name="Serato Library.app",
         icon=None,
         bundle_identifier="local.seratolibrary.browser",
+        info_plist={
+            "CFBundleShortVersionString": app_config.APP_VERSION,
+            "CFBundleVersion": app_config.APP_VERSION,
+            "LSUIElement": True,
+            "NSHighResolutionCapable": True,
+            "NSRemovableVolumesUsageDescription": (
+                "Serato Library reads music files on external drives."
+            ),
+        },
     )

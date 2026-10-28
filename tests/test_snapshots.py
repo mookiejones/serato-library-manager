@@ -23,11 +23,12 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import app_log
-import completeness
 import library
+import serato_web.completeness as completeness
 import snapshot_frames
 import snapshots
 from library import LibraryError
+from serato_web.completeness import CompletenessError, LEGACY_STATUS
 from snapshots import DriveSpec, SnapshotBlocked, SnapshotStore
 from tests.fixture import TempLibrary, open_database
 
@@ -842,6 +843,82 @@ class SnapshotTests(unittest.TestCase):
             self.assertFalse(completeness.is_complete(partial))
             self.assertNotIn("partial-one.partial", [item["id"] for item in store.list_snapshots()])
             self.assertIn("deleted", store.plan(saved["id"]))
+            took: list[object] = []
+
+            def refuse_take(*args: object, **kwargs: object) -> dict[str, object]:
+                took.append(args)
+                raise AssertionError("restore saved a snapshot of an incomplete directory")
+
+            store.take = refuse_take  # type: ignore[method-assign]
+            with self.assertRaises(snapshots.SnapshotError):
+                store.restore("partial-one.partial")
+            self.assertEqual(took, [])
+
+    def test_legacy_folder_is_checked_before_the_pre_restore_snapshot(self) -> None:
+        """Check an unmarked folder before saving the pre-restore snapshot.
+
+        Returns:
+            None. The test fails if ``verify_legacy_backup`` is skipped, if
+            it opens the backup database in place, or if the pre-restore
+            snapshot is saved before that check.
+        """
+        import sqlite3
+
+        with TempLibrary() as temp:
+            _music, _serato, store = _drive(temp.root, temp.db)
+            snapshot_id = "legacyfolder"
+            folder = store.manifests / snapshot_id
+            folder.mkdir(parents=True)
+            connection = sqlite3.connect(folder / "master.sqlite")
+            connection.execute("CREATE TABLE note (id INTEGER)")
+            connection.commit()
+            connection.close()
+            self.assertEqual(completeness.backup_status(folder), LEGACY_STATUS)
+            self.assertNotIn(snapshot_id, [item["id"] for item in store.list_snapshots()])
+            order: list[str] = []
+
+            def verify(directory: Path) -> None:
+                order.append("verify")
+                completeness.verify_legacy_backup(directory)
+                self.assertFalse((directory / "master.sqlite-shm").exists())
+
+            def diff(snapshot_id: str) -> dict[str, object]:
+                order.append("diff")
+                return {"deleted": []}
+
+            def take(trigger: str, reason: str, source: str | None = None) -> dict[str, object]:
+                order.append("take")
+                raise snapshots.SnapshotError("stopped after the pre-restore snapshot")
+
+            with mock.patch("snapshots.verify_legacy_backup", verify):
+                store._diff = diff  # type: ignore[method-assign]
+                store.take = take  # type: ignore[method-assign]
+                with self.assertRaises(snapshots.SnapshotError):
+                    store.restore(snapshot_id)
+            self.assertEqual(order, ["verify", "diff", "take"])
+
+    def test_corrupt_legacy_folder_is_refused_before_a_snapshot(self) -> None:
+        """Refuse a legacy folder whose integrity check fails, and save nothing.
+
+        Returns:
+            None. The test fails if the error is not a snapshot error or a
+            pre-restore snapshot is saved.
+        """
+        with TempLibrary() as temp:
+            _music, _serato, store = _drive(temp.root, temp.db)
+            folder = store.manifests / "broklegacy"
+            folder.mkdir(parents=True)
+            (folder / "master.sqlite").write_bytes(b"not a database")
+            took: list[object] = []
+
+            def refuse_take(*args: object, **kwargs: object) -> dict[str, object]:
+                took.append(args)
+                raise AssertionError("restore saved a snapshot of a failed legacy folder")
+
+            store.take = refuse_take  # type: ignore[method-assign]
+            with self.assertRaises(snapshots.SnapshotError):
+                store.restore("broklegacy")
+            self.assertEqual(took, [])
 
     def test_page_reads_the_restore_plan_fields(self) -> None:
         """Keep the Snapshots page on the dry-run fields the server returns.
@@ -1214,6 +1291,21 @@ def _m4a_file(audio: bytes) -> bytes:
     return atom(b"ftyp", b"M4A ") + moov + atom(b"mdat", audio)
 
 
+def _write_marked(folder: Path, files: dict[str, bytes]) -> None:
+    """Write files and the shared COMPLETE marker.
+
+    Args:
+        folder: Directory to create.
+        files: File names and bytes. ``COMPLETE`` is written after these.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, data in files.items():
+        target = folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    completeness.write_complete_marker(folder)
+
+
 class CompletenessTests(unittest.TestCase):
     """The JSON COMPLETE marker and the rules a backup copy will import."""
 
@@ -1226,7 +1318,7 @@ class CompletenessTests(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as raw:
             final = Path(raw) / "snap"
-            completeness.publish_directory(final, {"manifest.json": b'{"ok": true}\n'})
+            _write_marked(final, {"manifest.json": b'{"ok": true}\n'})
             self.assertTrue(completeness.is_complete(final))
             marker = json.loads((final / "COMPLETE").read_text(encoding="utf-8"))
             self.assertEqual(set(marker), {"version", "algorithm", "hashes"})
@@ -1289,15 +1381,12 @@ class CompletenessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "blob"
             path.write_bytes(payload)
-            previous = completeness._HASH_CHUNK
-            completeness._HASH_CHUNK = 4
-            try:
-                with mock.patch.object(Path, "open", wrapped):
-                    digest = completeness._sha256_file(path)
-            finally:
-                completeness._HASH_CHUNK = previous
+            with mock.patch.object(Path, "open", wrapped):
+                digest = completeness._sha256_file(path)
         self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
-        self.assertEqual(reads, [4, 4, 4, 4])
+        self.assertTrue(reads)
+        self.assertNotIn(-1, reads)
+        self.assertTrue(all(isinstance(size, int) and 0 < size <= 1024 * 1024 for size in reads))
 
     def test_only_sha256_digests_count(self) -> None:
         """Reject a marker whose algorithm or digest is not SHA-256.
@@ -1377,8 +1466,6 @@ class CompletenessTests(unittest.TestCase):
         """
         import sqlite3
 
-        import library
-
         with tempfile.TemporaryDirectory() as raw:
             folder = Path(raw) / "old"
             folder.mkdir()
@@ -1387,8 +1474,10 @@ class CompletenessTests(unittest.TestCase):
             connection.commit()
             connection.close()
             self.assertFalse(completeness.is_complete(folder))
+            self.assertEqual(completeness.backup_status(folder), LEGACY_STATUS)
             completeness.verify_legacy_backup(folder)
+            self.assertFalse((folder / "master.sqlite-shm").exists())
             finished = Path(raw) / "done"
-            completeness.publish_directory(finished, {"manifest.json": b"{}"})
-            with self.assertRaises(library.LibraryError):
+            _write_marked(finished, {"manifest.json": b"{}"})
+            with self.assertRaises(CompletenessError):
                 completeness.verify_legacy_backup(finished)

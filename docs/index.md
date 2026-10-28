@@ -4,7 +4,7 @@ Serato Library is a window on your computer for the Serato DJ Pro library. Brows
 
 The app talks only to this computer. It is not a website you log in to. Your tracks, crate names, and file paths stay here.
 
-[Install the app](guide/install.md). Read [Safety and backups](guide/safety.md) before the first edit.
+[Install the app](first-install.md). Read [Safety and backups](guide/safety.md) before the first edit.
 
 ![The library window on a sample collection. Crates are on the left. The open track is on the right.](media/crates.png)
 

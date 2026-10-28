@@ -54,7 +54,11 @@ The copy is a folder next to `master.sqlite`:
 
 `Library/Backups/serato-web-YYYYMMDD-HHMMSS`
 
-`YYYYMMDD` is the date. `HHMMSS` is the time on this computer. When a folder for that same second already exists, the name ends with `-02`, then `-03`, up through `-99`. A later number is a later copy from that second. Sorting the folder names keeps them in the order they were made. The folder contains `master.sqlite`. It also contains `root.sqlite` when that file was beside the library.
+`YYYYMMDD` is the date. `HHMMSS` is the time on this computer. When a folder for that same second already exists, the name ends with `-02`, then `-03`, up through `-99`. A later number is a later copy from that second. Sorting the folder names keeps them in the order they were made. The folder contains `master.sqlite`. It also contains `root.sqlite` when that file was beside the library. A finished folder also contains a file named `COMPLETE`. That file is JSON. It lists a SHA-256 hash for every other file in the folder.
+
+Do not restore a folder whose name ends with `-failed` or `-failed-` and digits, such as `-failed-02` or `-failed-100` (any capitalization). Do not restore a hidden folder whose name ends with `.partial`. Do not restore a folder that contains a file named `INCOMPLETE`. Those copies did not finish. Leave them where they are.
+
+An older folder that has `master.sqlite` but no `COMPLETE` file is **legacy, unverified**. The snapshot list does not offer it. A restore pointed at that folder checks `master.sqlite` on a copy first and stops unless that check is exactly ok.
 
 A file change in the Files view copies the database first as well. During the change, the app also writes `Library/Backups/file-ops-journal.json`. That file is removed when the change finishes. Leave it alone.
 
@@ -68,7 +72,7 @@ The snapshot list is the restore to use. The steps below are only for a `serato-
 2. Quit Serato Library. Close the window.
 3. Open the [library folder](install.md#where-serato-keeps-the-library).
 4. Open `Backups`.
-5. Open the `serato-web-` folder from the time you want. A suffix `-02` through `-99` is a later copy from that same second.
+5. Open a `serato-web-` folder that contains `COMPLETE`. A suffix `-02` through `-99` is a later copy from that same second. Skip a name that ends with `-failed` or `-failed-` and digits (any capitalization), a hidden name that ends with `.partial`, and a folder that contains `INCOMPLETE`. An older folder with no `COMPLETE` file is legacy, unverified. Do not use it unless you mean to, and stop if its check does not come back ok.
 6. Copy the current `master.sqlite` to a different folder, so you still have it.
 7. If `root.sqlite` is in the library folder, copy that file aside too.
 8. Copy `master.sqlite` from the backup folder into the library folder. Replace the current file.

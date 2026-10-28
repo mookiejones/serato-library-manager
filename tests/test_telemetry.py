@@ -420,8 +420,8 @@ class ScrubTests(TelemetryCase):
         """Initialize Sentry without request hooks or personal data.
 
         ``sentry_sdk.init`` is patched, so no client starts and no request
-        leaves the process. Auto-enabling stays off so Bottle, which the
-        desktop window installs, cannot attach.
+        leaves the process. Auto-enabling stays off so a framework
+        integration cannot attach.
 
         Returns:
             None. The test fails if a privacy flag is left at the SDK default.

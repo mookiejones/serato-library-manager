@@ -47,8 +47,15 @@ from pathlib import Path
 from typing import Protocol, TypedDict
 
 import app_log
-import completeness
 import snapshot_frames
+from serato_web.completeness import (
+    LEGACY_STATUS,
+    CompletenessError,
+    backup_status,
+    is_complete,
+    verify_legacy_backup,
+    write_complete_marker,
+)
 
 FORMAT = 1
 EXCLUDED_DIRS = frozenset({"Export Backups", "Lexicon"})
@@ -473,13 +480,15 @@ class SnapshotStore:
         """Return snapshots, newest first.
 
         Returns:
-            Summary rows. A manifest that is not JSON is skipped.
+            Summary rows. A directory ``is_complete`` rejects is skipped,
+            including a missing marker, a failed name, and a partial name.
+            A manifest that is not JSON is skipped.
         """
         rows: list[SnapshotInfo] = []
         if not self.manifests.is_dir():
             return rows
         for path in self.manifests.iterdir():
-            if not completeness.is_complete(path):
+            if not is_complete(path):
                 continue
             try:
                 manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
@@ -543,7 +552,7 @@ class SnapshotStore:
         }
         self._verify(manifest)
         self._write_manifest(manifest)
-        if not completeness.is_complete(self._snapshot_dir(str(manifest["id"]))):
+        if not is_complete(self._snapshot_dir(str(manifest["id"]))):
             raise SnapshotError("The snapshot was not finished.")
         self._remember_version(install)
         return _info(manifest)
@@ -698,7 +707,7 @@ class SnapshotStore:
         if not isinstance(undo, str):
             raise SnapshotError("The restore journal is not valid.")
         self._refuse_if_running()
-        if not completeness.is_complete(self._snapshot_dir(undo)):
+        if not is_complete(self._snapshot_dir(undo)):
             raise SnapshotError("The pre-restore snapshot is incomplete.")
         self._verify(self._manifest(undo))
         self._apply(undo)
@@ -777,16 +786,26 @@ class SnapshotStore:
             SnapshotBlocked: If Serato DJ is running, the Serato 5 gate
                 refuses the library, or Serato holds the database. Nothing
                 is changed, and no snapshot is saved.
-            SnapshotError: If a hash or a path is not valid. A failure after
-                the pre-restore snapshot tries to put that snapshot back.
+            SnapshotError: If a hash or a path is not valid, or the snapshot
+                directory is not complete. A legacy folder is checked with
+                ``verify_legacy_backup`` before the pre-restore snapshot. A
+                failure after that snapshot tries to put that snapshot back.
         """
         self._refuse_restore()
-        if not completeness.is_complete(self._snapshot_dir(snapshot_id)):
+        directory = self._snapshot_dir(snapshot_id)
+        # backup_status and is_complete are the only completeness gates.
+        # A failed or partial name is rejected inside those functions.
+        if backup_status(directory) == LEGACY_STATUS:
+            try:
+                verify_legacy_backup(directory)
+            except CompletenessError as exc:
+                raise SnapshotError(exc.message) from exc
+        elif not is_complete(directory):
             raise SnapshotError("That snapshot is incomplete.", 404)
         diff = self._diff(snapshot_id)
         pre = self.take("before-restore", f"Before restoring snapshot {snapshot_id}.")
         pre_dir = self._snapshot_dir(pre["id"])
-        if not completeness.is_complete(pre_dir):
+        if not is_complete(pre_dir):
             raise SnapshotError("The pre-restore snapshot is incomplete. Nothing was restored.")
         self._verify(self._manifest(pre["id"]))
         if self.serato_running():
@@ -1447,7 +1466,7 @@ class SnapshotStore:
             SnapshotError: If the id or the file is not valid.
         """
         folder = self._snapshot_dir(snapshot_id)
-        if not completeness.is_complete(folder):
+        if not is_complete(folder):
             raise SnapshotError("That snapshot is incomplete.", 404)
         base = os.path.realpath(folder)
         full = os.path.normpath(os.path.join(base, "manifest.json"))
@@ -1522,7 +1541,7 @@ class SnapshotStore:
             manifest["sha256"] = _body_digest(manifest, self._manifest_key())
             payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
             try:
-                completeness.publish_directory(folder, {"manifest.json": payload})
+                _publish_directory(folder, {"manifest.json": payload})
             except FileExistsError:
                 manifest["id"] = _new_id()
                 manifest.pop("sha256", None)
@@ -2583,6 +2602,90 @@ def _body_digest_matches(manifest: Mapping[str, object], key: bytes) -> bool:
         return False
     expected = _body_digest(manifest, key)
     return len(recorded) == len(expected) and hmac.compare_digest(recorded, expected)
+
+
+def _publish_directory(final: Path, files: Mapping[str, bytes]) -> None:
+    """Write files, then the shared COMPLETE marker, then rename into place.
+
+    Args:
+        final: Destination directory. It must not already exist.
+        files: File names and bytes. Each name is one path component.
+            ``write_complete_marker`` writes ``COMPLETE`` after these.
+
+    Raises:
+        FileExistsError: If ``final`` already exists.
+        OSError: If a file cannot be written. A leftover ``.partial``
+            directory is removed.
+    """
+    if final.exists():
+        raise FileExistsError(final)
+    partial = final.with_name(final.name + ".partial")
+    if partial.exists() or partial.is_symlink():
+        _remove_partial(partial)
+    partial.mkdir(parents=True)
+    try:
+        for name, data in files.items():
+            if not _single_component(name) or name in {"COMPLETE", "INCOMPLETE"}:
+                raise OSError("A published file name is not a single path component.")
+            _atomic_write(_realpath_within(partial, name), data)
+        write_complete_marker(partial)
+        os.replace(partial, final)
+    except Exception:
+        try:
+            if partial.exists() or partial.is_symlink():
+                _remove_partial(partial)
+        except OSError:
+            app_log.logger.exception("A partial snapshot directory could not be removed.")
+        raise
+
+
+def _single_component(name: str) -> bool:
+    """Return whether a published name is one path component.
+
+    Args:
+        name: File name from the publisher.
+
+    Returns:
+        True when the name has no separator, dot-dot, or colon.
+    """
+    if not isinstance(name, str) or not name or name in {".", ".."}:
+        return False
+    if "/" in name or "\\" in name or ":" in name:
+        return False
+    return Path(name).name == name
+
+
+def _remove_partial(path: Path) -> None:
+    """Remove a ``.partial`` directory this process created.
+
+    A shortcut is unlinked and its target is left in place. A real
+    directory is removed only when every child stays inside it.
+
+    Args:
+        path: Directory whose name ends in ``.partial``.
+
+    Raises:
+        OSError: If the path is not a partial directory, or a child leaves it.
+    """
+    if path.is_symlink():
+        path.unlink()
+        return
+    if not path.is_dir():
+        if path.exists():
+            path.unlink()
+        return
+    root = Path(os.path.realpath(path))
+    if not root.name.lower().endswith(".partial"):
+        raise OSError("Refusing to remove a directory that is not a partial snapshot.")
+    for child in sorted(root.rglob("*"), reverse=True):
+        parent = Path(os.path.realpath(child.parent))
+        if parent != root and root not in parent.parents:
+            raise OSError("Refusing to remove a file outside the partial directory.")
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            child.rmdir()
+    root.rmdir()
 
 
 def _atomic_write(path: Path, data: bytes) -> None:

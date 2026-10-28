@@ -36,6 +36,6 @@ The log file is `serato-library.log`. It rotates at 1 MiB and keeps three older 
 
 ## Release builds
 
-A tagged release writes `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` from GitHub Actions secrets into `_build_config.py` before the app is frozen. An empty secret leaves that service off. The copy of `_build_config.py` in git is empty. Do not commit a filled-in key file.
+A tagged release writes `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` from GitHub Actions secrets into `_build_config.py` before the app is frozen. A manual run of that workflow does not. An empty secret leaves that service off. The copy of `_build_config.py` in git is empty, and a build from source uses that empty file. Do not commit a filled-in key file.
 
-Those values are client keys. They end up inside the unsigned zip. They do not grant access to the Serato library. For a local run, set the same variable names in the environment. An environment value overrides the baked file.
+Those values are client keys. They end up inside the unsigned build. They do not grant access to the Serato library. For a local run, set the same variable names in the environment. An environment value overrides the baked file.
