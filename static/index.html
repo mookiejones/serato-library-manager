@@ -7,8 +7,10 @@
   merge a group into the copy you keep. Export writes an M3U playlist.
   Rekordbox writes rekordbox.xml. The Files view browses folders
   and previews a rename, move, replace, or delete before it is saved.
-  app.css and app.js are local files. The page talks only to the library
-  server on 127.0.0.1. It does not open master.sqlite itself.
+  The Snapshots view lists hash-checked library snapshots and previews a
+  restore before it is confirmed. app.css and app.js are local files.
+  The page talks only to the library server on 127.0.0.1. It does not
+  open master.sqlite itself.
 -->
 <html lang="en">
 <head>
@@ -43,6 +45,7 @@
         <button type="button" data-view="duplicates" role="tab">Duplicates</button>
         <button type="button" data-view="stems" role="tab">Stems</button>
         <button type="button" data-view="files" role="tab">Files</button>
+        <button type="button" data-view="snapshots" role="tab">Snapshots</button>
       </div>
       <div id="crate-tools">
         <label class="rail-field">
@@ -133,6 +136,21 @@
           <button id="files-pick-cancel" type="button" hidden>Cancel</button>
         </div>
       </section>
+
+      <section id="snapshots-panel" class="files-panel" hidden>
+        <div class="browser-bar">
+          <p id="snapshots-heading" class="files-path">Snapshots</p>
+          <button id="snapshots-refresh" type="button">Refresh</button>
+          <button id="snapshots-take" type="button">Take a snapshot</button>
+        </div>
+        <p id="snapshots-block" class="notice" role="status" hidden></p>
+        <div id="snapshots-undo" class="snapshot-undo" hidden>
+          <p id="snapshots-undo-text"></p>
+          <button id="snapshots-undo-button" type="button">Review undo</button>
+        </div>
+        <p id="snapshots-status" class="notice" role="status" aria-live="polite"></p>
+        <div id="snapshots-list" class="files-list" role="list" aria-label="Snapshots" aria-busy="false" tabindex="0"></div>
+      </section>
     </main>
   </div>
   <dialog id="consent-dialog" aria-labelledby="consent-title" aria-describedby="consent-body">
@@ -208,6 +226,17 @@
       <button id="files-review" type="button">Review</button>
       <button id="files-confirm" type="button">Confirm</button>
     </div>
+  </dialog>
+  <dialog id="snapshot-dialog" aria-labelledby="snapshot-title" aria-describedby="snapshot-intro">
+    <h2 id="snapshot-title">Restore this snapshot</h2>
+    <p id="snapshot-intro">Nothing is changed until you confirm. A new snapshot is saved first, so this restore can be undone.</p>
+    <div id="snapshot-plan" aria-live="polite"></div>
+    <p id="snapshot-block" class="dialog-note" role="status"></p>
+    <div class="dialog-actions">
+      <button id="snapshot-cancel" type="button">Cancel</button>
+      <button id="snapshot-confirm" type="button">Restore</button>
+    </div>
+    <p id="snapshot-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
   <script src="/app.js"></script>
 </body>

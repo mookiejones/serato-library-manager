@@ -6,7 +6,9 @@
  * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
  * /api/duplicates/merge. Rekordbox export is GET /api/export.rekordbox.xml.
  * File moves, renames, replacements, and deletes
- * use /api/files. A preview is shown before confirm. Related tracks use
+ * use /api/files. A preview is shown before confirm. Snapshot UI is the
+ * block marked "snapshots" below, kept together for the TypeScript move.
+ * Related tracks use
  * /api/related. The track list is virtualized: only rows near the scroll
  * window are in the DOM. Sharing settings and local logs use
  * /api/settings and /api/logs. This file does not open master.sqlite
@@ -77,6 +79,14 @@ const state = {
   filesError: "",
   filesMessage: "",
   filesTruncated: false,
+  snapshots: [],
+  snapshotLoading: false,
+  snapshotError: "",
+  snapshotMessage: "",
+  snapshotUndo: null,
+  writeBlock: "",
+  seratoRunning: false,
+  snapshotPlanId: "",
 };
 
 const crateList = document.getElementById("crate-list");
@@ -694,15 +704,20 @@ function renderShell() {
   sessionList.hidden = !historyMode;
   modeNote.hidden = cratesMode || historyMode;
   const filesMode = state.mode === "files";
-  document.querySelector(".browser").hidden = filesMode;
-  document.getElementById("detail").hidden = filesMode;
+  const snapshotsMode = state.mode === "snapshots";
+  document.querySelector(".browser").hidden = filesMode || snapshotsMode;
+  document.getElementById("detail").hidden = filesMode || snapshotsMode;
   document.getElementById("files-panel").hidden = !filesMode;
+  document.getElementById("snapshots-panel").hidden = !snapshotsMode;
   if (state.mode === "missing") modeNote.textContent = "Tracks Serato has marked missing in this space.";
   if (state.mode === "duplicates") {
     modeNote.textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
   }
   if (state.mode === "stems") modeNote.textContent = "Tracks with a stems analysis state.";
   if (filesMode) modeNote.textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
+  if (snapshotsMode) {
+    modeNote.textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
+  }
   for (const button of document.querySelectorAll("#views button")) {
     button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
   }
@@ -718,6 +733,10 @@ function renderShell() {
   if (filesMode) {
     const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
     crateFoot.textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
+    return;
+  }
+  if (snapshotsMode) {
+    crateFoot.textContent = state.snapshotLoading ? "Reading snapshots" : `${state.snapshots.length.toLocaleString()} snapshots`;
     return;
   }
   const pool = state.mode === "history" ? state.entries : footerTracks();
@@ -2516,7 +2535,294 @@ function setMode(mode) {
     state.filesLoading = true;
     loadFolder(state.filesPath || "").catch((error) => failFiles(error));
   }
+  if (mode === "snapshots") {
+    loadSnapshots().catch((error) => failSnapshots(error));
+  }
   renderList();
+}
+
+// --- snapshots (issue 35). Keep this block together for the TypeScript move in #59. ---
+
+/**
+ * Load the snapshot list.
+ *
+ * Shows a reading line, then the rows or an empty explanation. A failure
+ * stays in the panel with a retry. Does not restore anything.
+ *
+ * @returns {Promise<void>}
+ */
+async function loadSnapshots() {
+  state.snapshotLoading = true;
+  state.snapshotError = "";
+  renderSnapshots();
+  const response = await fetch("/api/snapshots");
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "The snapshots could not be read.");
+  state.snapshots = payload.snapshots || [];
+  state.snapshotUndo = payload.pending_undo || null;
+  state.writeBlock = payload.write_block || "";
+  state.seratoRunning = Boolean(payload.serato_running);
+  state.snapshotLoading = false;
+  renderSnapshots();
+}
+
+/**
+ * Show a snapshot-list failure.
+ *
+ * @param {Error} error Failed request.
+ * @returns {void}
+ */
+function failSnapshots(error) {
+  state.snapshotLoading = false;
+  state.snapshotError = error.message || "The snapshots could not be read.";
+  renderSnapshots();
+}
+
+/**
+ * Paint the snapshot list, the Serato 5 note, and an outside-change undo.
+ *
+ * Text is set with textContent. Restore stays available as a button on
+ * each row; the dialog decides whether confirm is allowed.
+ *
+ * @returns {void}
+ */
+function renderSnapshots() {
+  const status = document.getElementById("snapshots-status");
+  const block = document.getElementById("snapshots-block");
+  const undo = document.getElementById("snapshots-undo");
+  const list = document.getElementById("snapshots-list");
+  list.setAttribute("aria-busy", String(state.snapshotLoading));
+  if (state.writeBlock) {
+    block.hidden = false;
+    block.textContent = state.writeBlock;
+  } else {
+    block.hidden = true;
+    block.textContent = "";
+  }
+  if (state.snapshotUndo && state.snapshotUndo.restore_id) {
+    undo.hidden = false;
+    const source = state.snapshotUndo.source === "Lexicon" ? "Lexicon" : "Something outside this app";
+    document.getElementById("snapshots-undo-text").textContent =
+      `${source} changed the Serato folder. A snapshot was saved after that change. Undo puts back the previous snapshot.`;
+  } else {
+    undo.hidden = true;
+  }
+  list.replaceChildren();
+  if (state.snapshotLoading) {
+    status.textContent = "Reading snapshots";
+    return;
+  }
+  if (state.snapshotError) {
+    status.textContent = state.snapshotError;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.textContent = "Try again";
+    retry.addEventListener("click", () => loadSnapshots().catch((error) => failSnapshots(error)));
+    list.append(retry);
+    return;
+  }
+  status.textContent = state.snapshotMessage;
+  if (!state.snapshots.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "No snapshots yet. Take a snapshot to keep a point you can restore. Snapshots are kept, and this page does not expire them.";
+    list.append(empty);
+    return;
+  }
+  for (const item of state.snapshots) {
+    const card = document.createElement("article");
+    card.className = "snapshot-card";
+    card.setAttribute("role", "listitem");
+    const title = document.createElement("p");
+    title.textContent = `${item.created || "Unknown time"} · ${item.trigger || "snapshot"}`;
+    const detail = document.createElement("p");
+    const version = item.serato_version && item.serato_version !== "unknown"
+      ? `Serato ${item.serato_version} (build ${item.serato_build})`
+      : "Serato version unknown";
+    const drives = (item.unavailable_drives || []).length
+      ? ` Unavailable: ${(item.unavailable_drives || []).join(", ")}.`
+      : "";
+    detail.textContent = `${version}. ${item.reason || ""}${drives}`;
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.textContent = "Review restore";
+    restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(error.message)));
+    card.append(title, detail, restore);
+    list.append(card);
+  }
+}
+
+/**
+ * Ask for a restore plan and open the dialog.
+ *
+ * The plan is a dry run. Confirm stays off when the server says the
+ * restore is blocked.
+ *
+ * @param {string} snapshotId Snapshot to review.
+ * @returns {Promise<void>}
+ */
+async function openSnapshotPlan(snapshotId) {
+  state.snapshotPlanId = snapshotId;
+  const planBox = document.getElementById("snapshot-plan");
+  const block = document.getElementById("snapshot-block");
+  const confirm = document.getElementById("snapshot-confirm");
+  planBox.replaceChildren();
+  block.textContent = "Reading what would change";
+  confirm.disabled = true;
+  setSnapshotDialogStatus("");
+  document.getElementById("snapshot-dialog").showModal();
+  const plan = await postJSON("/api/snapshots", { action: "plan", id: snapshotId });
+  paintSnapshotPlan(plan);
+}
+
+/**
+ * Fill the restore dialog from a dry-run plan.
+ *
+ * @param {object} plan Response from action plan. Reads plan.crates,
+ *   plan.tracks, plan.cues, plan.grids, plan.dry_run, and plan.restore_blocked.
+ * @returns {void}
+ */
+function paintSnapshotPlan(plan) {
+  const planBox = document.getElementById("snapshot-plan");
+  const block = document.getElementById("snapshot-block");
+  const confirm = document.getElementById("snapshot-confirm");
+  planBox.replaceChildren();
+  const crates = plan.crates || {};
+  const tracks = plan.tracks || {};
+  appendPlanLine(planBox, "Crates added", crates.added);
+  appendPlanLine(planBox, "Crates removed", crates.removed);
+  appendPlanLine(planBox, "Crates changed", crates.changed);
+  appendPlanLine(planBox, "Crates on an unavailable drive", crates.unavailable);
+  appendPlanLine(planBox, "Tracks added", tracks.added);
+  appendPlanLine(planBox, "Tracks removed", tracks.removed);
+  appendPlanLine(planBox, "Tracks on an unavailable drive", tracks.unavailable);
+  appendFrameDiffs(planBox, "Cue changes", plan.cues);
+  appendFrameDiffs(planBox, "Grid changes", plan.grids);
+  const deleted = plan.deleted || {};
+  appendPlanLine(planBox, "Deleted crates", deleted.crates);
+  appendPlanLine(planBox, "Deleted tracks", deleted.tracks);
+  appendPlanLine(planBox, "Deleted cues", deleted.cues);
+  appendPlanLine(planBox, "Deleted grids", deleted.grids);
+  if (plan.restore_blocked) {
+    block.textContent = plan.restore_blocked;
+    confirm.disabled = true;
+  } else {
+    block.textContent = plan.dry_run ? "Nothing has been changed." : "";
+    confirm.disabled = false;
+  }
+}
+
+/**
+ * Add one labelled count or name list to the restore plan.
+ *
+ * @param {HTMLElement} parent Plan container.
+ * @param {string} label Section name.
+ * @param {object[]|undefined} rows Diff rows.
+ * @returns {void}
+ */
+function appendPlanLine(parent, label, rows) {
+  const line = document.createElement("p");
+  const items = rows || [];
+  if (!items.length) {
+    line.textContent = `${label}: none`;
+  } else {
+    const names = items.slice(0, 8).map((item) => item.name || item.path || item.drive_label || "item");
+    const extra = items.length > names.length ? `, and ${items.length - names.length} more` : "";
+    line.textContent = `${label}: ${items.length}. ${names.join(", ")}${extra}`;
+  }
+  parent.append(line);
+}
+
+/**
+ * Add per-file cue or grid differences.
+ *
+ * @param {HTMLElement} parent Plan container.
+ * @param {string} label Section name.
+ * @param {object[]|undefined} rows Files whose frames would change.
+ * @returns {void}
+ */
+function appendFrameDiffs(parent, label, rows) {
+  const items = rows || [];
+  const line = document.createElement("p");
+  if (!items.length) {
+    line.textContent = `${label}: none`;
+    parent.append(line);
+    return;
+  }
+  line.textContent = `${label}: ${items.length} file${items.length === 1 ? "" : "s"}`;
+  parent.append(line);
+  for (const item of items.slice(0, 12)) {
+    const row = document.createElement("p");
+    row.textContent = fileName(item.path || "");
+    parent.append(row);
+  }
+}
+
+/**
+ * Return the last path segment for a restore line.
+ *
+ * @param {string} path File path.
+ * @returns {string} The file name, or the whole path when it has no slash.
+ */
+function fileName(path) {
+  const parts = String(path).split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+/**
+ * Set the restore dialog status line.
+ *
+ * @param {string} message Status text.
+ * @returns {void}
+ */
+function setSnapshotDialogStatus(message) {
+  document.getElementById("snapshot-status").textContent = message;
+}
+
+/**
+ * Save a manual snapshot and reload the list.
+ *
+ * @returns {Promise<void>}
+ */
+async function takeSnapshot() {
+  const button = document.getElementById("snapshots-take");
+  button.disabled = true;
+  button.textContent = "Saving snapshot…";
+  try {
+    await postJSON("/api/snapshots", { action: "create" });
+    state.snapshotMessage = "Snapshot saved.";
+    await loadSnapshots();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Take a snapshot";
+  }
+}
+
+/**
+ * Confirm the open restore after the dry run.
+ *
+ * @returns {Promise<void>}
+ */
+async function confirmSnapshotRestore() {
+  const confirm = document.getElementById("snapshot-confirm");
+  confirm.disabled = true;
+  confirm.textContent = "Restoring…";
+  setSnapshotDialogStatus("");
+  try {
+    const undoing = state.snapshotUndo && state.snapshotUndo.restore_id === state.snapshotPlanId;
+    const body = undoing
+      ? { action: "undo", confirm: true }
+      : { action: "restore", id: state.snapshotPlanId, confirm: true };
+    await postJSON("/api/snapshots", body);
+    document.getElementById("snapshot-dialog").close();
+    state.snapshotMessage = "Restore finished. The previous library was saved first, so this can be undone from the list.";
+    await loadSnapshots();
+    await loadLibrary();
+  } catch (error) {
+    setSnapshotDialogStatus(error.message);
+    confirm.disabled = false;
+  } finally {
+    confirm.textContent = "Restore";
+  }
 }
 
 // Wire the page controls. These listeners call the functions above; they
@@ -2654,6 +2960,28 @@ spaceSelect.addEventListener("change", () => {
 document.getElementById("views").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (button?.dataset.view) setMode(button.dataset.view);
+});
+
+document.getElementById("snapshots-refresh").addEventListener("click", () => {
+  loadSnapshots().catch((error) => failSnapshots(error));
+});
+
+document.getElementById("snapshots-take").addEventListener("click", () => {
+  takeSnapshot().catch((error) => failSnapshots(error));
+});
+
+document.getElementById("snapshots-undo-button").addEventListener("click", () => {
+  const pending = state.snapshotUndo;
+  if (!pending || !pending.restore_id) return;
+  openSnapshotPlan(pending.restore_id).catch((error) => failSnapshots(error));
+});
+
+document.getElementById("snapshot-cancel").addEventListener("click", () => {
+  document.getElementById("snapshot-dialog").close();
+});
+
+document.getElementById("snapshot-confirm").addEventListener("click", () => {
+  confirmSnapshotRestore().catch((error) => setSnapshotDialogStatus(error.message));
 });
 
 document.querySelector(".sort-crates").addEventListener("click", (event) => {

@@ -410,6 +410,14 @@ def status(path: Path | None = None) -> dict[str, object]:
             "message": "Serato DJ Pro has the library open. Edits stay off until it quits.",
         }
     info["file_manager"] = file_manager_name()
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    info["write_block"] = blocked
+    info["serato_running"] = snapshots.serato_dj_running()
+    if blocked and not info.get("open"):
+        info["writable"] = False
+        info["message"] = blocked
     return info
 
 
@@ -641,6 +649,8 @@ def begin_write() -> sqlite3.Connection:
     """Open a write transaction after Serato has quit.
 
     The first call in a process also copies the databases into Library/Backups.
+    Every call first saves a content-addressed snapshot, after Serato 5 has
+    been allowed to proceed.
 
     Returns:
         A connection inside BEGIN IMMEDIATE. The caller commits and closes it.
@@ -652,6 +662,12 @@ def begin_write() -> sqlite3.Connection:
     info = status()
     if info["open"]:
         raise SeratoOpen(info)
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    if blocked:
+        raise LibraryError(blocked, 409)
+    snapshots.snapshot_before_write()
     ensure_backup()
     conn = sqlite3.connect(Path(MASTER), timeout=1)
     conn.row_factory = sqlite3.Row
