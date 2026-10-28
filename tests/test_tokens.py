@@ -403,6 +403,14 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     (".files-kind", ("--color-card",), 13, 400),
     (".files-empty", ("--color-card",), 15, 400),
     ("#files-confirm.danger", ("--color-danger",), 15, 400),
+    (".wizard-step", ("--color-card",), 14, 500),
+    (".wizard-status.is-blocked", ("--color-warn-bg",), 15, 400),
+    (".wizard-status.is-saved", ("--color-safe-bg",), 15, 400),
+    (".wizard-choice", ("--color-card",), 15, 400),
+    (".wizard-quiet", ("--color-card",), 15, 400),
+    ("#wizard-primary", ("--color-primary",), 20, 700),
+    ("#wizard-folder-use", ("--color-text",), 15, 400),
+    (".wizard-folder", ("--color-button",), 15, 400),
 )
 
 # Large or inherited text whose color comes from an ancestor rule.
@@ -469,6 +477,7 @@ _CONTROL_EDGE = (
     (".related-form select", "--color-card", "border-bottom"),
     (".files-field input", "--color-card", "border-bottom"),
     (".rule-edit textarea", "--color-card", "border"),
+    (".wizard-folder", "--color-card", "border"),
 )
 
 
@@ -580,6 +589,8 @@ class ContrastTests(unittest.TestCase):
 
         outline = self._rule("button:focus-visible")
         ring = _paint(outline["outline"], self.colors)
+        heading_focus = self._rule("#wizard-title:focus")
+        self.assertEqual(heading_focus.get("outline"), "none")
         for background_name in _FOCUS_SURFACES:
             ratio = contrast(ring, self._surface(background_name))
             self.assertGreaterEqual(ratio, 3, f"focus on {background_name} is {ratio:.2f}:1")
@@ -602,7 +613,7 @@ class ContrastTests(unittest.TestCase):
             ratio = contrast(_over(mark, surface, alpha or 0), surface)
             self.assertGreaterEqual(ratio, 3, f"holds-selection on {background_name} is {ratio:.2f}:1")
 
-        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#rekordbox-cancel", "#merge-cancel"):
+        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice"):
             border = _paint(self._rule(selector)["border"], self.colors)
             ratio = contrast(border, self._surface("--color-card"))
             self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
@@ -650,6 +661,7 @@ class ContrastTests(unittest.TestCase):
             "#copy-logs",
             "#rekordbox-cancel",
             "#merge-cancel",
+            ".wizard-choice",
         } | {selector for selector, _, _ in _CONTROL_EDGE}
         self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")
         self.assertEqual(checked_borders - bordered, set(), "contrast list names a border that is not painted")

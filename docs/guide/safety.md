@@ -24,6 +24,8 @@ File changes in the [Files](files.md) view are different. Rename and move carry 
 
 ## Snapshots
 
+The first time you finish setup, **Take a safety snapshot** saves a copy of the library data before you change anything. If Serato DJ is open, that step says **Close Serato DJ to continue** and checks again on its own.
+
 **Snapshots** in the sidebar keeps hash-checked copies of the library database, the crates on each drive (including a drive's `_Serato_` folder and `database V2`), and the Serato cue, beatgrid, and autotag data stored inside MP3, FLAC, M4A, and AIFF files. The music itself is not copied. Snapshots are kept with no time limit. The page does not delete old ones.
 
 Quit Serato DJ Pro before you restore. If Serato DJ is still running, restore stops and the page tells you to quit it first. That check runs again before the database, the crates, and the audio are replaced. **Review restore** shows what would change: crates, tracks, and the cue and beatgrid differences for each file. Nothing is written until you confirm. Confirm saves a new snapshot first, so the restore can be undone from the list. If the app stops in the middle of a restore, the next time it opens it puts that saved snapshot back.

@@ -74,6 +74,7 @@ export interface ElementIds {
   "consent-decline": HTMLButtonElement;
   "consent-accept": HTMLButtonElement;
   "open-settings": HTMLButtonElement;
+  "rerun-wizard": HTMLButtonElement;
   "settings-close": HTMLButtonElement;
   "open-logs": HTMLButtonElement;
   "copy-logs": HTMLButtonElement;

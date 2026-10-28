@@ -25,7 +25,7 @@ CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "telemetry_consent", "window")
+SETTINGS_KEYS = ("install_id", "telemetry_consent", "window", "wizard_complete")
 WINDOW_FIELDS = ("x", "y", "width", "height")
 # The desktop window refuses a smaller frame. Origins may be negative
 # when a monitor sits left of or above the primary screen.
@@ -79,41 +79,48 @@ class WindowGeometry:
 
 @dataclass(frozen=True)
 class Settings:
-    """The sharing choice, the anonymous install id, and the window frame.
+    """The sharing choice, the install id, the window frame, and setup.
 
     Attributes:
         install_id: Random UUID for this install, or None until one is saved.
         telemetry_consent: True, False, or None when the person has not chosen.
         window: Last saved frame, or None before the window has been placed.
+        wizard_complete: True after setup finishes. False is unfinished,
+            including a file written before this key existed.
     """
 
     install_id: str | None
     telemetry_consent: bool | None
     window: WindowGeometry | None = None
+    wizard_complete: bool = False
 
     def as_json(self) -> dict[str, object]:
         """Return the settings object for the file.
 
         Returns:
-            The completed telemetry pair when both fields are set, and the
-            window frame when one has been saved. A window may be stored
-            before the sharing choice.
+            The completed telemetry pair when both fields are set, the
+            setup flag with that pair, and the window frame when one has
+            been saved. A window may be stored before the sharing choice.
 
         Raises:
-            ValueError: If the install id and the choice disagree, or if
-                there is nothing to store. A partial telemetry pair would
-                stick on the next load and hide the prompt.
+            ValueError: If the install id and the choice disagree, if
+                ``wizard_complete`` is not a boolean, or if there is
+                nothing to store. A partial telemetry pair would stick
+                on the next load and hide the prompt.
         """
         has_id = self.install_id is not None
         has_consent = isinstance(self.telemetry_consent, bool)
         if has_id != has_consent:
             raise ValueError("Refusing to write a partial settings file.")
+        if not isinstance(self.wizard_complete, bool):
+            raise ValueError("wizard_complete must be a boolean.")
         if not has_id and self.window is None:
             raise ValueError("Refusing to write an empty settings file.")
         body: dict[str, object] = {}
         if has_id:
             body["install_id"] = self.install_id
             body["telemetry_consent"] = self.telemetry_consent
+            body["wizard_complete"] = self.wizard_complete
         if self.window is not None:
             body["window"] = {
                 "x": self.window.x,
@@ -303,7 +310,7 @@ def _parse(payload: object) -> Settings:
     """
     if not isinstance(payload, dict):
         logger.warning("Config file must be a mapping — ignored")
-        return Settings(install_id=None, telemetry_consent=None)
+        return Settings(install_id=None, telemetry_consent=None, wizard_complete=False)
     for key in payload:
         if key not in SETTINGS_KEYS:
             logger.warning("Unknown config key %r — ignored", key)
@@ -322,7 +329,19 @@ def _parse(payload: object) -> Settings:
             logger.warning("Config key 'telemetry_consent' has wrong type — ignored")
             consent = None
     window = _parse_window(payload["window"]) if "window" in payload else None
-    return Settings(install_id=install_id, telemetry_consent=consent, window=window)
+    wizard_complete = False
+    if "wizard_complete" in payload:
+        raw_wizard = payload.get("wizard_complete")
+        if isinstance(raw_wizard, bool):
+            wizard_complete = raw_wizard
+        else:
+            logger.warning("Config key 'wizard_complete' has wrong type — ignored")
+    return Settings(
+        install_id=install_id,
+        telemetry_consent=consent,
+        window=window,
+        wizard_complete=wizard_complete,
+    )
 
 
 def load_settings() -> Settings:
@@ -337,13 +356,13 @@ def load_settings() -> Settings:
     """
     path = settings_path()
     if not path.is_file():
-        return Settings(install_id=None, telemetry_consent=None)
+        return Settings(install_id=None, telemetry_consent=None, wizard_complete=False)
     try:
         text = path.read_text(encoding="utf-8")
         payload: object = json.loads(text)
     except (OSError, UnicodeError, json.JSONDecodeError):
         logger.warning("Config file %s could not be read — ignored", path.name)
-        return Settings(install_id=None, telemetry_consent=None)
+        return Settings(install_id=None, telemetry_consent=None, wizard_complete=False)
     return _parse(payload)
 
 
@@ -418,6 +437,7 @@ def set_telemetry_consent(value: bool) -> Settings:
             install_id=install_id,
             telemetry_consent=value,
             window=current.window,
+            wizard_complete=current.wizard_complete is True,
         )
         save_settings(updated)
         return updated
@@ -455,6 +475,47 @@ def save_window_geometry(geometry: WindowGeometry) -> Settings:
             install_id=install_id,
             telemetry_consent=consent,
             window=geometry,
+            wizard_complete=current.wizard_complete is True,
+        )
+        save_settings(updated)
+        return updated
+
+
+def set_wizard_complete(value: bool) -> Settings:
+    """Store whether first-run setup has finished.
+
+    Args:
+        value: True when the person opens the library from the last step.
+            False leaves setup unfinished. False is a real choice.
+
+    Returns:
+        The settings after the decision. When sharing has not been chosen
+        yet, False is returned without writing a file. True is refused
+        until that choice exists, so a finished flag cannot hide the prompt.
+
+    Raises:
+        ValueError: If ``value`` is not a boolean, or True is requested
+            before the sharing choice is a boolean.
+        OSError: If the settings file cannot be written.
+    """
+    if not isinstance(value, bool):
+        raise ValueError("wizard_complete must be a boolean.")
+    with _settings_lock:
+        current = load_settings()
+        if not isinstance(current.telemetry_consent, bool) or current.install_id is None:
+            if value:
+                raise ValueError("Choose whether to share stats before finishing setup.")
+            return Settings(
+                install_id=current.install_id,
+                telemetry_consent=current.telemetry_consent,
+                window=current.window,
+                wizard_complete=False,
+            )
+        updated = Settings(
+            install_id=current.install_id,
+            telemetry_consent=current.telemetry_consent,
+            window=current.window,
+            wizard_complete=value,
         )
         save_settings(updated)
         return updated

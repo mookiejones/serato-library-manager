@@ -13,7 +13,7 @@ A local window for the Serato DJ Pro library on macOS and Windows. Source on `ma
   <img alt="Serato Library Manager: restore your library to any point in time, checked against the saved backup, on every drive." src="docs/images/hero-light.png" width="100%">
 </picture>
 
-The hero is a product illustration. The screenshots below are the app on main `9d2bb92`, and they show example data. The app has one theme, so there is no dark variant.
+The hero is a product illustration. The screenshots below show example data of the crates, snapshots, and Prepare views. The app has one theme, so there is no dark variant.
 
 ## Install
 
@@ -45,7 +45,7 @@ These are on `main` (1.1.0).
 - Rename, move, replace, and trash audio, and update the library path.
 - Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied.
 - The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
-- Ask before sharing anonymous counts and crash reports. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
+- Ask before sharing anonymous counts and crash reports. Setup asks on the first launch. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
 
 The page source is strict TypeScript in `src/`. `npm run build` writes the `static/app.js` the server loads. Node is not required to run the server. Node 22 or newer is required to typecheck and rebuild that file.
 

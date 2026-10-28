@@ -1049,3 +1049,185 @@ dialog .check input {
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto; }
 }
+
+#wizard {
+  max-width: 40rem;
+}
+
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--font-heading);
+  font-weight: 500;
+}
+
+.wizard-segments {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.wizard-segment {
+  width: var(--space-5);
+  height: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--color-control-edge);
+}
+
+.wizard-segment[data-state="current"],
+.wizard-segment[data-state="done"] {
+  background: var(--color-primary);
+}
+
+.wizard-art:not([hidden]) {
+  display: block;
+  box-sizing: border-box;
+  height: 160px;
+  margin: 0 0 var(--space-4);
+  overflow: hidden;
+}
+
+.wizard-art svg,
+.wizard-art img {
+  display: block;
+  width: 100%;
+  height: 160px;
+}
+
+#wizard-title:focus {
+  outline: none;
+}
+
+.wizard-status {
+  margin-top: var(--space-3);
+}
+
+.wizard-status.is-blocked {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--color-warn-bg);
+  color: var(--color-warn-text);
+}
+
+.wizard-status.is-saved {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--color-safe-bg);
+  color: var(--color-safe-text);
+}
+
+#wizard-progress:not([hidden]) {
+  display: block;
+  width: 100%;
+  height: var(--space-2);
+  margin-top: var(--space-4);
+  accent-color: var(--color-primary);
+}
+
+.wizard-choices:not([hidden]) {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.wizard-choice {
+  flex: 1 1 0;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-text);
+  border-radius: var(--radius-card);
+  background: var(--color-card);
+  color: var(--color-text);
+}
+
+.wizard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-5);
+}
+
+.wizard-actions-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+}
+
+.wizard-quiet {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+#wizard-folder-use {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-text);
+  color: var(--color-card);
+}
+
+#wizard-primary {
+  min-height: 44px;
+  margin-left: auto;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-card);
+  background: var(--color-primary);
+  color: var(--color-card);
+  font-size: var(--font-title);
+  font-weight: 700;
+}
+
+#wizard-primary:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.wizard-folder-name {
+  margin: var(--space-4) 0 0;
+  font-size: var(--font-heading);
+}
+
+.wizard-folders {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 240px;
+  margin-top: var(--space-3);
+  overflow: auto;
+}
+
+.wizard-folder {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-control-edge);
+  border-radius: var(--radius-card);
+  background: var(--color-button);
+  color: var(--color-text);
+  text-align: left;
+}
+
+.wizard-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  margin-top: var(--space-3);
+}
+
+.wizard-folder-empty {
+  margin: 0;
+}

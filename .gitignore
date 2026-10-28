@@ -30,3 +30,6 @@ node_modules/
 
 # MkDocs output from `mkdocs build -f docs/mkdocs.yml`
 /site/
+
+# Wizard build tools. static/wizard.js is the committed bundle.
+node_modules/
