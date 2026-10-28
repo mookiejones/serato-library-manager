@@ -1381,7 +1381,14 @@ function markerSection(track) {
     const time = document.createElement("span");
     time.textContent = beatSeconds(mark.position);
     const name = document.createElement("span");
-    name.textContent = mark.bpm != null ? `${mark.bpm} BPM` : `${mark.beats} beats`;
+    const bpmNumber = Number(mark.bpm);
+    if (mark.bpm != null && mark.bpm !== "" && Number.isFinite(bpmNumber)) {
+      name.textContent = `${bpmNumber} BPM`;
+    } else if (mark.beats != null) {
+      name.textContent = `${mark.beats} beats`;
+    } else {
+      name.textContent = "";
+    }
     row.append(document.createElement("span"), time, name);
     section.append(row);
   }

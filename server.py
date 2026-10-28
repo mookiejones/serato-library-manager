@@ -798,22 +798,85 @@ def format_beat_position(value: object) -> str:
     return f"{number:.3f}"
 
 
+def display_bpm(value: object) -> float | None:
+    """Return a beatgrid BPM the track panel can show.
+
+    Args:
+        value: BPM from a beatgrid marker, or a missing value.
+
+    Returns:
+        The number when it is finite. ``None`` when it is missing, ``NaN``,
+        or infinite. The panel JSON then contains ``null`` instead of ``NaN``.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
+
+
 def display_beatgrid(markers: object) -> list[dict[str, object]]:
-    """Copy beatgrid markers with positions rounded for the track panel.
+    """Copy beatgrid markers for the track panel.
 
     Args:
         markers: Beatgrid list from ``markers_for``.
 
     Returns:
         Marker dicts whose ``position`` is a three-decimal seconds string.
-        The export reads the audio file itself and does not use this copy.
+        A non-finite ``bpm`` is ``None``. The export reads the audio file
+        itself and does not use this copy.
     """
     shown: list[dict[str, object]] = []
     for marker in as_dicts(markers):
         copy = dict(marker)
         copy["position"] = format_beat_position(marker.get("position"))
+        if "bpm" in copy:
+            copy["bpm"] = display_bpm(marker.get("bpm"))
         shown.append(copy)
     return shown
+
+
+def json_ready(value: object) -> object:
+    """Replace non-finite floats so the value can be encoded as JSON.
+
+    Args:
+        value: A response payload, or a value nested inside one.
+
+    Returns:
+        The same structure with ``NaN`` and infinities replaced by ``None``.
+        Other values are left as they are.
+    """
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return value
+    if isinstance(value, dict):
+        ready: dict[str, object] = {}
+        items = cast("dict[object, object]", value)
+        for key, item in items.items():
+            ready[str(key)] = json_ready(item)
+        return ready
+    if isinstance(value, (list, tuple)):
+        return [json_ready(item) for item in value]
+    return value
+
+
+def encode_json(payload: object) -> bytes:
+    """Encode one API payload as UTF-8 JSON.
+
+    Args:
+        payload: Object to send. Non-finite floats become ``null``.
+
+    Returns:
+        UTF-8 JSON. ``allow_nan`` is false, so a non-finite number cannot
+        be written as the tokens ``NaN`` or ``Infinity``.
+
+    Raises:
+        TypeError: If a value cannot be encoded as JSON.
+        ValueError: If a non-finite float remains after cleaning.
+    """
+    return json.dumps(json_ready(payload), ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
 def format_bpm(value: object) -> str:
@@ -1786,10 +1849,10 @@ class Handler(BaseHTTPRequestHandler):
         """Write a JSON response.
 
         Args:
-            payload: Object encoded as UTF-8 JSON.
+            payload: Object encoded as UTF-8 JSON. A non-finite float becomes null.
             status: HTTP status code. Defaults to 200.
         """
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = encode_json(payload)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
