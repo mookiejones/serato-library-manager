@@ -422,15 +422,13 @@ def _hide_incomplete_backup(name: str, path: Path, kind: str) -> bool:
     """
     if kind != "dir":
         return False
-    snapshot_store = name == "snapshots" or (path / "manifests").is_dir() or (path / "objects").is_dir()
-    shaped = (
-        name.startswith("serato-web-")
-        or name.endswith(library.BACKUP_FAILED_SUFFIX)
-        or snapshot_store
-    )
-    if not shaped and not (path / library.BACKUP_INCOMPLETE_NAME).exists():
-        return False
-    return not library.is_complete(path)
+    if library._is_staging_name(name) or library._is_failed_name(name):
+        return True
+    if (path / library.BACKUP_INCOMPLETE_NAME).exists():
+        return True
+    if (path / library.BACKUP_COMPLETE_NAME).exists() and not library.is_complete(path):
+        return True
+    return False
 
 
 def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:

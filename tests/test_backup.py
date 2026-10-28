@@ -147,7 +147,8 @@ class BackupTests(unittest.TestCase):
             self.assertIsInstance(folder, Path)
             backup = cast(Path, folder)
             copied = sorted(path.name for path in backup.iterdir() if path.is_file())
-            self.assertEqual(copied, ["master.sqlite", "root.sqlite"])
+            self.assertEqual(copied, [library.BACKUP_COMPLETE_NAME, "master.sqlite", "root.sqlite"])
+            self.assertTrue(library.is_complete(backup))
             for name, source in sources.items():
                 self.assertEqual(_sha256(backup / name), digests[name])
                 self.assertEqual(_sha256(source), digests[name])
@@ -282,57 +283,242 @@ class BackupTests(unittest.TestCase):
             self.assertIsNone(caught.exception.__cause__)
             self.assertIsNone(caught.exception.__context__)
             self.assertNotIsInstance(caught.exception, PermissionError)
-            self.assertIn(str(folder), "\n".join(recorded.output))
+            logged = "\n".join(recorded.output)
+            self.assertIn(STAMP, logged)
+            self.assertIn(".partial", logged)
 
-    def test_is_complete_accepts_a_snapshot_store_anywhere(self) -> None:
-        """Accept a snapshot store that is not under ``Library/Backups``.
+    def test_double_failure_leaves_only_a_hidden_partial(self) -> None:
+        """Keep a failed copy out of the restore list when cleanup also fails.
 
-        A store is complete only when ``manifests`` and ``objects`` are both
-        real directories. A ``-failed`` name, an ``INCOMPLETE`` marker, or
-        only one of those directories is not complete. ``list_backups`` does
-        not return the store; the snapshot list calls ``is_complete`` on the
-        store root itself.
+        The root copy raises ``OSError`` 28 after ``master.sqlite`` is in
+        the staging directory. Renaming that directory fails, and writing
+        ``INCOMPLETE`` fails too. The leftover keeps the ``.partial`` name.
+        It is not complete and no listing offers it.
 
         Returns:
-            None. The test fails if the store's parent path decides the result.
+            None. The test fails if a ``serato-web-`` folder is offered.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            good = parent / "serato-web-20200101-000000"
+            good.mkdir(parents=True)
+            (good / "master.sqlite").write_bytes(b"complete")
+            library._write_complete_marker(good)
+            root = temp.db.resolve().parent / "root.sqlite"
+            root.write_bytes(b"location")
+            real = library._backup_database
+            real_rename = Path.rename
+            real_write = Path.write_text
+
+            def copy_master_only(source: Path, dest: Path) -> None:
+                if Path(source).name == "root.sqlite":
+                    raise OSError(28, "No space left on device")
+                real(source, dest)
+
+            def refuse_rename(self: Path, target: Path) -> Path:
+                if "serato-web-" in self.name.lower():
+                    raise OSError(13, "Access is denied")
+                return real_rename(self, target)
+
+            def refuse_marker(self: Path, data: str, *args: object, **kwargs: object) -> int:
+                if self.name == library.BACKUP_INCOMPLETE_NAME:
+                    raise OSError(13, "Access is denied")
+                return real_write(self, data, *args, **kwargs)
+
+            with mock.patch.object(library, "_backup_database", side_effect=copy_master_only):
+                with mock.patch.object(Path, "rename", refuse_rename):
+                    with mock.patch.object(Path, "write_text", refuse_marker):
+                        with self.assertRaises(OSError) as caught:
+                            library.ensure_backup()
+            self.assertEqual(caught.exception.errno, 28)
+            self.assertNotIsInstance(caught.exception, PermissionError)
+            leftovers = [path for path in parent.iterdir() if path.is_dir() and path != good]
+            self.assertEqual(len(leftovers), 1)
+            leftover = leftovers[0]
+            self.assertTrue(library._is_staging_name(leftover.name))
+            self.assertTrue((leftover / "master.sqlite").is_file())
+            self.assertFalse((leftover / "root.sqlite").exists())
+            self.assertFalse((leftover / library.BACKUP_COMPLETE_NAME).exists())
+            self.assertFalse((leftover / library.BACKUP_INCOMPLETE_NAME).exists())
+            self.assertFalse(library.is_complete(leftover))
+            self.assertEqual(library.backup_status(leftover), "incomplete")
+            self.assertEqual(library.list_backups(parent), [good])
+            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            self.assertNotIn(leftover.name, names)
+            self.assertIn(good.name, names)
+
+    def test_partial_leftover_is_removed_on_the_next_run(self) -> None:
+        """Ignore a crashed staging directory and remove it later.
+
+        Returns:
+            None. The test fails if the ``.partial`` directory is listed
+            or survives the next backup.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            parent.mkdir()
+            partial = parent / ".serato-web-crash.partial"
+            partial.mkdir()
+            (partial / "master.sqlite").write_bytes(b"half")
+            self.assertFalse(library.is_complete(partial))
+            self.assertEqual(library.list_backups(parent), [])
+            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            self.assertNotIn(partial.name, names)
+            folder = library.ensure_backup()
+            self.assertIsInstance(folder, Path)
+            self.assertFalse(partial.exists())
+            self.assertTrue(library.is_complete(cast(Path, folder)))
+            self.assertEqual(library.list_backups(parent), [folder])
+
+    def test_tampered_backup_fails_hash_verification(self) -> None:
+        """Reject a backup whose file no longer matches COMPLETE.
+
+        Returns:
+            None. The test fails if the tampered folder is still complete.
+        """
+        with TempLibrary() as temp:
+            folder = library.ensure_backup()
+            self.assertIsInstance(folder, Path)
+            backup = cast(Path, folder)
+            self.assertTrue(library.is_complete(backup))
+            master = backup / "master.sqlite"
+            data = bytearray(master.read_bytes())
+            data[-1] ^= 0xFF
+            master.write_bytes(data)
+            self.assertFalse(library.is_complete(backup))
+            self.assertEqual(library.list_backups(backup.parent), [])
+
+    def test_legacy_backup_is_unverified_until_checked(self) -> None:
+        """Leave an unmarked backup off the restore list until it is checked.
+
+        A folder with ``master.sqlite`` and no COMPLETE marker is
+        ``legacy, unverified``. A corrupt database is refused.
+        ``PRAGMA integrity_check`` must be exactly ``ok`` before a healthy
+        one can be restored. Neither one is :func:`library.is_complete`.
+
+        Returns:
+            None. The test fails if a legacy folder is listed as complete
+            or a corrupt database is accepted.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            parent.mkdir()
+            legacy = parent / "serato-web-20190101-000000"
+            legacy.mkdir()
+            healthy = legacy / "master.sqlite"
+            with sqlite3.connect(healthy) as conn:
+                conn.execute("CREATE TABLE asset (id INTEGER PRIMARY KEY, name TEXT)")
+                conn.execute("INSERT INTO asset VALUES (1, 'kept')")
+            corrupt = parent / "serato-web-20190101-000001"
+            corrupt.mkdir()
+            broken = corrupt / "master.sqlite"
+            broken.write_bytes(healthy.read_bytes())
+            data = bytearray(broken.read_bytes())
+            data[100] ^= 0xFF
+            broken.write_bytes(data)
+            self.assertEqual(library.backup_status(legacy), library.LEGACY_BACKUP_STATUS)
+            self.assertEqual(library.backup_status(corrupt), library.LEGACY_BACKUP_STATUS)
+            self.assertFalse(library.is_complete(legacy))
+            self.assertFalse(library.is_complete(corrupt))
+            self.assertEqual(library.list_backups(parent), [])
+            library.verify_legacy_backup(legacy)
+            with self.assertRaises(library.LibraryError) as caught:
+                library.verify_legacy_backup(corrupt)
+            self.assertIn("not restored", str(caught.exception))
+
+    def test_failed_rename_uses_the_next_suffix(self) -> None:
+        """Use ``-failed-02`` when ``-failed`` is already taken.
+
+        Returns:
+            None. The test fails if the collision overwrites the first name
+            or the second name is offered as a restore.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            taken = parent / f".serato-web-{STAMP}.partial-failed"
+            taken.mkdir(parents=True)
+            (taken / "keep.txt").write_text("keep", encoding="utf-8")
+            root = temp.db.resolve().parent / "root.sqlite"
+            root.write_bytes(b"location")
+            real = library._backup_database
+
+            def copy_master_only(source: Path, dest: Path) -> None:
+                if Path(source).name == "root.sqlite":
+                    raise OSError(28, "No space left on device")
+                real(source, dest)
+
+            with _freeze_clock():
+                with mock.patch.object(library, "_backup_database", side_effect=copy_master_only):
+                    with mock.patch(
+                        "library.shutil.rmtree",
+                        side_effect=PermissionError(13, "Access is denied"),
+                    ):
+                        with self.assertRaises(OSError):
+                            library.ensure_backup()
+            second = parent / f".serato-web-{STAMP}.partial-failed-02"
+            self.assertTrue(second.is_dir())
+            self.assertEqual((taken / "keep.txt").read_text(encoding="utf-8"), "keep")
+            self.assertFalse(library.is_complete(taken))
+            self.assertFalse(library.is_complete(second))
+            self.assertEqual(library.list_backups(parent), [])
+            uppercase = parent / "serato-web-old-FAILED"
+            uppercase.mkdir()
+            (uppercase / "master.sqlite").write_bytes(b"old")
+            library._write_complete_marker(uppercase)
+            self.assertFalse(library.is_complete(uppercase))
+
+    def test_is_complete_verifies_a_snapshot_store_anywhere(self) -> None:
+        """Require a verified COMPLETE marker in any directory.
+
+        A snapshot store outside ``Library/Backups`` is complete only after
+        its COMPLETE marker matches every file. A missing marker, a
+        ``-failed`` name, and ``INCOMPLETE`` are not complete.
+
+        Returns:
+            None. The test fails if the parent path decides the result.
         """
         with tempfile.TemporaryDirectory() as raw:
             app_data = Path(raw) / "Serato Library"
             store = app_data / "snapshots"
             (store / "manifests").mkdir(parents=True)
             (store / "objects").mkdir()
+            (store / "manifests" / "one.json").write_text("{}\n", encoding="utf-8")
             half = app_data / "half-store"
             (half / "objects").mkdir(parents=True)
-            failed = app_data / "snapshots-failed"
+            (half / "objects" / "blob").write_bytes(b"blob")
+            failed = app_data / "snapshots-FAILED"
             (failed / "manifests").mkdir(parents=True)
             (failed / "objects").mkdir()
+            (failed / "manifests" / "one.json").write_text("{}\n", encoding="utf-8")
+            library._write_complete_marker(failed)
             marked = app_data / "marked-store"
             (marked / "manifests").mkdir(parents=True)
             (marked / "objects").mkdir()
+            (marked / "manifests" / "one.json").write_text("{}\n", encoding="utf-8")
+            library._write_complete_marker(marked)
             (marked / library.BACKUP_INCOMPLETE_NAME).write_text("incomplete\n", encoding="utf-8")
+            self.assertFalse(library.is_complete(store))
+            library._write_complete_marker(store)
             self.assertTrue(library.is_complete(store))
             self.assertFalse(library.is_complete(half))
             self.assertFalse(library.is_complete(failed))
             self.assertFalse(library.is_complete(marked))
-            self.assertFalse(library.is_complete(store / "manifests"))
         with TempLibrary() as temp:
             parent = temp.db.resolve().parent / "Backups"
             good = parent / "serato-web-20200101-000000"
             good.mkdir(parents=True)
             (good / "master.sqlite").write_bytes(b"complete")
+            library._write_complete_marker(good)
             snapshots = parent / "snapshots"
             (snapshots / "manifests").mkdir(parents=True)
             (snapshots / "objects").mkdir()
+            (snapshots / "manifests" / "one.json").write_text("{}\n", encoding="utf-8")
+            library._write_complete_marker(snapshots)
             self.assertTrue(library.is_complete(snapshots))
-            self.assertEqual(library.list_backups(parent), [good])
+            self.assertEqual(library.list_backups(parent), [good, snapshots])
             names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
             self.assertIn(good.name, names)
             self.assertIn(snapshots.name, names)
-            (snapshots / library.BACKUP_INCOMPLETE_NAME).write_text("incomplete\n", encoding="utf-8")
-            self.assertFalse(library.is_complete(snapshots))
-            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
-            self.assertNotIn(snapshots.name, names)
-            self.assertIn(good.name, names)
 
     def test_partial_delete_is_not_offered(self) -> None:
         """Leave a locked delete under a name restore will not offer.
@@ -351,6 +537,7 @@ class BackupTests(unittest.TestCase):
             good = parent / "serato-web-20200101-000000"
             good.mkdir(parents=True)
             (good / "master.sqlite").write_bytes(b"complete")
+            library._write_complete_marker(good)
             root = temp.db.resolve().parent / "root.sqlite"
             root.write_bytes(b"location")
             digest = _sha256(temp.db)
@@ -405,6 +592,7 @@ class BackupTests(unittest.TestCase):
             good = parent / "serato-web-20200101-000000"
             good.mkdir(parents=True)
             (good / "master.sqlite").write_bytes(b"complete")
+            library._write_complete_marker(good)
             root = temp.db.resolve().parent / "root.sqlite"
             root.write_bytes(b"location")
             real = library._backup_database
@@ -416,9 +604,7 @@ class BackupTests(unittest.TestCase):
                 real(source, dest)
 
             def refuse_failed_rename(self: Path, target: Path) -> Path:
-                if self.name.startswith("serato-web-") and str(target).endswith(
-                    library.BACKUP_FAILED_SUFFIX
-                ):
+                if "serato-web-" in self.name.lower():
                     raise OSError(13, "Access is denied")
                 return real_rename(self, target)
 
@@ -499,9 +685,11 @@ class BackupTests(unittest.TestCase):
                 leftovers = [path for path in parent.iterdir() if path.is_dir()]
                 self.assertTrue(leftovers)
                 for item in leftovers:
-                    marked = item.name.endswith(library.BACKUP_FAILED_SUFFIX) or (
-                        item / library.BACKUP_INCOMPLETE_NAME
-                    ).exists()
+                    marked = (
+                        library._is_failed_name(item.name)
+                        or library._is_staging_name(item.name)
+                        or (item / library.BACKUP_INCOMPLETE_NAME).exists()
+                    )
                     self.assertTrue(marked)
                     self.assertFalse(library.is_complete(item))
                 self.assertEqual(library.list_backups(parent), [])

@@ -9,6 +9,7 @@ write in a process copies the database into Library/Backups first.
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import re
@@ -552,11 +553,17 @@ def _match_quiescent_header(source: Path, dest: Path) -> None:
 
 
 # A folder whose name ends with this suffix is a backup that did not finish.
-# ``list_backups`` and :func:`is_complete` both treat it as unusable.
+# The check is case-insensitive. A collision uses ``-failed-02`` and so on.
 BACKUP_FAILED_SUFFIX = "-failed"
-# Written inside a failed backup when renaming it to the suffix above fails.
+# Written inside a failed backup when every failed rename is blocked.
 # A restore must not offer a folder that contains this file.
 BACKUP_INCOMPLETE_NAME = "INCOMPLETE"
+# Written last, after every other file. Each line is a SHA-256 and a
+# relative path. ``is_complete`` requires this file and checks every hash.
+BACKUP_COMPLETE_NAME = "COMPLETE"
+# Status for an old backup that has no COMPLETE marker. It is not offered
+# as a finished restore. ``verify_legacy_backup`` checks one the user picked.
+LEGACY_BACKUP_STATUS = "legacy, unverified"
 
 
 def _real_dir(path: Path) -> bool:
@@ -583,70 +590,281 @@ def _real_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
 
 
-def _is_snapshot_store(backup_dir: Path) -> bool:
-    """Return whether a directory is a content-addressed snapshot store.
+def _is_failed_name(name: str) -> bool:
+    """Return whether a directory name is a failed backup.
 
     Args:
-        backup_dir: Directory to test.
+        name: Directory name, not a path.
 
     Returns:
-        True when ``manifests`` or ``objects`` is a real directory. The
-        parent path is not consulted, so a store under ``Library/Backups``
-        and a store in an app-data folder are recognized the same way.
+        True when the name ends with ``-failed`` or ``-failed-NN``, in any
+        letter case.
     """
-    return _real_dir(backup_dir / "manifests") or _real_dir(backup_dir / "objects")
+    lowered = name.lower()
+    if lowered.endswith("-failed"):
+        return True
+    tail = lowered.rsplit("-failed-", 1)
+    return len(tail) == 2 and len(tail[1]) == 2 and tail[1].isdigit()
 
 
-def is_complete(backup_dir: Path) -> bool:
-    """Return whether a backup or snapshot directory is safe to restore.
-
-    This is the only completeness check a restore or a snapshot list should
-    use. It does not look at the parent path, so it works for a
-    ``serato-web-`` folder beside ``master.sqlite`` and for a snapshot store
-    anywhere else, including an app-data directory.
-
-    A folder is not safe when its name ends with :data:`BACKUP_FAILED_SUFFIX`,
-    when it contains :data:`BACKUP_INCOMPLETE_NAME`, when it is a shortcut,
-    when it is missing, or when it cannot be read. A snapshot store (a
-    directory that already has ``manifests`` or ``objects``) is safe only
-    when both of those are real directories. Any other folder is a database
-    backup and is safe only when ``master.sqlite`` is a regular file.
-    ``root.sqlite`` is optional.
+def _is_staging_name(name: str) -> bool:
+    """Return whether a directory name is an unfinished staging folder.
 
     Args:
-        backup_dir: Candidate directory. Pass the snapshot store root (the
-            directory that contains ``manifests`` and ``objects``), not the
-            ``manifests`` directory and not a manifest file.
+        name: Directory name, not a path.
 
     Returns:
-        True when the directory has the files its layout requires and
-        neither the failed suffix nor the incomplete marker.
+        True for a hidden ``.partial`` folder.
     """
+    return name.lower().endswith(".partial")
+
+
+def _relative_files(folder: Path) -> list[Path] | None:
+    """Return regular files under a folder, excluding the COMPLETE marker.
+
+    Args:
+        folder: Directory to walk.
+
+    Returns:
+        File paths relative to ``folder``, sorted by their POSIX path.
+        None when a shortcut is found or the walk cannot be read.
+    """
+    found: list[Path] = []
     try:
-        if backup_dir.is_symlink() or not backup_dir.is_dir():
+        for path in folder.rglob("*"):
+            if path.is_symlink():
+                return None
+            if not path.is_file():
+                continue
+            if path.name == BACKUP_COMPLETE_NAME and path.parent == folder:
+                continue
+            found.append(path.relative_to(folder))
+    except OSError:
+        return None
+    return sorted(found, key=lambda item: item.as_posix())
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        The lowercase hex digest.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _write_complete_marker(folder: Path) -> None:
+    """Write the COMPLETE marker after every other backup file.
+
+    Args:
+        folder: Staging directory whose files are already in place.
+
+    Raises:
+        OSError: If a file cannot be read or the marker cannot be written.
+    """
+    files = _relative_files(folder)
+    if files is None:
+        raise OSError("The backup contains a shortcut.")
+    lines = [f"{_sha256_file(folder / rel)}  {rel.as_posix()}\n" for rel in files]
+    (folder / BACKUP_COMPLETE_NAME).write_text("".join(lines), encoding="utf-8")
+
+
+def _complete_hashes_match(folder: Path) -> bool:
+    """Return whether COMPLETE lists every file and each hash matches.
+
+    Args:
+        folder: Directory that contains a COMPLETE marker.
+
+    Returns:
+        True when the marker and the files agree. A missing file, an extra
+        file, a shortcut, or a hash mismatch is false.
+    """
+    marker = folder / BACKUP_COMPLETE_NAME
+    try:
+        text = marker.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    listed: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line:
+            continue
+        digest, separator, rel = line.partition("  ")
+        if separator != "  " or len(digest) != 64 or not rel or rel == BACKUP_COMPLETE_NAME:
             return False
-        if backup_dir.name.endswith(BACKUP_FAILED_SUFFIX):
+        if any(part in {"", ".", ".."} or part.startswith("/") for part in rel.split("/")):
             return False
-        if (backup_dir / BACKUP_INCOMPLETE_NAME).exists():
+        try:
+            bytes.fromhex(digest)
+        except ValueError:
             return False
-        if _is_snapshot_store(backup_dir):
-            return _real_dir(backup_dir / "manifests") and _real_dir(backup_dir / "objects")
-        master = backup_dir / "master.sqlite"
-        if not _real_file(master):
+        if rel in listed:
             return False
+        listed[rel] = digest.lower()
+    if not listed:
+        return False
+    files = _relative_files(folder)
+    if files is None:
+        return False
+    names = [path.as_posix() for path in files]
+    if names != sorted(listed):
+        return False
+    try:
+        for rel, digest in listed.items():
+            if _sha256_file(folder / rel) != digest:
+                return False
     except OSError:
         return False
     return True
 
 
+def _rejected_backup_dir(backup_dir: Path) -> bool:
+    """Return whether a directory is never a finished backup.
+
+    Args:
+        backup_dir: Candidate directory.
+
+    Returns:
+        True for a shortcut, a missing path, a failed name, a staging
+        name, a folder that contains ``INCOMPLETE``, or an unreadable path.
+    """
+    if backup_dir.is_symlink() or not backup_dir.is_dir():
+        return True
+    if _is_failed_name(backup_dir.name) or _is_staging_name(backup_dir.name):
+        return True
+    return (backup_dir / BACKUP_INCOMPLETE_NAME).exists()
+
+
+def is_complete(backup_dir: Path) -> bool:
+    """Return whether a backup directory is safe to restore.
+
+    This is the only completeness check a restore or a snapshot list should
+    use. The signature is ``is_complete(backup_dir)`` and the argument is
+    the directory itself. The parent path is ignored, so the same check
+    works for a ``serato-web-`` folder beside ``master.sqlite`` and for a
+    snapshot directory anywhere else, including an app-data folder.
+
+    True only when :data:`BACKUP_COMPLETE_NAME` exists and every hash it
+    lists matches the file with that relative path, and every other file
+    in the directory is listed. A missing marker means the directory is
+    not complete. A name ending in ``-failed`` or ``-failed-NN`` (any
+    letter case) and a hidden ``.partial`` directory are never complete.
+    ``INCOMPLETE`` is never complete. A shortcut or an unreadable path is
+    not complete.
+
+    An old backup with no marker is not complete. :func:`backup_status`
+    reports it as :data:`LEGACY_BACKUP_STATUS`. :func:`verify_legacy_backup`
+    is the check for one the user explicitly picked.
+
+    Args:
+        backup_dir: Candidate directory. For a snapshot store, pass the
+            store root after its COMPLETE marker has been written, not a
+            single manifest file.
+
+    Returns:
+        True when the COMPLETE marker verifies every file in the directory.
+    """
+    try:
+        if _rejected_backup_dir(backup_dir):
+            return False
+        marker = backup_dir / BACKUP_COMPLETE_NAME
+        if not _real_file(marker):
+            return False
+        return _complete_hashes_match(backup_dir)
+    except OSError:
+        return False
+
+
+def backup_status(backup_dir: Path) -> str:
+    """Describe a backup directory for a restore list.
+
+    Args:
+        backup_dir: Candidate directory.
+
+    Returns:
+        ``complete`` when :func:`is_complete` is true.
+        :data:`LEGACY_BACKUP_STATUS` (``legacy, unverified``) when the
+        folder is an old backup with ``master.sqlite`` and no COMPLETE
+        marker. ``incomplete`` for everything else, including ``-failed``
+        and ``.partial`` folders.
+    """
+    if is_complete(backup_dir):
+        return "complete"
+    if _is_legacy_backup(backup_dir):
+        return LEGACY_BACKUP_STATUS
+    return "incomplete"
+
+
+def _is_legacy_backup(backup_dir: Path) -> bool:
+    """Return whether a folder is an old backup with no COMPLETE marker.
+
+    Args:
+        backup_dir: Candidate directory.
+
+    Returns:
+        True when ``master.sqlite`` is a regular file and the folder has
+        neither marker, and it is not a failed or staging name.
+    """
+    try:
+        if _rejected_backup_dir(backup_dir):
+            return False
+        if (backup_dir / BACKUP_COMPLETE_NAME).exists():
+            return False
+        return _real_file(backup_dir / "master.sqlite")
+    except OSError:
+        return False
+
+
+def verify_legacy_backup(backup_dir: Path) -> None:
+    """Check an explicitly chosen legacy backup before it is restored.
+
+    Call this only when the user picked an unmarked folder.
+    :func:`is_complete` stays false for that folder. The check opens
+    ``master.sqlite`` read-only and runs ``PRAGMA integrity_check``. A
+    restore must stop when the result is not exactly ``ok``, and it must
+    do that before saving the usual pre-restore snapshot.
+
+    Args:
+        backup_dir: Folder the user picked. It must be a legacy backup.
+
+    Raises:
+        LibraryError: If the folder is not an unverified legacy backup,
+            the database cannot be opened read-only, or the integrity
+            check is not exactly ``ok``.
+    """
+    if not _is_legacy_backup(backup_dir):
+        raise LibraryError("That folder is not an unverified legacy backup.")
+    master = backup_dir / "master.sqlite"
+    uri = f"file:{master.resolve()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            rows = conn.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.Error as exc:
+        raise LibraryError(
+            "That legacy backup could not be checked, so it was not restored."
+        ) from exc
+    if rows != [("ok",)]:
+        raise LibraryError(
+            "That legacy backup did not pass its integrity check, so it was not restored."
+        )
+
+
 def list_backups(directory: Path | None = None) -> list[Path]:
     """Return backup folders that are safe to restore.
 
-    Uses :func:`is_complete` on each database backup folder. A snapshot
-    store is not included: its listing calls :func:`is_complete` on the
-    store root itself. Folders ending in ``-failed``, folders that contain
-    ``INCOMPLETE``, and folders without ``master.sqlite`` are omitted.
-    The file browser uses the same check when it lists ``Library/Backups``.
+    Uses :func:`is_complete`. A legacy folder, a ``-failed`` folder, and a
+    hidden ``.partial`` folder are omitted. The snapshot list calls
+    :func:`is_complete` on its own store directory. The file browser hides
+    staging and failed folders when it lists ``Library/Backups``.
 
     Args:
         directory: Folder that holds the backups. When omitted, this is
@@ -663,12 +881,7 @@ def list_backups(directory: Path | None = None) -> list[Path]:
         found = [
             child
             for child in root.iterdir()
-            if (
-                not child.is_symlink()
-                and child.is_dir()
-                and not _is_snapshot_store(child)
-                and is_complete(child)
-            )
+            if not child.is_symlink() and child.is_dir() and is_complete(child)
         ]
     except OSError:
         return []
@@ -707,30 +920,60 @@ def _discard_failed_backup(folder: Path, backups: Path) -> None:
         )
 
 
+def _failed_names(name: str) -> list[str]:
+    """Return the failed-folder names to try, in order.
+
+    Args:
+        name: Current directory name.
+
+    Returns:
+        ``<name>-failed``, then ``<name>-failed-02`` through
+        ``<name>-failed-99``.
+    """
+    base = f"{name}{BACKUP_FAILED_SUFFIX}"
+    return [base, *[f"{base}-{suffix:02d}" for suffix in range(2, 100)]]
+
+
 def _quarantine_failed_backup(folder: Path) -> None:
     """Rename a failed backup, then delete that renamed folder.
 
     Args:
         folder: Real directory this call created inside ``Backups``.
 
-    A delete error leaves the renamed folder. A rename error leaves the
-    original folder with an ``INCOMPLETE`` marker. Either result makes
-    :func:`is_complete` return false.
+    The first free name is ``-failed``, then ``-failed-02`` and so on.
+    A delete error leaves the renamed folder. When every rename fails,
+    the original folder gets an ``INCOMPLETE`` marker. A staging name
+    and a failed name both make :func:`is_complete` return false.
     """
-    destination = folder.with_name(folder.name + BACKUP_FAILED_SUFFIX)
-    try:
-        folder.rename(destination)
-    except OSError as exc:
-        _write_incomplete_marker(folder, exc)
+    rename_error: OSError | None = None
+    for name in _failed_names(folder.name):
+        destination = folder.with_name(name)
+        try:
+            folder.rename(destination)
+        except FileExistsError as exc:
+            rename_error = exc
+            continue
+        except OSError as exc:
+            # Linux reports ENOTEMPTY when the target name is an existing
+            # directory. That is a collision, so try the next suffix.
+            if exc.errno == errno.ENOTEMPTY:
+                rename_error = exc
+                continue
+            _write_incomplete_marker(folder, exc)
+            return
+        try:
+            shutil.rmtree(destination)
+        except OSError as exc:
+            app_log.logger.warning(
+                "Could not remove the failed backup folder %s: %s",
+                destination,
+                exc,
+            )
         return
-    try:
-        shutil.rmtree(destination)
-    except OSError as exc:
-        app_log.logger.warning(
-            "Could not remove the failed backup folder %s: %s",
-            destination,
-            exc,
-        )
+    _write_incomplete_marker(
+        folder,
+        rename_error or OSError("Every failed backup name is already taken."),
+    )
 
 
 def _write_incomplete_marker(folder: Path, rename_error: OSError) -> None:
@@ -760,15 +1003,19 @@ def _write_incomplete_marker(folder: Path, rename_error: OSError) -> None:
 def ensure_backup() -> Path | None:
     """Copy the master database once per process before the first write.
 
-    The folder is ``Backups/serato-web-%Y%m%d-%H%M%S``. When that folder
-    already exists, the next free name is ``-02``, then ``-03``, through
-    ``-99``. Each name is claimed with ``mkdir(parents=True, exist_ok=False)``,
-    which fails atomically when another process already took it. Nothing is
-    copied until a folder is claimed. If the copy fails, that new folder is
-    renamed so its name ends with ``-failed`` and then removed. If the
-    rename fails, an ``INCOMPLETE`` file is written in the folder. A failure
-    to rename or remove the folder is logged and does not replace the copy
-    error. :func:`is_complete` is false for either leftover.
+    Files are copied into a hidden ``.serato-web-<stamp>.partial`` directory.
+    When that name exists, the next free name is ``-02`` through ``-99``.
+    ``mkdir(parents=True, exist_ok=False)`` claims it. After every copy
+    succeeds, a ``COMPLETE`` marker is written last, with a SHA-256 for
+    every file, and the directory is renamed to ``serato-web-<stamp>``.
+    A leftover ``.partial`` directory from an earlier crash is removed at
+    the start of the next backup. If this copy fails, the staging directory
+    is renamed so the name ends with ``-failed`` (or ``-failed-02`` when
+    that name is taken) and then removed. If the rename fails, an
+    ``INCOMPLETE`` file is written in the staging directory. A failure to
+    rename or remove it is logged and does not replace the copy error.
+    :func:`is_complete` is false for a staging directory, a failed name,
+    and a folder with no verified ``COMPLETE`` marker.
 
     Returns:
         The new backup directory, or None when this process already backed
@@ -785,35 +1032,87 @@ def ensure_backup() -> Path | None:
         return None
     stamp = time.strftime("%Y%m%d-%H%M%S")
     parent = master.resolve().parent / "Backups"
-    base = f"serato-web-{stamp}"
-    names = [base, *[f"{base}-{suffix:02d}" for suffix in range(2, 100)]]
-    folder: Path | None = None
-    for name in names:
-        candidate = parent / name
-        try:
-            candidate.mkdir(parents=True, exist_ok=False)
-        except FileExistsError:
-            continue
-        folder = candidate
-        break
-    if folder is None:
-        raise FileExistsError(
-            f"Every backup folder for this second already exists: "
-            f"{base} through {base}-99. Nothing was copied."
-        )
+    _cleanup_partial_backups(parent)
+    staging, final_name = _claim_staging(parent, stamp)
     try:
-        _backup_database(master, folder / "master.sqlite")
-        _match_quiescent_header(master, folder / "master.sqlite")
+        _backup_database(master, staging / "master.sqlite")
+        _match_quiescent_header(master, staging / "master.sqlite")
         root = master.resolve().parent / "root.sqlite"
         if root.is_file() and _mirror_allowed(root):
-            _backup_database(root, folder / "root.sqlite")
-            _match_quiescent_header(root, folder / "root.sqlite")
+            _backup_database(root, staging / "root.sqlite")
+            _match_quiescent_header(root, staging / "root.sqlite")
+        _write_complete_marker(staging)
+        folder = staging.with_name(final_name)
+        # os.replace is atomic on the same directory. File moves use
+        # os.rename so a cross-device fallback does not publish this folder.
+        os.replace(staging, folder)
     except Exception:
-        _discard_failed_backup(folder, parent)
+        _discard_failed_backup(staging, parent)
         raise
     _backed_up.add(key)
     telemetry.capture(telemetry.EVENT_BACKUP_MADE)
     return folder
+
+
+def _backup_name_choices(stamp: str) -> list[str]:
+    """Return the public backup names for one second, in order.
+
+    Args:
+        stamp: ``%Y%m%d-%H%M%S`` text.
+
+    Returns:
+        ``serato-web-<stamp>``, then ``-02`` through ``-99``.
+    """
+    base = f"serato-web-{stamp}"
+    return [base, *[f"{base}-{suffix:02d}" for suffix in range(2, 100)]]
+
+
+def _claim_staging(parent: Path, stamp: str) -> tuple[Path, str]:
+    """Create the hidden directory that receives this backup.
+
+    Args:
+        parent: ``Library/Backups``.
+        stamp: ``%Y%m%d-%H%M%S`` text.
+
+    Returns:
+        The staging directory and the public name it will be renamed to.
+
+    Raises:
+        FileExistsError: If every staging name for this second exists.
+            Nothing is copied.
+    """
+    for name in _backup_name_choices(stamp):
+        final = parent / name
+        staging = parent / f".{name}.partial"
+        if final.exists():
+            continue
+        try:
+            staging.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            continue
+        return staging, name
+    base = f"serato-web-{stamp}"
+    raise FileExistsError(
+        f"Every backup folder for this second already exists: "
+        f"{base} through {base}-99. Nothing was copied."
+    )
+
+
+def _cleanup_partial_backups(parent: Path) -> None:
+    """Remove hidden staging directories left by an earlier crash.
+
+    Args:
+        parent: ``Library/Backups``. A missing directory is left missing.
+    """
+    if not parent.is_dir() or parent.is_symlink():
+        return
+    for child in list(parent.iterdir()):
+        if child.is_symlink() or not child.is_dir() or not _is_staging_name(child.name):
+            continue
+        try:
+            shutil.rmtree(child)
+        except OSError:
+            _discard_failed_backup(child, parent)
 
 
 def begin_write() -> sqlite3.Connection:
