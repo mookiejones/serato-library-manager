@@ -124,8 +124,17 @@ jobs:
         shell: bash
         env:
           RELEASE_ARTIFACT: ${{ matrix.artifact }}
-        run: python -c "import os; from pathlib import Path; names=[os.environ['RELEASE_ARTIFACT'], 'Serato-Library-windows-setup.exe'];
-[print('%s %s bytes (%.2f MiB)' % (p.name, p.stat().st_size, p.stat().st_size/1048576)) for p in map(Path, names) if p.is_file()]"
+        run: |
+          python <<'PY'
+          import os
+          from pathlib import Path
+          names = [os.environ["RELEASE_ARTIFACT"], "Serato-Library-windows-setup.exe"]
+          for name in names:
+              path = Path(name)
+              if path.is_file():
+                  size = path.stat().st_size
+                  print("%s %s bytes (%.2f MiB)" % (path.name, size, size / 1048576))
+          PY
 
       # upload-artifact does not need actions: write. This job stays at contents: read.
       - name: Upload the disk image
@@ -289,8 +298,17 @@ jobs:
         shell: bash
         env:
           RELEASE_ARTIFACT: ${{ matrix.artifact }}
-        run: python -c "import os; from pathlib import Path; names=[os.environ['RELEASE_ARTIFACT'], 'Serato-Library-windows-setup.exe'];
-[print('%s %s bytes (%.2f MiB)' % (p.name, p.stat().st_size, p.stat().st_size/1048576)) for p in map(Path, names) if p.is_file()]"
+        run: |
+          python <<'PY'
+          import os
+          from pathlib import Path
+          names = [os.environ["RELEASE_ARTIFACT"], "Serato-Library-windows-setup.exe"]
+          for name in names:
+              path = Path(name)
+              if path.is_file():
+                  size = path.stat().st_size
+                  print("%s %s bytes (%.2f MiB)" % (path.name, size, size / 1048576))
+          PY
 
       - name: Upload the disk image
         if: matrix.kind == 'dmg'
