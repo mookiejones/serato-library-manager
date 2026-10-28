@@ -13,7 +13,7 @@ A local page for the Serato DJ Pro library. The process reads `master.sqlite`. I
 
 On macOS the process exits when `~/Library/Application Support/Serato/Library/master.sqlite` is missing. On Windows that file is `%LOCALAPPDATA%\Serato\Library\master.sqlite`. `server.py` uses the Python standard library.
 
-The desktop app runs the same server on a free port and opens the browser:
+The desktop app runs the same server on a free port and opens a native window:
 
 ```bash
 python3 -m venv .venv
@@ -21,7 +21,7 @@ python3 -m venv .venv
 .venv/bin/python desktop.py
 ```
 
-Quit from the menu bar on macOS or the notification-area icon on Windows. Closing the browser does not stop the server. A second launch opens the same page. On macOS, install `requirements-macos.txt` in that environment as well. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`. To build an app for the machine you are on, install `requirements-build.txt` in that environment and run `python -m PyInstaller serato-library.spec`. The result is `dist/Serato Library.app` on macOS, or `dist/Serato Library/` on Windows. The build is unsigned. Release disk images, the Windows installer, attestations, and the GitHub settings around them are in [docs/github.md](github.md).
+The window is titled Serato Library. Close it to quit. A second launch focuses that window. On macOS, install `requirements-macos.txt` in that environment as well so WKWebView can load. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`, and install the WebView2 runtime when it is missing. On Linux, install WebKitGTK (GTK 3 and WebKit2) or Qt WebKit. Qt WebEngine is refused because it bundles Chromium. `SERATO_LIBRARY_NO_WINDOW=1` or `--no-window` skips the window. To build an app for the machine you are on, install `requirements-build.txt` in that environment and run `python -m PyInstaller serato-library.spec`. The result is `dist/Serato Library.app` on macOS, or `dist/Serato Library/` on Windows. The build is unsigned. Release disk images, the Windows installer, attestations, and the GitHub settings around them are in [docs/github.md](github.md).
 
 The first time the page opens, it asks whether to share anonymous usage stats and crash reports. The choice stays off until you accept. [PRIVACY.md](../PRIVACY.md) lists what can be sent.
 
@@ -47,7 +47,7 @@ The first time the page opens, it asks whether to share anonymous usage stats an
 C4Container
 title Serato web library
 
-Person(dj, "DJ", "Browses and edits the library in a browser")
+Person(dj, "DJ", "Browses and edits the library in the Serato Library window")
 Container(page, "static/", "HTML, CSS, JavaScript", "Crate tree, track list, and track detail")
 Container(server, "server.py", "Python HTTP server", "JSON API on 127.0.0.1 port 8765")
 Container(library, "library.py", "Python", "Reads and writes the Serato SQLite schema")
@@ -83,11 +83,11 @@ Rel(tags, audio, "Reads the tag header")
 
 `serve` binds `ThreadingHTTPServer` to `127.0.0.1`. Called with no arguments it uses port `8765` and exits when that port is already taken or the master database is missing. `serve(port=0)` asks the operating system for a free port. `require_library=False` skips the database check and does not start telemetry or the snapshot watch, which is the release smoke path. When the library is required, `serve` starts that watch after the port is bound. `main` serves until Ctrl-C on port 8765. The handler class is `Handler`. It logs each request and answers JSON with `Cache-Control: no-store`. `shutdown_token` on the server object starts as None.
 
-`app_root` locates `static/`. A PyInstaller build reads it from `sys._MEIPASS`. A source checkout reads the directory beside `server.py`. The menu icon is `packaging/menu-icon.png` beside that root.
+`app_root` locates `static/`. A PyInstaller build reads it from `sys._MEIPASS`. A source checkout reads the directory beside `server.py`.
 
-`desktop.py` calls `serve(port=0)`, opens the default browser, and shows a pystray icon: a menu-bar item on macOS and a notification-area icon on Windows. The menu is Open and Quit. Quit shuts the server down and then stops telemetry. A lock file `instance.lock` in the config directory keeps a single instance. The page URL is written to `instance.port`. A second launch opens that URL when `/api/health` answers. pystray is imported only when the icon is shown. The macOS bundle sets `LSUIElement` so there is no Dock icon, and `NSRemovableVolumesUsageDescription` so macOS can ask before the app reads an external drive. That permission is Removable Volumes, not Full Disk Access.
+`desktop.py` calls `serve(port=0)` and opens a pywebview window titled Serato Library on that URL. The window uses the system web view: WebView2 (`edgechromium`) on Windows, WKWebView (`cocoa`) on macOS, and WebKitGTK (`gtk`) or Qt WebKit (`qt`) on Linux. CEF and Qt WebEngine are not requested, so the build does not bundle Chromium. The window size and position are stored in `settings.json` under `window` (`x`, `y`, `width`, `height`) after the window has been placed. Closing the window POSTs `/api/shutdown` with the desktop shutdown token, then the process stops telemetry. A lock file `instance.lock` in the config directory keeps a single instance. The page URL is written to `instance.port`. A focus token is written to `instance.focus` with mode `0600`. A second launch POSTs `/api/focus` with `X-Serato-Library-Focus` when `/api/health` answers, and the running process restores and shows the window. It does not start another server. pywebview is imported only when the window is shown. `SERATO_LIBRARY_NO_WINDOW=1` or `--no-window` skips that import and waits until shutdown. The macOS bundle does not set `LSUIElement`, so the app has a Dock icon, and it sets `NSRemovableVolumesUsageDescription` so macOS can ask before the app reads an external drive. That permission is Removable Volumes, not Full Disk Access. There is no menu-bar item and no notification-area icon.
 
-When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_main` runs and `launch` does not. The check confirms the bundled page through `server.app_root()`, binds a free port without opening the library or telemetry, writes `http://127.0.0.1:<port>` and a shutdown token to the marker, and serves until `POST /api/shutdown` presents that token in `X-Serato-Library-Shutdown`. A relative path, a symlink, a directory, or a missing parent directory stops the process. The windowed build has no console, so the marker file is the signal the release check reads.
+When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_main` runs and `launch` does not. The check confirms the bundled page through `server.app_root()`, binds a free port without opening the library, a window, or telemetry, writes `http://127.0.0.1:<port>` and a shutdown token to the marker, and serves until `POST /api/shutdown` presents that token in `X-Serato-Library-Shutdown`. A relative path, a symlink, a directory, or a missing parent directory stops the process. The windowed build has no console, so the marker file is the signal the release check reads. The smoke path does not import pywebview.
 
 `static_assets.py` lists local `src` and `href` files in `static/index.html`. Remote URLs, anchors, and data URLs are skipped. `serato-library.spec` exits before it analyzes the program when one of those files is missing. The release zip check compares the same files, byte for byte, with the source tree.
 
@@ -249,7 +249,7 @@ The events are `app_opened` (once per process after consent), `library_scanned`,
 
 Sentry uses `server_name` `local`, environment `local`, release `app_config.APP_VERSION` (`1.1.0`), and the tag `app=serato-library-manager`. `send_default_pii` is false. Local variables, source context, and request bodies are off. Argv and logging integrations are disabled. Framework auto-enabling is off. `before_send` returns `None` when consent is off. Otherwise it removes request data, frame variables, and absolute paths. A path becomes `[path]`. A final component ending in `.py` is kept as the file name.
 
-`app_config.py` stores `settings.json` with `install_id` and `telemetry_consent`. The id is a random UUID, created when the choice is saved, not before. `None` means the prompt is still due. `False` is a saved decline. The file is written only when both fields are set. A corrupt file is renamed to `settings.json.unreadable`. The directory is `~/Library/Application Support/Serato Library` on macOS, `%APPDATA%\Serato Library` on Windows, and `$XDG_CONFIG_HOME/serato-library` (or `~/.config/serato-library`) elsewhere. `SERATO_LIBRARY_CONFIG_DIR` overrides it when the value is absolute. `related.sqlite` is in that same directory. Its schema is in [related-tracks.md](related-tracks.md).
+`app_config.py` stores `settings.json` with `install_id`, `telemetry_consent`, and, after the desktop window has been placed, `window`. The id is a random UUID, created when the choice is saved, not before. `None` means the prompt is still due. `False` is a saved decline. The telemetry pair is written only when both fields are set. `window` is `x`, `y`, `width`, and `height`, all integers. `x` and `y` may be `0` or negative. A bool is rejected. A window frame may be stored before the sharing choice, and a later choice keeps the frame. A window save keeps a completed choice. A corrupt file is renamed to `settings.json.unreadable`. The directory is `~/Library/Application Support/Serato Library` on macOS, `%APPDATA%\Serato Library` on Windows, and `$XDG_CONFIG_HOME/serato-library` (or `~/.config/serato-library`) elsewhere. `SERATO_LIBRARY_CONFIG_DIR` overrides it when the value is absolute. `related.sqlite` is in that same directory. Its schema is in [related-tracks.md](related-tracks.md). `GET /api/settings` does not return the window frame or the install id.
 
 `app_log.py` writes `serato-library.log` with `RotatingFileHandler`: 1 MiB and three backups. The directory is `~/Library/Logs/Serato Library` on macOS, `%LOCALAPPDATA%\Serato Library\Logs` on Windows, and `$XDG_STATE_HOME/serato-library/logs` (or `~/.local/state/serato-library/logs`) elsewhere. `SERATO_LIBRARY_LOG_DIR` overrides it when the value is absolute. The startup line can include the database path. That file is not uploaded. Copying the log skips a symlink and skips a file that is not inside the log directory, and it keeps the newest 200,000 characters. Opening the folder runs `open` on macOS, `xdg-open` elsewhere, and `os.startfile` on Windows. The response does not include the path.
 
@@ -261,6 +261,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 |--------|------|---------------|--------|
 | GET | `/api/health` | none | `{"ok": true}`. Does not open the library |
 | POST | `/api/shutdown` | header `X-Serato-Library-Shutdown` | Stops the desktop server when the token matches. 404 when no token is set. 403 when it does not match |
+| POST | `/api/focus` | header `X-Serato-Library-Focus` | Brings the desktop window forward when the token matches. 404 when no token is set. 403 when it does not match. The token is not in the page |
 | GET | `/api/status` | none | Lock status |
 | GET | `/api/library` | `space` | Tracks, crates, rules, counts |
 | GET | `/api/track` | `id`, `space` | One track, or 404 |

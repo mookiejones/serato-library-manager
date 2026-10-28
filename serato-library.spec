@@ -3,8 +3,9 @@
 
 The static files are the directory server.py serves. The spec fails when
 index.html points at a local file that is not in that directory, or when
-the menu icon is missing. On macOS it also fails when the menu-bar
-frameworks are not installed.
+pywebview is not installed. On macOS it also fails when the WebKit
+frameworks are not installed. The window uses the system web view.
+CEF and Qt WebEngine are excluded so the bundle does not contain Chromium.
 """
 
 import importlib.util
@@ -18,14 +19,11 @@ import app_config
 from static_assets import missing_static_files
 
 missing = missing_static_files(root / "static")
-icon = root / "packaging" / "menu-icon.png"
-if not icon.is_file():
-    missing.append("packaging/menu-icon.png")
 if missing:
     raise SystemExit("Missing build inputs: " + ", ".join(missing))
 
-if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("pystray") is None:
-    raise SystemExit("Missing build inputs: PIL and pystray")
+if importlib.util.find_spec("webview") is None:
+    raise SystemExit("Missing build inputs: pywebview")
 
 
 def telemetry_hiddenimports():
@@ -61,45 +59,93 @@ def telemetry_hiddenimports():
     return names
 
 
-hidden = ["pystray", "pystray._base", "PIL", "PIL.Image", "six"]
-binaries = []
-if sys.platform == "darwin":
-    frameworks = ("objc", "AppKit", "Foundation", "CoreFoundation", "PyObjCTools")
-    absent = [name for name in ("AppKit", "Foundation", "objc") if importlib.util.find_spec(name) is None]
-    if absent:
-        raise SystemExit("Missing macOS tray frameworks: " + ", ".join(absent))
-    from PyInstaller.utils.hooks import collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
-    for name in frameworks:
-        binaries += collect_dynamic_libs(name)
-    hidden += [
-        "pystray._darwin",
+hidden = [
+    "webview",
+    "webview.guilib",
+    "webview.http",
+    "webview.window",
+    "bottle",
+    "proxy_tools",
+    "typing_extensions",
+]
+binaries = collect_dynamic_libs("webview")
+datas = [
+    (str(root / "static"), "static"),
+]
+datas += collect_data_files("webview")
+# CEF bundles Chromium. Qt WebEngine does too. Neither is a system web view.
+excludes = [
+    "webview.platforms.cef",
+    "webview.platforms.android",
+    "cefpython3",
+    "PyQt5",
+    "PyQt6",
+    "PySide2",
+    "PySide6",
+    "qtpy",
+    "PIL",
+    "pystray",
+]
+if sys.platform == "darwin":
+    frameworks = (
+        "objc",
         "AppKit",
         "Foundation",
-        "objc",
-        "CoreFoundation",
+        "WebKit",
+        "Quartz",
+        "Security",
+        "UniformTypeIdentifiers",
         "PyObjCTools",
-        "PyObjCTools.MachSignals",
+    )
+    absent = [
+        name
+        for name in ("AppKit", "Foundation", "objc", "WebKit")
+        if importlib.util.find_spec(name) is None
+    ]
+    if absent:
+        raise SystemExit("Missing macOS web view frameworks: " + ", ".join(absent))
+    for name in frameworks:
+        if importlib.util.find_spec(name) is not None:
+            binaries += collect_dynamic_libs(name)
+    hidden += [
+        "webview.platforms.cocoa",
+        "AppKit",
+        "Foundation",
+        "WebKit",
+        "objc",
+        "Quartz",
+        "Security",
+        "UniformTypeIdentifiers",
+        "PyObjCTools",
+        "PyObjCTools.AppHelper",
     ]
 elif sys.platform == "win32":
-    hidden += ["pystray._win32", "pystray._util.win32"]
+    if importlib.util.find_spec("clr") is None:
+        raise SystemExit("Missing build inputs: pythonnet")
+    hidden += [
+        "webview.platforms.winforms",
+        "webview.platforms.edgechromium",
+        "webview.platforms.win32",
+        "clr",
+        "clr_loader",
+        "pythonnet",
+    ]
 else:
-    hidden += ["pystray._xorg", "pystray._appindicator", "pystray._gtk"]
+    hidden += ["webview.platforms.gtk", "gi"]
 hidden.extend(telemetry_hiddenimports())
 
 a = Analysis(
     ["desktop.py"],
     pathex=[str(root)],
     binaries=binaries,
-    datas=[
-        (str(root / "static"), "static"),
-        (str(icon), "packaging"),
-    ],
+    datas=datas,
     hiddenimports=hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -138,7 +184,6 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleShortVersionString": app_config.APP_VERSION,
             "CFBundleVersion": app_config.APP_VERSION,
-            "LSUIElement": True,
             "NSHighResolutionCapable": True,
             "NSRemovableVolumesUsageDescription": (
                 "Serato Library reads music files on external drives."
