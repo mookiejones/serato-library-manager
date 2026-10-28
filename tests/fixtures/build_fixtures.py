@@ -780,6 +780,20 @@ def _library(
     }
 
 
+def _write_text(path: Path, text: str) -> None:
+    """Write UTF-8 text with LF line endings.
+
+    Args:
+        path: Destination.
+        text: Text. Newlines are LF on every platform so a Windows rebuild
+            matches the committed files.
+
+    Returns:
+        None.
+    """
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def _sha256(data: bytes) -> str:
     """Return the hex SHA-256 of ``data``.
 
@@ -905,9 +919,9 @@ def build(root: Path) -> None:
             },
             "audio": audio_golden,
         }
-        (directory / "golden.json").write_text(json.dumps(golden, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _write_text(directory / "golden.json", json.dumps(golden, indent=2, ensure_ascii=False) + "\n")
         manifest = {"version": str(library["dir"]), "status": status, "note": str(library["note"]), "files": files}
-        (directory / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        _write_text(directory / "manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
         for item in files:
             readme_rows.append(
                 {
@@ -917,7 +931,7 @@ def build(root: Path) -> None:
                     "citation": str(item["citation"]),
                 }
             )
-    (root / "README.md").write_text(_readme(readme_rows), encoding="utf-8")
+    _write_text(root / "README.md", _readme(readme_rows))
 
 
 def _crate_parts(filename: str) -> tuple[list[str], str]:
