@@ -166,13 +166,13 @@ class SetupApiTests(unittest.TestCase):
         self.library = TempLibrary()
         self.library.__enter__()
         self._tmp = tempfile.TemporaryDirectory()
-        config = Path(self._tmp.name) / "config"
+        self.config = Path(self._tmp.name) / "config"
         logs = Path(self._tmp.name) / "logs"
-        config.mkdir()
+        self.config.mkdir()
         logs.mkdir()
         self._env = mock.patch.dict(
             os.environ,
-            {app_config.CONFIG_ENV: str(config), app_config.LOG_ENV: str(logs)},
+            {app_config.CONFIG_ENV: str(self.config), app_config.LOG_ENV: str(logs)},
         )
         self._env.start()
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -266,6 +266,85 @@ class SetupApiTests(unittest.TestCase):
         assert isinstance(rejected, dict)
         self.assertFalse(rejected["found"])
         self.assertNotIn(str(other), json.dumps(rejected))
+
+    def test_settings_rejects_a_non_boolean_and_unknown_keys(self) -> None:
+        """Refuse a completion flag that is not a boolean, and any extra key.
+
+        The only accepted completion body is ``{"wizard_complete": bool}``.
+        A string, an integer, null, and an unknown field are all 400, and
+        none of them creates a settings file.
+
+        Returns:
+            None. The test fails if a bad body is stored.
+        """
+        rejected = (
+            {"wizard_complete": "yes"},
+            {"wizard_complete": 1},
+            {"wizard_complete": None},
+            {"theme": "dark"},
+            {"wizard_complete": True, "theme": "dark"},
+        )
+        path = self.config / "settings.json"
+        for payload in rejected:
+            status, body = _request(self.base, "/api/settings", payload)
+            self.assertEqual(status, 400, payload)
+            assert isinstance(body, dict)
+            self.assertIn("error", body)
+            self.assertFalse(path.exists(), payload)
+
+    def test_wizard_complete_keeps_the_window_and_a_rerun_keeps_settings(self) -> None:
+        """Keep the desktop frame, the install id, and the sharing choice.
+
+        The window is stored first, the way the desktop app saves it
+        before setup finishes. Marking setup finished, clearing that flag
+        to run setup again, and finishing once more all leave the other
+        fields in place.
+
+        Returns:
+            None. The test fails if a setup save drops the window.
+        """
+        frame = app_config.WindowGeometry(-12, 0, 1280, 800)
+        app_config.save_window_geometry(frame)
+        status, choice = _request(self.base, "/api/settings", {"telemetry_consent": False})
+        self.assertEqual(status, 200)
+        assert isinstance(choice, dict)
+        self.assertIs(choice["wizard_complete"], False)
+        before = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        install_id = before["install_id"]
+        self.assertEqual(before["window"], {"x": -12, "y": 0, "width": 1280, "height": 800})
+        self.assertIs(before["telemetry_consent"], False)
+
+        status, done = _request(self.base, "/api/settings", {"wizard_complete": True})
+        self.assertEqual(status, 200)
+        assert isinstance(done, dict)
+        self.assertIs(done["wizard_complete"], True)
+        self.assertIs(done["telemetry_consent"], False)
+        finished = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(finished["install_id"], install_id)
+        self.assertEqual(finished["window"], before["window"])
+        self.assertIs(finished["telemetry_consent"], False)
+        self.assertIs(finished["wizard_complete"], True)
+
+        status, again = _request(self.base, "/api/settings", {"wizard_complete": False})
+        self.assertEqual(status, 200)
+        assert isinstance(again, dict)
+        self.assertIs(again["wizard_complete"], False)
+        self.assertIs(again["telemetry_consent"], False)
+        rerun = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(rerun["install_id"], install_id)
+        self.assertEqual(rerun["window"], before["window"])
+        self.assertIs(rerun["telemetry_consent"], False)
+        self.assertIs(rerun["wizard_complete"], False)
+
+        status, redone = _request(self.base, "/api/settings", {"wizard_complete": True})
+        self.assertEqual(status, 200)
+        assert isinstance(redone, dict)
+        self.assertIs(redone["wizard_complete"], True)
+        stored = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["install_id"], install_id)
+        self.assertEqual(stored["window"], before["window"])
+        self.assertIs(stored["telemetry_consent"], False)
+        self.assertEqual(set(stored), set(app_config.SETTINGS_KEYS))
 
 
 class MissingLibraryServerTests(unittest.TestCase):

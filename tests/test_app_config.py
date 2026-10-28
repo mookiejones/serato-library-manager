@@ -64,7 +64,7 @@ class SettingsTests(unittest.TestCase):
         """Keep a saved False instead of treating it as missing.
 
         Writes the choice, loads it again, and checks the file contains
-        both the boolean and an install id.
+        the boolean, an install id, and an unfinished setup flag.
 
         Returns:
             None. The test fails if False comes back as None or True.
@@ -73,10 +73,12 @@ class SettingsTests(unittest.TestCase):
         self.assertIs(saved.telemetry_consent, False)
         loaded = app_config.load_settings()
         self.assertIs(loaded.telemetry_consent, False)
+        self.assertIs(loaded.wizard_complete, False)
         self.assertEqual(loaded.install_id, saved.install_id)
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertIs(payload["telemetry_consent"], False)
-        self.assertEqual(set(payload), {"install_id", "telemetry_consent"})
+        self.assertIs(payload["wizard_complete"], False)
+        self.assertEqual(set(payload), {"install_id", "telemetry_consent", "wizard_complete"})
 
     def test_true_is_kept(self) -> None:
         """Keep a saved True and reuse the install id.
@@ -281,6 +283,37 @@ class WindowSettingsTests(unittest.TestCase):
         self.assertEqual(set(payload), {"install_id", "telemetry_consent", "window", "wizard_complete"})
         self.assertIs(payload["wizard_complete"], False)
         self.assertEqual(set(payload["window"]), set(app_config.WINDOW_FIELDS))
+
+    def test_wizard_complete_keeps_the_window_and_a_rerun_keeps_the_choice(self) -> None:
+        """Keep a negative origin when setup is finished and run again.
+
+        False before a sharing choice does not write a file. After the
+        choice and the frame exist, True and False both keep them.
+
+        Returns:
+            None. The test fails if setup drops the window or the choice.
+        """
+        untouched = app_config.set_wizard_complete(False)
+        self.assertIsNone(untouched.window)
+        self.assertFalse((self.config / "settings.json").exists())
+        frame = app_config.WindowGeometry(-40, 0, 1280, 800)
+        app_config.save_window_geometry(frame)
+        saved = app_config.set_telemetry_consent(True)
+        done = app_config.set_wizard_complete(True)
+        self.assertEqual(done.window, frame)
+        self.assertIs(done.telemetry_consent, True)
+        self.assertEqual(done.install_id, saved.install_id)
+        again = app_config.set_wizard_complete(False)
+        self.assertIs(again.wizard_complete, False)
+        self.assertEqual(again.window, frame)
+        self.assertIs(again.telemetry_consent, True)
+        self.assertEqual(again.install_id, saved.install_id)
+        finished = app_config.set_wizard_complete(True)
+        self.assertEqual(finished.window, frame)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["window"]["x"], -40)
+        self.assertIs(payload["telemetry_consent"], True)
+        self.assertEqual(payload["install_id"], saved.install_id)
 
     def test_bool_coordinate_is_rejected(self) -> None:
         """Ignore a boolean coordinate instead of storing it as 1.

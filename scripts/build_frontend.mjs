@@ -1,10 +1,10 @@
 /**
- * Bundle src/app.ts to static/app.js.
+ * Bundle the page and the first-run wizard.
  *
- * The page is an IIFE so index.html can keep a plain script tag. The
- * sourcemap sits beside the bundle. --check rebuilds in place and exits
- * non-zero when the committed bundle or map differs. esbuild is pinned
- * in package.json so the bytes stay the same on Ubuntu and Windows.
+ * Both outputs are IIFEs so index.html can keep plain script tags. The
+ * sourcemap sits beside each bundle. --check rebuilds in place and exits
+ * non-zero when a committed bundle or map differs. esbuild is pinned in
+ * package.json so the bytes stay the same on Ubuntu and Windows.
  */
 
 import esbuild from "esbuild";
@@ -13,51 +13,68 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const outfile = join(root, "static", "app.js");
-const mapfile = `${outfile}.map`;
 const check = process.argv.includes("--check");
 
-const beforeJs = check ? readFileSync(outfile) : null;
-const beforeMap = check ? readFileSync(mapfile) : null;
+const bundles = [
+  { entry: "src/app.ts", outfile: "static/app.js" },
+  { entry: "src/wizard-view.ts", outfile: "static/wizard.js", globalName: "SeratoWizard" },
+];
 
-await esbuild.build({
-  absWorkingDir: root,
-  entryPoints: ["src/app.ts"],
-  bundle: true,
-  format: "iife",
-  platform: "browser",
-  target: "es2022",
-  outfile: "static/app.js",
-  sourcemap: true,
-  sourcesContent: true,
-  legalComments: "none",
-  charset: "utf8",
-  logLevel: "warning",
-});
-
-const map = JSON.parse(readFileSync(mapfile, "utf8"));
-const sources = Array.isArray(map.sources) ? map.sources : [];
-if (!sources.length) {
-  console.error("static/app.js.map has no sources");
-  process.exit(1);
+const before = new Map();
+if (check) {
+  for (const bundle of bundles) {
+    const js = join(root, bundle.outfile);
+    before.set(js, readFileSync(js));
+    before.set(`${js}.map`, readFileSync(`${js}.map`));
+  }
 }
-for (const source of sources) {
-  if (typeof source !== "string" || source.includes("\\") || source.startsWith("/") || /^[A-Za-z]:/.test(source)) {
-    console.error(`static/app.js.map source is not a relative forward-slash path: ${source}`);
+
+for (const bundle of bundles) {
+  await esbuild.build({
+    absWorkingDir: root,
+    entryPoints: [bundle.entry],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: "es2022",
+    outfile: bundle.outfile,
+    globalName: bundle.globalName,
+    sourcemap: true,
+    sourcesContent: true,
+    legalComments: "none",
+    charset: "utf8",
+    logLevel: "warning",
+  });
+  const mapfile = join(root, `${bundle.outfile}.map`);
+  const map = JSON.parse(readFileSync(mapfile, "utf8"));
+  const sources = Array.isArray(map.sources) ? map.sources : [];
+  if (!sources.length) {
+    console.error(`${bundle.outfile}.map has no sources`);
     process.exit(1);
+  }
+  for (const source of sources) {
+    if (typeof source !== "string" || source.includes("\\") || source.startsWith("/") || /^[A-Za-z]:/.test(source)) {
+      console.error(`${bundle.outfile}.map source is not a relative forward-slash path: ${source}`);
+      process.exit(1);
+    }
   }
 }
 
 if (!check) {
-  console.log(`Wrote ${relative(root, outfile)} and ${relative(root, mapfile)}`);
-  process.exit(0);
-}
-
-const afterJs = readFileSync(outfile);
-const afterMap = readFileSync(mapfile);
-if (!beforeJs.equals(afterJs) || !beforeMap.equals(afterMap)) {
-  console.error("static/app.js is stale. Run npm run build and commit static/app.js and static/app.js.map.");
-  process.exit(1);
+  for (const bundle of bundles) {
+    console.log(`Wrote ${bundle.outfile} and ${bundle.outfile}.map`);
+  }
+} else {
+  for (const bundle of bundles) {
+    const js = join(root, bundle.outfile);
+    const map = `${js}.map`;
+    const jsChanged = !before.get(js).equals(readFileSync(js));
+    const mapChanged = !before.get(map).equals(readFileSync(map));
+    if (jsChanged || mapChanged) {
+      console.error(`${bundle.outfile} is stale. Run npm run build and commit ${bundle.outfile} and ${bundle.outfile}.map.`);
+      process.exit(1);
+    }
+  }
 }
 
 const expectedExpectError = 0;
@@ -74,7 +91,7 @@ function countExpectErrors(dir) {
     const text = readFileSync(full, "utf8");
     expectError += (text.match(/@ts-expect-error/g) || []).length;
     if (text.includes("@ts-nocheck") || text.includes("@ts-ignore")) {
-      console.error(`${full} uses @ts-nocheck or @ts-ignore. Strict checking stays on.`);
+      console.error(`${relative(root, full)} uses @ts-nocheck or @ts-ignore. Strict checking stays on.`);
       process.exit(1);
     }
   }

@@ -1,4 +1,3 @@
-/* Generated from src/wizard-view.ts by npm run build. Do not edit. */
 "use strict";
 var SeratoWizard = (() => {
   var __defProp = Object.defineProperty;
@@ -165,7 +164,7 @@ var SeratoWizard = (() => {
   // src/wizard-view.ts
   var LABELS = {
     "get-started": "Get started",
-    looking: "Looking\u2026",
+    looking: "Looking…",
     "use-library": "Use this library",
     "check-again": "Check again",
     "take-snapshot": "Take a safety snapshot",
@@ -364,7 +363,7 @@ var SeratoWizard = (() => {
     if (busy || model.step !== "consent") return;
     const token = generation;
     busy = true;
-    statusNote = "Saving\u2026";
+    statusNote = "Saving…";
     paint(false);
     try {
       const payload = await postJSON("/api/settings", { telemetry_consent: value }, 15e3);
@@ -385,7 +384,7 @@ var SeratoWizard = (() => {
   async function finish() {
     const token = generation;
     busy = true;
-    statusNote = "Opening\u2026";
+    statusNote = "Opening…";
     paint(false);
     try {
       const payload = await postJSON("/api/settings", { wizard_complete: true }, 15e3);
@@ -523,7 +522,7 @@ var SeratoWizard = (() => {
     const primary = button("wizard-primary");
     const action = primaryAction(model);
     primary.hidden = action === "none";
-    primary.textContent = model.context.snapshot === "saving" ? "Saving a safety copy\u2026" : LABELS[action];
+    primary.textContent = model.context.snapshot === "saving" ? "Saving a safety copy…" : LABELS[action];
     primary.disabled = busy || !primaryEnabled(model);
     button("wizard-no").disabled = busy;
     button("wizard-yes").disabled = busy;
@@ -743,3 +742,4 @@ var SeratoWizard = (() => {
   }
   return __toCommonJS(wizard_view_exports);
 })();
+//# sourceMappingURL=wizard.js.map
