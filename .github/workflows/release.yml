@@ -105,9 +105,32 @@ jobs:
         shell: bash
         run: python scripts/release_bundle.py smoke-setup Serato-Library-windows-setup.exe
 
-  # Tag pushes and manual runs only. actions: write is required to upload
-  # the built files so a later job can download them. A pull request never
-  # runs this job, so that scope never appears on a pull_request token.
+      # upload-artifact does not need actions: write. This job stays at contents: read.
+      - name: Upload the disk image
+        if: matrix.kind == 'dmg'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+      - name: Upload the portable zip
+        if: matrix.kind == 'windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Serato-Library-windows.zip
+          path: Serato-Library-windows.zip
+          if-no-files-found: error
+
+      - name: Upload the Windows installer
+        if: matrix.kind == 'windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Serato-Library-windows-setup.exe
+          path: Serato-Library-windows-setup.exe
+          if-no-files-found: error
+
+  # Tag pushes and manual runs only. A pull request never runs this job.
   release-build:
     name: release-build (${{ matrix.artifact }})
     if: github.event_name != 'pull_request'

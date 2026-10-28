@@ -490,6 +490,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("github.event_name == 'pull_request'", build)
         build_perms = build.split("permissions:", 1)[1].split("strategy:", 1)[0]
         self.assertEqual(build_perms.strip(), "contents: read")
+        self.assertEqual(build.count("uses: actions/upload-artifact@"), 3)
+        self.assertIn("name: Serato-Library-windows.zip", build)
+        self.assertIn("name: Serato-Library-windows-setup.exe", build)
         self.assertNotIn("secrets.", build)
         self.assertNotIn("id-token", build)
         self.assertNotIn("attestations", build)
