@@ -1,9 +1,8 @@
 """Parse the spec-derived Serato fixtures without a live Serato install.
 
 The builder writes the bytes from the published notes. These tests read
-them back. MP3 and AIFF go through ``tags.read_serato_tags``. FLAC and
-M4A are expected to fail that reader until it understands those carriers
-(issue #47).
+them back. MP3, AIFF, FLAC, and M4A all go through ``tags.read_serato_tags``.
+Issue #47, which ignored FLAC and M4A, was fixed by pull request #55.
 """
 
 from __future__ import annotations
@@ -345,33 +344,27 @@ class AudioParseTests(unittest.TestCase):
                 self.assertTrue(parsed["found"])
                 self._assert_fields(parsed, spec)
 
-    @unittest.expectedFailure
     def test_flac_read_matches_the_golden(self) -> None:
         """Read SERATO_MARKERS_V2 from the FLAC fixtures.
 
-        ``tags.read_serato_tags`` only walks ID3 GEOB frames, so a FLAC
-        Vorbis comment comes back with ``found`` false. That bug is issue
-        #47. The failure is expected until the reader understands
-        ``SERATO_MARKERS_V2``. The same gap blocks the tag half of the
-        backup in issue #35 and the format work in issue #40.
+        Issue #47 was fixed by pull request #55. ``read_serato_tags`` now
+        reads the Vorbis comment, so these cues, loops, flips, and beatgrid
+        markers match the golden. This test is not an expected failure.
 
         Returns:
-            None. The test fails while the reader ignores FLAC.
+            None. The test fails if a FLAC fixture is unread or a field differs.
         """
         self._expect_production("flac")
 
-    @unittest.expectedFailure
     def test_m4a_read_matches_the_golden(self) -> None:
         """Read ``com.serato.dj`` ``markersv2`` atoms from the M4A fixtures.
 
-        ``tags.read_serato_tags`` only walks ID3 GEOB frames, so an M4A
-        atom comes back with ``found`` false. That bug is issue #47.
-        The failure is expected until the reader understands that atom.
-        The same gap blocks the tag half of the backup in issue #35 and
-        the format work in issue #40.
+        Issue #47 was fixed by pull request #55. ``read_serato_tags`` now
+        reads the freeform atom, so these cues, loops, flips, and beatgrid
+        markers match the golden. This test is not an expected failure.
 
         Returns:
-            None. The test fails while the reader ignores M4A.
+            None. The test fails if an M4A fixture is unread or a field differs.
         """
         self._expect_production("m4a")
 
