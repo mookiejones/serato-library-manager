@@ -221,25 +221,30 @@ class UndoAndBackupTests(unittest.TestCase):
             None. The test fails if the second call overwrites the snapshot
             or does not raise.
         """
-        # Occupy the one-second folder name ensure_backup is about to use.
-        # A clock tick between the two steps gets another try. Patching
-        # time.strftime is not used: a specialized lookup can miss the patch.
-        key = str(Path(library.MASTER).resolve())
+        # Occupy the folder ensure_backup is about to create. Clear the
+        # once-per-process set immediately before the call so a key from an
+        # earlier test cannot turn the call into a no-op. Retry when the
+        # clock ticks onto the next second between the two steps.
         parent = Path(library.MASTER).resolve().parent / "Backups"
+        created = None
         for _ in range(5):
             stamp = time.strftime("%Y%m%d-%H%M%S")
             folder = parent / f"serato-web-{stamp}"
             folder.mkdir(parents=True, exist_ok=True)
             sentinel = folder / "master.sqlite"
             sentinel.write_bytes(b"sentinel-backup")
-            library._backed_up.discard(key)
+            library._backed_up.clear()
             try:
-                library.ensure_backup()
+                created = library.ensure_backup()
             except FileExistsError:
                 self.assertEqual(sentinel.read_bytes(), b"sentinel-backup")
-                self.assertNotIn(key, library._backed_up)
+                self.assertFalse(library._backed_up)
                 return
-        self.fail("A backup folder that already exists for this second was replaced.")
+        siblings = sorted(path.name for path in parent.glob("serato-web-*")) if parent.is_dir() else []
+        self.fail(
+            f"ensure_backup returned {created!r} instead of raising. "
+            f"Occupied {folder}. Existing folders: {siblings}."
+        )
 
     def _drop_backups(self) -> None:
         """Remove snapshot folders so the next call writes a fresh one.
