@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Single source for the app version. Sentry's release, PostHog's
 # app_version, and ``__version__`` all read this string.
-APP_VERSION = "0.1.1"
+APP_VERSION = "1.1.0"
 __version__ = APP_VERSION
 CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"

@@ -704,7 +704,7 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Serato-Library-windows-setup", text)
         self.assertIn("PrivilegesRequired=lowest", text)
         self.assertNotIn("SignTool=", text)
-        self.assertEqual(release_bundle.app_version(), "0.1.1")
+        self.assertEqual(release_bundle.app_version(), "1.1.0")
         self.assertIn(release_bundle.INNO_VERSION, release_bundle.INNO_URL)
         self.assertEqual(len(release_bundle.INNO_SHA256), 64)
 
