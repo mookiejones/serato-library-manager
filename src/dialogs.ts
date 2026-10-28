@@ -47,6 +47,7 @@ let filesTrigger: HTMLElement | null = null;
  *
  * The report form asks for the loss report as JSON. The file form is the
  * XML download, which starts only after the dialog is confirmed.
+ * Hot loops is off until checked, which sends ``hot_loops=0``.
  *
  * @param {boolean} report True asks for the loss report instead of the file.
  * @returns {string} The request path and query.
@@ -54,8 +55,9 @@ let filesTrigger: HTMLElement | null = null;
 export function rekordboxExportUrl(report: boolean) {
   const crate = state.mode === "crates" ? state.activeCrate : "all";
   const memory = el("rekordbox-memory").checked ? "1" : "0";
+  const hotLoops = el("rekordbox-hot-loops").checked ? "1" : "0";
   const key = el("rekordbox-key").value;
-  const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}`;
+  const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
   return report ? `${base}&report=1` : base;
 }
 

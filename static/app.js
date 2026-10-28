@@ -2196,8 +2196,9 @@
   function rekordboxExportUrl(report) {
     const crate = state.mode === "crates" ? state.activeCrate : "all";
     const memory = el("rekordbox-memory").checked ? "1" : "0";
+    const hotLoops = el("rekordbox-hot-loops").checked ? "1" : "0";
     const key = el("rekordbox-key").value;
-    const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}`;
+    const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
     return report ? `${base}&report=1` : base;
   }
   function fillRekordboxReport(lines) {

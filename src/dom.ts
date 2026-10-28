@@ -40,6 +40,7 @@ export interface ElementIds {
   reload: HTMLButtonElement;
   "export-m3u": HTMLButtonElement;
   "rekordbox-memory": HTMLInputElement;
+  "rekordbox-hot-loops": HTMLInputElement;
   "rekordbox-key": HTMLSelectElement;
   "rekordbox-report": HTMLUListElement;
   "export-rekordbox": HTMLButtonElement;
