@@ -24,3 +24,6 @@ env/
 # PyInstaller
 build/
 dist/
+
+# MkDocs output from `mkdocs build -f docs/mkdocs.yml`
+/site/

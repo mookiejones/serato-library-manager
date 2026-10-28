@@ -118,7 +118,7 @@ To build without publishing, open Actions, choose Release, and run the workflow.
 
 ## User guide
 
-The guide source is `docs/index.md`, `docs/first-install.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
+The guide source is `docs/index.md`, `docs/first-install.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. A local check is `mkdocs build --strict -f docs/mkdocs.yml`. That command writes `site/` next to `docs/`. The Pages job passes `-d` and does not publish that folder. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
 
 The published URL is `https://mookiejones.github.io/serato-library-manager/`.
 
@@ -143,6 +143,8 @@ Wait until CI, CodeQL, and a pull-request dependency review have each completed 
 - `analyze Python`
 
 Require `review dependency changes` on pull requests. That check does not run on a direct push, so it cannot be a required status for every update of `main`.
+
+A green check is not the whole merge. Gatekeeper QA reviews the pull request next. The Principal Developer reviews and merges after that. `.github/CODEOWNERS` names `@mookiejones` for the whole tree. Documentation for the change is in the same pull request. Work that is not merged is labelled PREVIEW.
 
 ## Where a change has to land
 

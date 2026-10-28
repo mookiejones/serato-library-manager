@@ -1,6 +1,6 @@
 # Moving between Serato and Rekordbox
 
-> **Status: preview.** Rekordbox XML export ships with [PR #39](https://github.com/mookiejones/serato-library-manager/pull/39). Until it merges, nothing here works yet.
+> **Status: preview.** Rekordbox XML export is in the app ([PR #39](https://github.com/mookiejones/serato-library-manager/pull/39) is merged). The export is one-way. It does not write the Serato library back.
 
 ## How it works
 

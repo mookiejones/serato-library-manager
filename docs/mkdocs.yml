@@ -5,6 +5,9 @@ repo_url: https://github.com/mookiejones/serato-library-manager
 repo_name: mookiejones/serato-library-manager
 edit_uri: edit/main/docs/
 docs_dir: .
+# Keep the build output out of docs/. `mkdocs build -f docs/mkdocs.yml`
+# writes ../site. The Pages job passes -d and overrides this.
+site_dir: ../site
 use_directory_urls: false
 
 exclude_docs: |
