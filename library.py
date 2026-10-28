@@ -3895,6 +3895,10 @@ def merge_duplicates(payload: Mapping[str, object]) -> dict[str, object]:
 def _resolved(portable_id: str | None) -> str | None:
     """Resolve a portable id to a path string.
 
+    An embedded NUL makes ``Path.is_file`` raise ``ValueError`` on some
+    Python versions and return false on others. That candidate is not a
+    file. The stored spelling is returned so the caller can warn.
+
     Args:
         portable_id: Stored path, or None.
 
@@ -3911,13 +3915,16 @@ def _resolved(portable_id: str | None) -> str | None:
         try:
             if candidate.is_file():
                 return str(candidate)
-        except OSError:
+        except (OSError, ValueError):
             continue
     return str(candidates[0])
 
 
 def resolved_path(portable_id: str | None) -> str | None:
     """Resolve a portable id to a path string.
+
+    An embedded NUL is not treated as a file that exists. The stored
+    spelling is returned so the caller can warn instead of crashing.
 
     Args:
         portable_id: Stored path, or None.

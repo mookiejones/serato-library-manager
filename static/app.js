@@ -1323,6 +1323,22 @@ function markerSection(track) {
     const minutes = Math.floor(total / 60);
     return `${minutes}:${(total - minutes * 60).toFixed(3).padStart(6, "0")}`;
   };
+  /**
+   * Format a beatgrid position for the panel.
+   *
+   * Nested in markerSection. Three decimal places hide the binary noise in
+   * a stored float, such as 1.2300000190734863. The export does not use
+   * this string. A value that is not a finite number is left blank.
+   *
+   * @param {number|string} value Position in seconds.
+   * @returns {string} Seconds with three decimal places, plus "s".
+   */
+  const beatSeconds = (value) => {
+    if (value === "" || value == null) return "";
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "";
+    return `${number.toFixed(3)}s`;
+  };
   for (const cue of track.cues || []) {
     const row = document.createElement("div");
     row.className = "marker";
@@ -1363,7 +1379,7 @@ function markerSection(track) {
     const row = document.createElement("div");
     row.className = "marker";
     const time = document.createElement("span");
-    time.textContent = `${mark.position}s`;
+    time.textContent = beatSeconds(mark.position);
     const name = document.createElement("span");
     name.textContent = mark.bpm != null ? `${mark.bpm} BPM` : `${mark.beats} beats`;
     row.append(document.createElement("span"), time, name);
