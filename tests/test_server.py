@@ -19,6 +19,8 @@ from xml.etree import ElementTree
 import server
 from server import (
     blank,
+    display_beatgrid,
+    encode_json,
     format_beat_position,
     format_bpm,
     format_bool,
@@ -75,6 +77,43 @@ class FormatTests(unittest.TestCase):
         script = Path(__file__).resolve().parents[1].joinpath("static", "app.js").read_text(encoding="utf-8")
         self.assertIn("beatSeconds(mark.position)", script)
         self.assertIn("toFixed(3)", script)
+        self.assertIn("Number.isFinite(bpmNumber)", script)
+
+    def test_nonfinite_bpm_is_null_in_json(self) -> None:
+        """Send a non-finite beatgrid BPM as null, never as the token NaN.
+
+        ``display_beatgrid`` clears the BPM. ``encode_json`` also replaces
+        a non-finite float anywhere in a payload and refuses ``allow_nan``.
+        A finite BPM and a marker that has no BPM are left alone. Nothing
+        is written.
+
+        Returns:
+            None. The test fails if the JSON contains NaN or Infinity.
+        """
+        shown = display_beatgrid(
+            [
+                {"position": 1.2300000190734863, "bpm": float("nan")},
+                {"position": 2.0, "bpm": float("inf")},
+                {"position": 3.0, "bpm": float("-inf")},
+                {"position": 4.0, "bpm": 128.0},
+                {"position": 0.0, "beats": 4},
+            ]
+        )
+        self.assertIsNone(shown[0]["bpm"])
+        self.assertIsNone(shown[1]["bpm"])
+        self.assertIsNone(shown[2]["bpm"])
+        self.assertEqual(shown[3]["bpm"], 128.0)
+        self.assertNotIn("bpm", shown[4])
+        self.assertEqual(shown[0]["position"], "1.230")
+        body = encode_json({"beatgrid": shown, "raw": float("nan"), "huge": float("inf")})
+        text = body.decode("utf-8")
+        self.assertNotIn("NaN", text)
+        self.assertNotIn("Infinity", text)
+        parsed = json.loads(text)
+        self.assertIsNone(parsed["beatgrid"][0]["bpm"])
+        self.assertIsNone(parsed["raw"])
+        self.assertIsNone(parsed["huge"])
+        self.assertEqual(parsed["beatgrid"][3]["bpm"], 128.0)
 
     def test_require_space(self) -> None:
         """Default a missing space to Serato Library and reject an unknown one.
