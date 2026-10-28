@@ -9,11 +9,15 @@ at a file it just wrote.
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 import os
 import plistlib
 import struct
 import subprocess
+import tempfile
 import unittest
+from unittest import mock
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -1021,3 +1025,139 @@ def _m4a_file(audio: bytes) -> bytes:
     meta = atom(b"meta", b"\x00\x00\x00\x00" + ilst)
     moov = atom(b"moov", atom(b"udta", meta))
     return atom(b"ftyp", b"M4A ") + moov + atom(b"mdat", audio)
+
+
+class CompletenessTests(unittest.TestCase):
+    """The JSON COMPLETE marker and the rules a backup copy will import."""
+
+    def test_writer_marker_passes_is_complete(self) -> None:
+        """Accept a directory whose marker was written by this module.
+
+        Returns:
+            None. The test fails if the marker is not the JSON object or
+            ``is_complete`` rejects it.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            final = Path(raw) / "snap"
+            completeness.publish_directory(final, {"manifest.json": b'{"ok": true}\n'})
+            self.assertTrue(completeness.is_complete(final))
+            marker = json.loads((final / "COMPLETE").read_text(encoding="utf-8"))
+            self.assertEqual(set(marker), {"version", "algorithm", "hashes"})
+            self.assertEqual(marker["version"], 1)
+            self.assertEqual(marker["algorithm"], "sha256")
+            self.assertEqual(set(marker["hashes"]), {"manifest.json"})
+            self.assertEqual(len(marker["hashes"]["manifest.json"]), 64)
+
+    def test_failed_and_partial_names_are_case_insensitive(self) -> None:
+        """Reject ``-FAILED`` and ``.PARTIAL`` the same as the lowercase names.
+
+        Returns:
+            None. The test fails if any of those names is treated as complete.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            for name in ("copy-FAILED", "copy-Failed-02", "stage.PARTIAL"):
+                folder = root / name
+                folder.mkdir()
+                (folder / "manifest.json").write_bytes(b"x")
+                completeness.write_complete_marker(folder)
+                self.assertFalse(completeness.is_complete(folder), name)
+
+    def test_unlisted_file_makes_the_directory_incomplete(self) -> None:
+        """Require the marker's file set to match the directory exactly.
+
+        Returns:
+            None. The test fails if an extra file is still complete.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw) / "snap"
+            folder.mkdir()
+            (folder / "a.txt").write_bytes(b"a")
+            completeness.write_complete_marker(folder)
+            self.assertTrue(completeness.is_complete(folder))
+            (folder / "extra.txt").write_bytes(b"nope")
+            self.assertFalse(completeness.is_complete(folder))
+
+    def test_hash_is_streamed(self) -> None:
+        """Read a file in chunks instead of loading it in one call.
+
+        Returns:
+            None. The test fails if a read asks for the whole file.
+        """
+        payload = b"abcdefghij"
+        reads: list[int] = []
+        original = Path.open
+
+        def wrapped(self: Path, *args: object, **kwargs: object):
+            handle = original(self, *args, **kwargs)
+            real = handle.read
+
+            def read(size: int = -1) -> bytes:
+                reads.append(size)
+                return real(size)
+
+            handle.read = read  # type: ignore[method-assign]
+            return handle
+
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "blob"
+            path.write_bytes(payload)
+            previous = completeness._HASH_CHUNK
+            completeness._HASH_CHUNK = 4
+            try:
+                with mock.patch.object(Path, "open", wrapped):
+                    digest = completeness._sha256_file(path)
+            finally:
+                completeness._HASH_CHUNK = previous
+        self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+        self.assertEqual(reads, [4, 4, 4, 4])
+
+    def test_only_sha256_digests_count(self) -> None:
+        """Reject a marker whose algorithm or digest is not SHA-256.
+
+        Returns:
+            None. The test fails if sha1, a short digest, or a non-hex
+            digest is accepted.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw) / "snap"
+            folder.mkdir()
+            (folder / "a.txt").write_bytes(b"a")
+            completeness.write_complete_marker(folder)
+            marker_path = folder / "COMPLETE"
+            payload = json.loads(marker_path.read_text(encoding="utf-8"))
+            payload["algorithm"] = "sha1"
+            marker_path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertFalse(completeness.is_complete(folder))
+            payload["algorithm"] = "sha256"
+            payload["hashes"]["a.txt"] = "ab"
+            marker_path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertFalse(completeness.is_complete(folder))
+            payload["hashes"]["a.txt"] = "z" * 64
+            marker_path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertFalse(completeness.is_complete(folder))
+
+    def test_legacy_backup_is_checked_on_a_copy(self) -> None:
+        """Run the legacy integrity check without opening the backup folder.
+
+        Returns:
+            None. The test fails if a valid unmarked database is rejected
+            or a finished snapshot is treated as legacy.
+        """
+        import sqlite3
+
+        import library
+
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw) / "old"
+            folder.mkdir()
+            connection = sqlite3.connect(folder / "master.sqlite")
+            connection.execute("CREATE TABLE note (id INTEGER)")
+            connection.commit()
+            connection.close()
+            self.assertFalse(completeness.is_complete(folder))
+            completeness.verify_legacy_backup(folder)
+            finished = Path(raw) / "done"
+            completeness.publish_directory(finished, {"manifest.json": b"{}"})
+            with self.assertRaises(library.LibraryError):
+                completeness.verify_legacy_backup(finished)
