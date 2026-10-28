@@ -463,6 +463,8 @@ def crate_query(raw: str) -> int | None:
     """
     if raw in {"", "all"}:
         return None
+    if not raw.isascii() or not raw.isdigit():
+        raise library.LibraryError("That request is not valid.", 400)
     try:
         crate_id = int(raw, 10)
     except (TypeError, ValueError, OverflowError):
@@ -1425,7 +1427,7 @@ class Handler(BaseHTTPRequestHandler):
                     key_notation=key_notation,
                 )
                 if (query_text(query, "report", "") or "") == "1":
-                    self.send_json({"report": report, "filename": "rekordbox.xml"})
+                    self.send_json({"report": report, "xml": xml_text, "filename": "rekordbox.xml"})
                     return
                 body = xml_text.encode("utf-8")
                 self.send_response(200)

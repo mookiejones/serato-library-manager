@@ -733,7 +733,9 @@ class ExportTests(unittest.TestCase):
         self.assertIn('id="rekordbox-report"', html)
         self.assertIn("showModal", script)
         self.assertIn('createElement("li")', script)
-        self.assertNotIn("revokeObjectURL", script)
+        self.assertIn('startsWith("<?xml")', script)
+        self.assertIn("setTimeout", script)
+        self.assertIn("revokeObjectURL", script)
         self.assertIn("report=1", script)
         self.assertIn("Preferences", guide)
         self.assertIn("rekordbox xml", guide)
@@ -1205,6 +1207,7 @@ class RoundTripChecklistTests(unittest.TestCase):
             key_notation="asis",
             stats=stats,
             unicode_names=names,
+            unreadable_names=[],
             folder_cache={},
         )
         self.assertIsNone(skipped)
@@ -1218,8 +1221,129 @@ class RoundTripChecklistTests(unittest.TestCase):
             collection = document.find("COLLECTION")
             assert collection is not None
             colored = next(item for item in collection.findall("TRACK") if item.get("TrackID") == "1")
-            self.assertEqual(colored.get("Colour"), "#CC0000")
+            self.assertEqual(colored.get("Colour"), "0xCC0000")
             self.assertEqual(colored.get("Rating"), "153")
+
+
+    def test_a_locked_file_does_not_stop_the_export(self) -> None:
+        """Export the rest of the library when one audio file cannot be opened.
+
+        PermissionError is the Windows sharing-violation case. The locked
+        file stays in the collection without cue points, and the loss report
+        names it.
+
+        Returns:
+            None. The test fails if the export raises or omits the other track.
+        """
+        from unittest.mock import patch
+
+        with TempLibrary() as temp:
+            locked = temp.root / "locked.wav"
+            locked.write_bytes(b"locked")
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'locked.wav', name = 'Locked' WHERE id = 1",
+                    (str(locked),),
+                )
+            real_open = Path.open
+
+            def refuse_locked(self: Path, *args: object, **kwargs: object):
+                if self.name == "locked.wav":
+                    raise PermissionError("locked")
+                return real_open(self, *args, **kwargs)
+
+            with patch.object(Path, "open", refuse_locked):
+                xml, report = rekordbox.export_rekordbox("Serato Library", None)
+            text = " ".join(report)
+            self.assertIn("could not be read", text)
+            self.assertIn("locked.wav", text)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            names = {item.get("Name") for item in collection.findall("TRACK")}
+            self.assertIn("Locked", names)
+            self.assertIn("Same", names)
+
+    def test_id3_without_a_footer_and_a_size_past_the_end(self) -> None:
+        """Read an ID3v2.3 tag with no footer, and refuse a size past the end.
+
+        Returns:
+            None. The test fails if the plain tag is unread or the short file crashes.
+        """
+        frame = _lame_frame(b"LAME3.100")
+        body = b"\x00" * 32
+        size = bytes(
+            (
+                (len(body) >> 21) & 0x7F,
+                (len(body) >> 14) & 0x7F,
+                (len(body) >> 7) & 0x7F,
+                len(body) & 0x7F,
+            )
+        )
+        header = b"ID3" + bytes([3, 0, 0]) + size
+        with TempLibrary() as temp:
+            plain = temp.root / "plain.mp3"
+            plain.write_bytes(header + body + frame)
+            self.assertEqual(rekordbox.mp3_timing(str(plain)), ("D", 0))
+            short = temp.root / "short.mp3"
+            # Synchsafe size that claims five million bytes the file does not have.
+            claimed = bytes(
+                (
+                    (5_000_000 >> 21) & 0x7F,
+                    (5_000_000 >> 14) & 0x7F,
+                    (5_000_000 >> 7) & 0x7F,
+                    5_000_000 & 0x7F,
+                )
+            )
+            short.write_bytes(b"ID3" + bytes([4, 0, 0]) + claimed + b"\x00" * 16)
+            self.assertEqual(rekordbox.mp3_timing(str(short))[0], "unread")
+
+    def test_a_file_without_xing_keeps_its_cue_time(self) -> None:
+        """Leave a cue where Serato stored it when the MP3 has no Xing header.
+
+        Returns:
+            None. The test fails if the exported time is shifted.
+        """
+        with TempLibrary() as temp:
+            audio = temp.root / "noxing.mp3"
+            frame = bytes([0xFF, 0xFB, 0x90, 0x00]) + bytes(80)
+            _write_audio(audio, _cue_payload([(0, 1000, b"\xCC\x00\x00", "Hit")]), frame)
+            with open_database(temp.db) as conn:
+                conn.execute("DELETE FROM space_asset")
+                conn.execute("DELETE FROM asset")
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                    VALUES (1, 'No Xing', 'DJ', ?, 'noxing.mp3', 1)
+                    """,
+                    (str(audio),),
+                )
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (1, 1)")
+            xml, report = rekordbox.export_rekordbox("Serato Library", None, memory_cues=False)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            mark = tracks[0]["marks"][0]
+            assert isinstance(mark, dict)
+            self.assertEqual(rekordbox.position_ms(str(mark["Start"])), 1000)
+            self.assertIn("case A", " ".join(report))
+
+    def test_a_segment_of_six_beats_is_not_the_downbeat(self) -> None:
+        """Place the next marker on beat 3 after a six-beat segment.
+
+        Six is not a multiple of four, so Battito must not stay at 1.
+
+        Returns:
+            None. The test fails if both markers are written as downbeats.
+        """
+        tempos = rekordbox.tempo_entries(
+            [
+                {"position": 0.0, "beats": 6},
+                {"position": 3.0, "bpm": 120.0},
+            ]
+        )
+        self.assertEqual([item["Battito"] for item in tempos], ["1", "3"])
+        self.assertEqual(tempos[0]["Bpm"], "120.00")
 
 
 class ParseTests(unittest.TestCase):

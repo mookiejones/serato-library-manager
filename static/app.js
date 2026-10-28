@@ -2561,14 +2561,18 @@ function fillRekordboxReport(lines) {
   }
 }
 
+let rekordboxXml = "";
+
 document.getElementById("export-rekordbox").addEventListener("click", () => {
+  rekordboxXml = "";
   fetch(rekordboxExportUrl(true))
     .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
     .then(({ ok, body }) => {
-      if (!ok) {
+      if (!ok || typeof body.xml !== "string" || !body.xml.startsWith("<?xml")) {
         setNotice(body.error || "The Rekordbox export failed.");
         return;
       }
+      rekordboxXml = body.xml;
       fillRekordboxReport(body.report || []);
       document.getElementById("rekordbox-status").textContent = "";
       document.getElementById("rekordbox-dialog").showModal();
@@ -2577,14 +2581,24 @@ document.getElementById("export-rekordbox").addEventListener("click", () => {
 });
 
 document.getElementById("rekordbox-cancel").addEventListener("click", () => {
+  rekordboxXml = "";
   document.getElementById("rekordbox-dialog").close();
 });
 
 document.getElementById("rekordbox-download").addEventListener("click", () => {
+  if (!rekordboxXml.startsWith("<?xml")) {
+    document.getElementById("rekordbox-status").textContent = "The export did not produce an XML file.";
+    return;
+  }
+  const blob = new Blob([rekordboxXml], { type: "application/xml" });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = rekordboxExportUrl(false);
+  link.href = url;
   link.download = "rekordbox.xml";
   link.click();
+  // Safari and Firefox need the object URL until the download has started.
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  rekordboxXml = "";
   document.getElementById("rekordbox-dialog").close();
 });
 

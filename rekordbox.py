@@ -337,6 +337,7 @@ def export_rekordbox(
     track_elements: list[ElementTree.Element] = []
     stats: dict[str, int] = {}
     unicode_names: list[str] = []
+    unreadable_names: list[str] = []
     folder_cache: dict[str, dict[str, str]] = {}
     for row in tracks:
         element = _track_element(
@@ -346,6 +347,7 @@ def export_rekordbox(
             key_notation=key_notation,
             stats=stats,
             unicode_names=unicode_names,
+            unreadable_names=unreadable_names,
             folder_cache=folder_cache,
         )
         if element is None:
@@ -375,7 +377,9 @@ def export_rekordbox(
     document.append(playlists)
     body = ElementTree.tostring(document, encoding="unicode")
     xml_text = '<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n"
-    return xml_text, _loss_report(stats, memory_cues, hot_loops, key_notation, unicode_names)
+    return xml_text, _loss_report(
+        stats, memory_cues, hot_loops, key_notation, unicode_names, unreadable_names
+    )
 
 
 def parse_rekordbox(xml_text: str) -> dict[str, object]:
@@ -723,17 +727,20 @@ def _inspect_audio(path: str, on_disk: bool) -> tuple[tags.SeratoTags, tuple[str
     """
     if not on_disk:
         return tags.serato_tags_from_regions(b""), ("skip", 0)
-    file = Path(path)
-    size = file.stat().st_size
-    with file.open("rb") as handle:
-        head = handle.read(min(size, 2_000_000))
-        tail = b""
-        if size > 2_000_000:
-            handle.seek(max(0, size - 512_000))
-            tail = handle.read(512_000)
-        timing = ("skip", 0)
-        if file.suffix.lower() == ".mp3":
-            timing = _mp3_timing_handle(handle)
+    try:
+        file = Path(path)
+        size = file.stat().st_size
+        with file.open("rb") as handle:
+            head = handle.read(min(size, 2_000_000))
+            tail = b""
+            if size > 2_000_000:
+                handle.seek(max(0, size - 512_000))
+                tail = handle.read(512_000)
+            timing = ("skip", 0)
+            if file.suffix.lower() == ".mp3":
+                timing = _mp3_timing_handle(handle)
+    except OSError:
+        return tags.serato_tags_from_regions(b""), ("unreadable", 0)
     return tags.serato_tags_from_regions(head, tail), timing
 
 
@@ -760,7 +767,7 @@ def _track_colour(value: object) -> str | None:
             empty color and is not written.
 
     Returns:
-        ``#RRGGBB``, or None when there is no color.
+        ``0xRRGGBB``, the form in Rekordbox's XML list, or None when there is no color.
     """
     if value is None or value == "":
         return None
@@ -770,7 +777,7 @@ def _track_colour(value: object) -> str | None:
         return None
     if color < 0 or color > 0xFFFFFF or color == 0xFFFFFF:
         return None
-    return f"#{color:06X}"
+    return f"0x{color:06X}"
 
 
 def notation_key(stored: str, notation: str) -> tuple[str, str]:
@@ -982,6 +989,7 @@ def _loss_report(
     hot_loops: bool,
     key_notation: str,
     unicode_names: Sequence[str] = (),
+    unreadable_names: Sequence[str] = (),
 ) -> list[str]:
     """Build the lines that say what this export cannot carry into Rekordbox.
 
@@ -991,6 +999,7 @@ def _loss_report(
         hot_loops: Whether loops were allowed onto free hot cue pads.
         key_notation: The key notation that was requested.
         unicode_names: File names whose paths could not be encoded.
+        unreadable_names: File names that were on disk but could not be opened.
 
     Returns:
         One sentence per line. The import warning is always first.
@@ -1063,7 +1072,16 @@ def _loss_report(
         lines.append(
             f"{len(unicode_names)} tracks had a path that could not be encoded and were left out: {shown}{extra}."
         )
-    lines.append("Track color is written as Colour when Serato has one. Rekordbox may ignore it.")
+    if unreadable_names:
+        shown = ", ".join(unreadable_names[:20])
+        extra = f" and {len(unreadable_names) - 20} more" if len(unreadable_names) > 20 else ""
+        lines.append(
+            f"{len(unreadable_names)} tracks could not be read and were exported without their cue points: {shown}{extra}."
+        )
+    lines.append(
+        "Track color is written as Colour in the form 0xRRGGBB. "
+        "Rekordbox's palette is eight colors, so another value may be ignored."
+    )
     lines.append("Beatgrid lock, replay gain, overview waveforms, stems, and play history are not copied.")
     lines.append("Smart crates are ordinary playlists in this file. Their rules are not copied.")
     if key_notation == "asis":
@@ -1521,6 +1539,7 @@ def _track_element(
     key_notation: str,
     stats: MutableMapping[str, int],
     unicode_names: list[str],
+    unreadable_names: list[str],
     folder_cache: dict[str, dict[str, str]],
 ) -> ElementTree.Element | None:
     """Build one TRACK element, including tempo and position marks.
@@ -1532,10 +1551,12 @@ def _track_element(
         key_notation: ``asis``, ``camelot``, or ``classical``.
         stats: Loss-report counters for this export.
         unicode_names: File names whose paths could not be encoded.
+        unreadable_names: File names that were on disk but could not be opened.
         folder_cache: Directory listings shared by every track in this export.
 
     Returns:
         The element, or None when the track has no path or the path cannot be encoded.
+        A file that cannot be opened is still exported, without cue points.
     """
     portable = _cell(row, "portable_id")
     if not isinstance(portable, str) or not portable.strip():
@@ -1543,20 +1564,30 @@ def _track_element(
         return None
     try:
         resolved = library.resolved_path(portable)
-        if not resolved:
-            _note(stats, "omitted")
-            return None
-        on_disk = Path(resolved).is_file()
-        spelled = filesystem_path(resolved, folder_cache) if on_disk else resolved
-        if not on_disk:
-            _note(stats, "missing_file")
-        location = location_uri(spelled)
-        parsed, timing = _inspect_audio(spelled if on_disk else resolved, on_disk)
     except UnicodeError:
         unicode_names.append(_file_label(portable))
         return None
+    if not resolved:
+        _note(stats, "omitted")
+        return None
+    try:
+        on_disk = Path(resolved).is_file()
+    except UnicodeError:
+        unicode_names.append(_file_label(portable))
+        return None
+    try:
+        spelled = filesystem_path(resolved, folder_cache) if on_disk else resolved
+        location = location_uri(spelled)
+    except UnicodeError:
+        unicode_names.append(_file_label(portable))
+        return None
+    if not on_disk:
+        _note(stats, "missing_file")
+    parsed, timing = _inspect_audio(spelled if on_disk else resolved, on_disk)
+    if timing[0] == "unreadable":
+        unreadable_names.append(_file_label(spelled))
     shift = 0
-    if on_disk and Path(spelled).suffix.lower() == ".mp3":
+    if on_disk and timing[0] != "unreadable" and Path(spelled).suffix.lower() == ".mp3":
         case, shift = timing
         if case in {"B", "C"}:
             _note(stats, "mp3_shift")

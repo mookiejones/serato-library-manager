@@ -8,6 +8,7 @@ import json
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -254,12 +255,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         summary = json.loads(reported)
         self.assertIn("Import to Collection", " ".join(summary["report"]))
-        self.assertNotIn("xml", summary)
+        self.assertTrue(summary["xml"].startswith("<?xml"))
         self.assertIn("Colour", " ".join(summary["report"]))
         self.assertIn("smart crate", " ".join(summary["report"]).lower())
         status, bad_crate = self.request("/api/export.rekordbox.xml?crate=nope")
         self.assertEqual(status, 400)
         self.assertIn("not valid", bad_crate)
+        refused = urllib.request.Request(self.base + "/api/export.rekordbox.xml?crate=nope")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(refused)
+        self.assertEqual(caught.exception.code, 400)
+        self.assertNotIn("rekordbox.xml", caught.exception.headers.get("Content-Disposition", ""))
+        caught.exception.close()
+        for raw in ("+1", "1_2", "١"):
+            status, _body = self.request("/api/export.rekordbox.xml?crate=" + urllib.parse.quote(raw))
+            self.assertEqual(status, 400, raw)
         status, huge = self.request("/api/export.rekordbox.xml?crate=" + ("9" * 40))
         self.assertEqual(status, 400)
         status, missing = self.request("/api/export.rekordbox.xml?crate=999")
