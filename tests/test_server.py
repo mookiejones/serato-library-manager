@@ -398,6 +398,52 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(json.loads(known)["xml"].startswith("<?xml"))
         self.assertEqual(json.loads(weird)["xml"], json.loads(defaults)["xml"])
 
+    def test_hot_loops_reaches_the_export(self) -> None:
+        """Pass hot loops through to the export for on, off, and omitted.
+
+        ``true`` and ``1`` are on. ``false`` and ``0`` are off. A request
+        that omits ``hot_loops`` is off. The export function is replaced,
+        so the fixture audio is not read.
+
+        Returns:
+            None. The test fails if the boolean passed to the export differs.
+        """
+        sentinel = ('<?xml version="1.0" encoding="UTF-8"?>\n<DJ_PLAYLISTS/>', [])
+        cases = (
+            ("&hot_loops=true", True),
+            ("&hot_loops=false", False),
+            ("&hot_loops=1", True),
+            ("&hot_loops=0", False),
+            ("", False),
+        )
+        with unittest.mock.patch.object(server.rekordbox, "export_rekordbox", return_value=sentinel) as export:
+            for query, expected in cases:
+                with self.subTest(query=query or "missing"):
+                    status, body = self.request(
+                        "/api/export.rekordbox.xml?crate=all&report=1" + query
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertTrue(str(body).startswith('{"'))
+                    self.assertIs(export.call_args.kwargs["hot_loops"], expected)
+                    self.assertIs(export.call_args.kwargs["memory_cues"], True)
+
+    def test_served_page_renders_hot_loops(self) -> None:
+        """Serve the Hot loops control with its label and help line.
+
+        GET ``/`` is the page file. The checkbox is present and unchecked.
+
+        Returns:
+            None. The test fails if the served page omits the control.
+        """
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(page, str)
+        assert isinstance(page, str)
+        self.assertIn("Hot loops", page)
+        self.assertIn("uses a free hot-cue pad", page)
+        self.assertRegex(page, r'id="rekordbox-hot-loops"[^>]*type="checkbox"')
+        self.assertNotRegex(page, r'id="rekordbox-hot-loops"[^>]*\bchecked\b')
+
     def test_merge_preview_and_confirm(self) -> None:
         """Preview a duplicate merge, then confirm it over HTTP.
 
