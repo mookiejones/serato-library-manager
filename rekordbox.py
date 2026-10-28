@@ -243,7 +243,8 @@ def tempo_entries(
     rounded for display before the division. A time before 0 is written
     at 0. A BPM that is not positive is left out. A marker whose position
     is not a finite number is left out, and the markers around it are
-    still written.
+    still written. A last marker whose BPM is ``NaN`` or infinite is left
+    out and counted with those markers.
 
     Args:
         beatgrid: Markers from tags.read_serato_tags. An empty list writes nothing.
@@ -273,7 +274,10 @@ def tempo_entries(
     beats_before = 0
     for index, marker in enumerate(kept):
         if index == last and "bpm" in marker:
-            bpm: float | None = float(marker["bpm"])
+            bpm = _stored_bpm(marker.get("bpm"))
+            if bpm is not None and not math.isfinite(bpm):
+                _note(stats, "grid_nonfinite")
+                bpm = None
         elif index < last:
             bpm = _segment_bpm(marker, kept[index + 1], terminal)
         else:
@@ -1091,7 +1095,7 @@ def _loss_report(
         lines.append(f"{stats['grid_unsupported']} beatgrids could not be read and were left out.")
     if stats.get("grid_nonfinite"):
         lines.append(
-            f"{stats['grid_nonfinite']} beatgrid markers had a time that is not a real number and were left out."
+            f"{stats['grid_nonfinite']} beatgrid markers had a time or a BPM that is not a real number and were left out."
         )
     if stats.get("grid_dynamic"):
         lines.append(
@@ -1242,6 +1246,21 @@ def _finite_position(marker: tags.BeatMarker) -> float | None:
     return value
 
 
+def _stored_bpm(value: object) -> float | None:
+    """Read a BPM stored on one beatgrid marker.
+
+    Args:
+        value: The marker's ``bpm`` field.
+
+    Returns:
+        The number, including ``NaN`` and infinities, or None when the
+        field is not a number. The caller counts a non-finite value.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _terminal_bpm(beatgrid: Sequence[tags.BeatMarker]) -> float | None:
     """Return the BPM stored on the last beatgrid marker.
 
@@ -1249,12 +1268,14 @@ def _terminal_bpm(beatgrid: Sequence[tags.BeatMarker]) -> float | None:
         beatgrid: Markers from the BeatGrid parser.
 
     Returns:
-        A positive BPM, or None when the last marker has none.
+        A positive finite BPM, or None when the last marker has none.
+        ``NaN`` and infinities are skipped so they are not copied onto
+        an earlier marker.
     """
     for marker in reversed(beatgrid):
-        bpm = marker.get("bpm")
-        if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) and bpm > 0:
-            return float(bpm)
+        bpm = _stored_bpm(marker.get("bpm"))
+        if bpm is not None and math.isfinite(bpm) and bpm > 0:
+            return bpm
     return None
 
 
