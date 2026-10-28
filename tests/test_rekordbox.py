@@ -10,6 +10,7 @@ import base64
 import contextlib
 import io
 import struct
+import unicodedata
 import unittest
 from pathlib import Path
 from xml.etree import ElementTree
@@ -278,8 +279,10 @@ class MarkerConversionTests(unittest.TestCase):
     def test_cues_loops_and_memory_cues(self) -> None:
         """Map hot cues, memory cues, and loops onto POSITION_MARK attributes.
 
-        Index 9 is outside the hot-cue slots, so Num is -1. A missing color
-        is white. A flip is not a position mark.
+        Index 9 is outside the hot-cue slots, so Num is -1. A hot cue is
+        also copied as a memory cue. A loop is Type 4 with Num -1 so it
+        does not take a hot cue pad. A missing color is white. A flip is
+        not a position mark.
 
         Returns:
             None. The test fails if a mark attribute differs.
@@ -317,6 +320,15 @@ class MarkerConversionTests(unittest.TestCase):
                     "Blue": "0",
                 },
                 {
+                    "Name": "Drop",
+                    "Type": "0",
+                    "Start": "1.500",
+                    "Num": "-1",
+                    "Red": "204",
+                    "Green": "0",
+                    "Blue": "0",
+                },
+                {
                     "Name": "Late",
                     "Type": "0",
                     "Start": "0.500",
@@ -327,9 +339,9 @@ class MarkerConversionTests(unittest.TestCase):
                 },
                 {
                     "Name": "Break",
-                    "Type": "1",
+                    "Type": "4",
                     "Start": "2.000",
-                    "Num": "1",
+                    "Num": "-1",
                     "Red": "0",
                     "Green": "170",
                     "Blue": "0",
@@ -461,7 +473,8 @@ class ExportTests(unittest.TestCase):
                     "UPDATE container SET name = ? WHERE id = ?",
                     ("House" + library.NAME_SPLIT + "abc", house["id"]),
                 )
-            xml = rekordbox.export_rekordbox("Serato Library", None)
+            xml, report = rekordbox.export_rekordbox("Serato Library", None)
+            self.assertIn("Import to Collection", " ".join(report))
             self.assertTrue(xml.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
             parsed = rekordbox.parse_rekordbox(xml)
             again = ElementTree.tostring(ElementTree.fromstring(xml.encode("utf-8")), encoding="unicode")
@@ -507,6 +520,15 @@ class ExportTests(unittest.TestCase):
                         "Blue": "0",
                     },
                     {
+                        "Name": "Drop & go",
+                        "Type": "0",
+                        "Start": "1.500",
+                        "Num": "-1",
+                        "Red": "204",
+                        "Green": "0",
+                        "Blue": "0",
+                    },
+                    {
                         "Name": "Late",
                         "Type": "0",
                         "Start": "0.500",
@@ -517,10 +539,10 @@ class ExportTests(unittest.TestCase):
                     },
                     {
                         "Name": "Break",
-                        "Type": "1",
+                        "Type": "4",
                         "Start": "2.000",
                         "End": "4.000",
-                        "Num": "1",
+                        "Num": "-1",
                         "Red": "0",
                         "Green": "170",
                         "Blue": "0",
@@ -586,7 +608,7 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(_node(playlists, "Later")["tracks"], [])
             track_ids = [track["track_id"] for track in tracks]
             self.assertEqual(track_ids.count("1"), 1)
-            subtree = rekordbox.export_rekordbox("Serato Library", int(house["id"]))
+            subtree, _subtree_report = rekordbox.export_rekordbox("Serato Library", int(house["id"]))
             sub = rekordbox.parse_rekordbox(subtree)
             sub_tracks = sub["tracks"]
             assert isinstance(sub_tracks, list)
@@ -601,7 +623,8 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(missing.exception.status, 404)
             with self.assertRaises(LibraryError):
                 rekordbox.export_rekordbox("Streaming", None)
-            prepare = rekordbox.parse_rekordbox(rekordbox.export_rekordbox("Prepare", None))
+            prepare_xml, _prepare_report = rekordbox.export_rekordbox("Prepare", None)
+            prepare = rekordbox.parse_rekordbox(prepare_xml)
             prepare_root = prepare["playlists"]
             assert isinstance(prepare_root, dict)
             self.assertEqual(_node(prepare_root, "Prepare")["type"], "1")
@@ -628,7 +651,8 @@ class ExportTests(unittest.TestCase):
                     """,
                     (str(audio),),
                 )
-            parsed = rekordbox.parse_rekordbox(rekordbox.export_rekordbox("Serato Library", None))
+            grid_xml, _grid_report = rekordbox.export_rekordbox("Serato Library", None)
+            parsed = rekordbox.parse_rekordbox(grid_xml)
             tracks = parsed["tracks"]
             assert isinstance(tracks, list)
             track = next(item for item in tracks if item["track_id"] == "1")
@@ -660,7 +684,9 @@ class ExportTests(unittest.TestCase):
                     ["-o", str(output), "--crate", str(house["id"]), "--space", "Serato Library"]
                 )
             self.assertEqual(code, 0)
-            self.assertEqual(stdout.getvalue().strip(), str(output))
+            self.assertTrue(stdout.getvalue().startswith(str(output)))
+            self.assertIn("Import to Collection", stdout.getvalue())
+            self.assertIn("load information from imported library", stdout.getvalue())
             parsed = rekordbox.parse_rekordbox(output.read_text(encoding="utf-8"))
             tracks = parsed["tracks"]
             assert isinstance(tracks, list)
@@ -702,10 +728,355 @@ class ExportTests(unittest.TestCase):
         self.assertIn("/api/export.rekordbox.xml", script)
         self.assertIn("rekordbox.xml", script)
         self.assertIn("#export-rekordbox", style)
+        self.assertIn('id="rekordbox-memory"', html)
+        self.assertIn("report=1", script)
         self.assertIn("Preferences", guide)
         self.assertIn("rekordbox xml", guide)
+        self.assertIn("Database", guide)
+        self.assertIn("Import to Collection", guide)
+        self.assertIn("load information from imported library", guide)
+        self.assertIn("overwrites", guide.lower())
         self.assertIn("Device Library Plus", guide)
         self.assertIn("OneLibrary", guide)
+
+
+def _cue_payload(cues: list[tuple[int, int, bytes, str]], loops: list[tuple[int, int, int, bytes, str]] | None = None) -> bytes:
+    """Encode cues and loops as a Markers2 body.
+
+    Args:
+        cues: Index, start in milliseconds, RGB, and name.
+        loops: Index, start, end, RGB, and name.
+
+    Returns:
+        The GEOB payload.
+    """
+    decoded = b""
+    for index, start_ms, color, name in cues:
+        decoded += _entry("CUE", _cue(index, start_ms, color, name))
+    for index, start_ms, end_ms, color, name in loops or []:
+        decoded += _entry("LOOP", _loop(index, start_ms, end_ms, color, name))
+    return b"\x01\x01" + base64.b64encode(decoded)
+
+
+def _lame_frame(encoder: bytes, crc: bytes | None = None) -> bytes:
+    """Build one MPEG frame with an Info tag and a 9-byte encoder name.
+
+    Args:
+        encoder: Nine bytes such as ``LAME3.100`` or ``Lavc60.31``.
+        crc: Two CRC bytes. None computes a valid LAME CRC.
+
+    Returns:
+        The frame bytes. No audio samples are included.
+    """
+    header = bytes([0xFF, 0xFB, 0x90, 0x00])
+    prefix = b"Info" + (0x0F).to_bytes(4, "big") + bytes(4) + bytes(4) + bytes(100) + bytes(4)
+    body = header + bytes(32) + prefix + encoder + bytes(25)
+    if crc is None:
+        crc = rekordbox._crc16_lame(body).to_bytes(2, "big")
+    return body + crc
+
+
+def _write_audio(path: Path, payload: bytes, frame: bytes = b"") -> None:
+    """Write an ID3 tag and an optional MPEG frame.
+
+    Args:
+        path: File to create.
+        payload: Markers2 GEOB body.
+        frame: MPEG frame bytes appended after the tag.
+
+    Returns:
+        None.
+    """
+    _id3(path, [_geob("Serato Markers2", payload)])
+    if frame:
+        path.write_bytes(path.read_bytes() + frame)
+
+
+class RoundTripChecklistTests(unittest.TestCase):
+    """Cover the Rekordbox round-trip checks with fixtures, not a live CDJ.
+
+    Each case uses a temporary file or a temporary library. Nothing is
+    written to a USB.
+    """
+
+    def test_every_hot_cue_round_trips_to_the_millisecond(self) -> None:
+        """Keep number, name, color, and millisecond position for slots 0 through 7.
+
+        The file is WAV, so no MP3 shift applies. Each hot cue is also a
+        memory cue. The loop is Type 4 and does not reuse a hot cue number.
+        ``1.005`` seconds must come back as 1005 milliseconds.
+
+        Returns:
+            None. The test fails if any field differs after the XML is parsed.
+        """
+        colors = [
+            (b"\xCC\x00\x00", "204", "0", "0"),
+            (b"\xFF\x8C\x00", "255", "140", "0"),
+            (b"\xFF\xFF\x00", "255", "255", "0"),
+            (b"\x00\x80\x00", "0", "128", "0"),
+            (b"\x00\xFF\xFF", "0", "255", "255"),
+            (b"\x00\x00\xCC", "0", "0", "204"),
+            (b"\x80\x00\x80", "128", "0", "128"),
+            (b"\xFF\x69\xB4", "255", "105", "180"),
+        ]
+        times = [0, 1, 10, 100, 1000, 1005, 60000, 218400]
+        cues = [
+            (index, times[index], colors[index][0], f"Cue {index}")
+            for index in range(8)
+        ]
+        with TempLibrary() as temp:
+            audio = temp.root / "all-cues.wav"
+            _write_audio(
+                audio,
+                _cue_payload(cues, [(3, 2000, 3500, b"\x00\xAA\x00", "Loop 3")]),
+            )
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = ? WHERE id = 1",
+                    (str(audio), audio.name),
+                )
+            xml, report = rekordbox.export_rekordbox("Serato Library", None, memory_cues=True)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            marks = next(track["marks"] for track in tracks if track["track_id"] == "1")
+            assert isinstance(marks, list)
+            numbered = [mark for mark in marks if mark["Num"] != "-1" and mark["Type"] == "0"]
+            self.assertEqual([mark["Num"] for mark in numbered], [str(index) for index in range(8)])
+            for index, mark in enumerate(numbered):
+                self.assertEqual(mark["Name"], f"Cue {index}")
+                self.assertEqual(rekordbox.position_ms(str(mark["Start"])), times[index])
+                self.assertEqual(mark["Red"], colors[index][1])
+                self.assertEqual(mark["Green"], colors[index][2])
+                self.assertEqual(mark["Blue"], colors[index][3])
+                copies = [
+                    other
+                    for other in marks
+                    if other["Name"] == mark["Name"] and other["Num"] == "-1" and other["Type"] == "0"
+                ]
+                self.assertEqual(len(copies), 1)
+                self.assertEqual(rekordbox.position_ms(str(copies[0]["Start"])), times[index])
+            loop = next(mark for mark in marks if mark["Type"] == "4")
+            self.assertEqual(loop["Name"], "Loop 3")
+            self.assertEqual(loop["Num"], "-1")
+            self.assertEqual(rekordbox.position_ms(str(loop["Start"])), 2000)
+            self.assertEqual(rekordbox.position_ms(str(loop["End"])), 3500)
+            self.assertNotIn("Type=\"1\"", xml)
+            self.assertIn("palette", " ".join(report))
+            ids = [track["track_id"] for track in tracks]
+            self.assertEqual(len(ids), len(set(ids)))
+            playlists = parsed["playlists"]
+            assert isinstance(playlists, dict)
+            _counts_match(playlists)
+
+    def test_memory_cues_can_be_turned_off_and_loops_avoid_hot_cue_slots(self) -> None:
+        """Skip memory copies, and refuse a loop pad that a hot cue already uses.
+
+        Returns:
+            None. The test fails if a loop takes pad 0 or a memory copy remains.
+        """
+        parsed: tags.SeratoTags = {
+            "cues": [{"index": 0, "start_ms": 1000, "color": "#CC0000", "name": "One"}],
+            "loops": [
+                {
+                    "index": 0,
+                    "start_ms": 2000,
+                    "end_ms": 3000,
+                    "color": "#00AA00",
+                    "locked": False,
+                    "name": "Taken",
+                },
+                {
+                    "index": 2,
+                    "start_ms": 4000,
+                    "end_ms": 5000,
+                    "color": "#0000CC",
+                    "locked": False,
+                    "name": "Free",
+                },
+            ],
+            "flips": [],
+            "beatgrid": [],
+            "found": True,
+        }
+        quiet: dict[str, int] = {}
+        plain = rekordbox.position_marks(parsed, memory_cues=False, stats=quiet)
+        self.assertEqual([mark["Num"] for mark in plain if mark["Type"] == "0"], ["0"])
+        self.assertEqual(quiet["loops_memory"], 2)
+        placed: dict[str, int] = {}
+        marks = rekordbox.position_marks(parsed, memory_cues=False, hot_loops=True, stats=placed)
+        by_name = {mark["Name"]: mark for mark in marks}
+        self.assertEqual(by_name["Taken"]["Num"], "-1")
+        self.assertEqual(by_name["Taken"]["Type"], "4")
+        self.assertEqual(by_name["Free"]["Num"], "2")
+        self.assertEqual(placed["loops_blocked"], 1)
+        self.assertEqual(placed["loops_hot"], 1)
+
+    def test_mp3_shift_follows_the_lame_header_and_aac_does_not_move(self) -> None:
+        """Align a case C MP3 with an AAC cue, and leave cases A and D alone.
+
+        The same musical hit is stored 26 ms later on the case C file.
+        After export it matches the AAC file. Cases A and D keep 1000 ms,
+        so the correction is not applied to every MP3.
+
+        Returns:
+            None. The test fails if a case is shifted the wrong way.
+        """
+        with TempLibrary() as temp:
+            files = {
+                "case-c.mp3": (_lame_frame(b"LAME3.100", b"\x00\x00"), 1026),
+                "case-d.mp3": (_lame_frame(b"LAME3.100"), 1000),
+                "case-a.mp3": (bytes([0xFF, 0xFB, 0x90, 0x00]) + bytes(80), 1000),
+                "case-b.mp3": (_lame_frame(b"Lavc60.31", b"\x00\x00"), 1026),
+                "track.m4a": (b"", 1000),
+            }
+            for name, (frame, start_ms) in files.items():
+                _write_audio(
+                    temp.root / name,
+                    _cue_payload(
+                        [(0, start_ms, b"\xCC\x00\x00", "Hit")],
+                        [(1, start_ms + 1000, start_ms + 2000, b"\x00\xAA\x00", "Hold")],
+                    ),
+                    frame,
+                )
+            self.assertEqual(rekordbox.mp3_timing(str(temp.root / "case-c.mp3")), ("C", 26))
+            self.assertEqual(rekordbox.mp3_timing(str(temp.root / "case-d.mp3"))[0], "D")
+            self.assertEqual(rekordbox.mp3_timing(str(temp.root / "case-a.mp3")), ("A", 0))
+            self.assertEqual(rekordbox.mp3_timing(str(temp.root / "case-b.mp3")), ("B", 26))
+            self.assertEqual(rekordbox.mp3_timing(str(temp.root / "track.m4a")), ("skip", 0))
+            with open_database(temp.db) as conn:
+                conn.execute("DELETE FROM space_asset")
+                conn.execute("DELETE FROM asset")
+                rows = [
+                    (1, "Case C", str(temp.root / "case-c.mp3")),
+                    (2, "Case D", str(temp.root / "case-d.mp3")),
+                    (3, "Case A", str(temp.root / "case-a.mp3")),
+                    (4, "Case B", str(temp.root / "case-b.mp3")),
+                    (5, "AAC", str(temp.root / "track.m4a")),
+                ]
+                for asset_id, title, path in rows:
+                    conn.execute(
+                        """
+                        INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                        VALUES (?, ?, 'DJ', ?, ?, 1)
+                        """,
+                        (asset_id, title, path, Path(path).name),
+                    )
+                    conn.execute(
+                        "INSERT INTO space_asset (asset_id, space_id) VALUES (?, 1)",
+                        (asset_id,),
+                    )
+            xml, report = rekordbox.export_rekordbox("Serato Library", None, memory_cues=False)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            by_name = {track["name"]: track for track in tracks}
+            for title in ("Case C", "Case D", "Case A", "Case B", "AAC"):
+                cue = next(mark for mark in by_name[title]["marks"] if mark["Type"] == "0")
+                loop = next(mark for mark in by_name[title]["marks"] if mark["Type"] == "4")
+                self.assertEqual(rekordbox.position_ms(str(cue["Start"])), 1000, title)
+                self.assertEqual(rekordbox.position_ms(str(loop["Start"])), 2000, title)
+                self.assertEqual(loop["Num"], "-1")
+            text = " ".join(report)
+            self.assertIn("2 MP3s were moved 26 ms earlier", text)
+            self.assertIn("2 MP3s kept their cue times", text)
+
+    def test_dynamic_grid_exports_every_marker_and_a_bad_grid_warns(self) -> None:
+        """Write one TEMPO per marker, and warn when the beatgrid cannot be read.
+
+        Three hundred markers is the Serato 5.0 shape of a grid that changes
+        tempo along the track. A version byte of 2 is left out and named in
+        the loss report. The first marker is beat 1 of the bar.
+
+        Returns:
+            None. The test fails if a marker is dropped or a bad grid is silent.
+        """
+        markers: list[tags.BeatMarker] = []
+        for index in range(299):
+            markers.append({"position": index * 0.5, "beats": 1})
+        markers.append({"position": 299 * 0.5, "bpm": 120.0})
+        tempos = rekordbox.tempo_entries(markers)
+        self.assertEqual(len(tempos), 300)
+        self.assertEqual([item["Battito"] for item in tempos[:5]], ["1", "2", "3", "4", "1"])
+        self.assertEqual(tempos[0]["Bpm"], "120.00")
+        self.assertEqual(rekordbox.position_ms(tempos[2]["Inizio"]), 1000)
+        self.assertEqual(tags.beatgrid_issue(bytes([2, 0, 0, 0, 0, 1])), "That beatgrid version is not supported.")
+        with TempLibrary() as temp:
+            good = temp.root / "grid.wav"
+            bad = temp.root / "bad-grid.wav"
+            payload = _beatgrid([(index * 0.5, 1) for index in range(299)] + [(149.5, 120.0)])
+            _id3(good, [_geob("Serato BeatGrid", payload)])
+            _id3(bad, [_geob("Serato BeatGrid", bytes([2, 0, 0, 0, 0, 1]))])
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'grid.wav' WHERE id = 1",
+                    (str(good),),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                    VALUES (3, 'Bad grid', 'DJ', ?, 'bad-grid.wav', 1)
+                    """,
+                    (str(bad),),
+                )
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (3, 1)")
+            xml, report = rekordbox.export_rekordbox("Serato Library", None)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            grid = next(track for track in tracks if track["name"] == "Same" and track["track_id"] == "1")
+            broken = next(track for track in tracks if track["name"] == "Bad grid")
+            self.assertEqual(len(grid["tempos"]), 300)
+            self.assertEqual(broken["tempos"], [])
+            self.assertIn("could not be read", " ".join(report))
+            self.assertIn("more than one marker", " ".join(report))
+            self.assertIn("downbeat", " ".join(report))
+
+    def test_key_notation_and_filesystem_spelling(self) -> None:
+        """Convert a known key, and use the directory entry's Unicode form.
+
+        Returns:
+            None. The test fails if Camelot stays classical or the URI uses the other spelling.
+        """
+        self.assertEqual(rekordbox.notation_key("8A", "classical"), ("Am", "converted"))
+        self.assertEqual(rekordbox.notation_key("Am", "camelot"), ("8A", "converted"))
+        self.assertEqual(rekordbox.notation_key("not a key", "camelot")[0], "not a key")
+        self.assertEqual(rekordbox.position_ms("1.005"), 1005)
+        with TempLibrary() as temp:
+            music = temp.root / "songs"
+            music.mkdir()
+            nfd = unicodedata.normalize("NFD", "café.wav")
+            nfc = unicodedata.normalize("NFC", "café.wav")
+            (music / nfd).write_bytes(b"cafe")
+            actual = next(entry.name for entry in music.iterdir())
+            other = nfc if actual == nfd else nfd
+            if other == actual:
+                other = actual
+            found = rekordbox.filesystem_path(str(music / other))
+            self.assertEqual(Path(found).name, actual)
+            uri = rekordbox.location_uri(found)
+            from urllib.parse import unquote
+            self.assertIn(actual, unquote(uri))
+
+    def test_a_cue_inside_the_mp3_shift_is_written_at_zero(self) -> None:
+        """Clamp a cue that the 26 ms correction would place before the start.
+
+        Returns:
+            None. The test fails if the XML contains a negative time.
+        """
+        stats: dict[str, int] = {}
+        parsed: tags.SeratoTags = {
+            "cues": [{"index": 1, "start_ms": 10, "color": "#010203", "name": "Early"}],
+            "loops": [],
+            "flips": [],
+            "beatgrid": [],
+            "found": True,
+        }
+        marks = rekordbox.position_marks(parsed, 26, memory_cues=False, stats=stats)
+        self.assertEqual(marks[0]["Start"], "0.000")
+        self.assertEqual(stats["clamped"], 1)
+        self.assertEqual(marks[0]["Num"], "1")
+        self.assertEqual(marks[0]["Red"], "1")
 
 
 class ParseTests(unittest.TestCase):

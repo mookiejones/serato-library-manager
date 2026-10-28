@@ -1389,7 +1389,20 @@ class Handler(BaseHTTPRequestHandler):
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
                 crate_id = None if raw_crate in {"", "all"} else int(raw_crate)
-                body = rekordbox.export_rekordbox(space, crate_id).encode("utf-8")
+                memory = (query_text(query, "memory", "1") or "1").lower() not in {"0", "false", "no"}
+                hot_loops = (query_text(query, "hot_loops", "0") or "0").lower() in {"1", "true", "yes"}
+                key_notation = query_text(query, "key", "asis") or "asis"
+                xml_text, report = rekordbox.export_rekordbox(
+                    space,
+                    crate_id,
+                    memory_cues=memory,
+                    hot_loops=hot_loops,
+                    key_notation=key_notation,
+                )
+                if (query_text(query, "report", "") or "") == "1":
+                    self.send_json({"xml": xml_text, "report": report, "filename": "rekordbox.xml"})
+                    return
+                body = xml_text.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/xml; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))

@@ -250,6 +250,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(root.tag, "DJ_PLAYLISTS")
         names = {track.get("Name") for track in root.find("COLLECTION").findall("TRACK")}
         self.assertIn("Same", names)
+        status, reported = self.request("/api/export.rekordbox.xml?crate=all&report=1")
+        self.assertEqual(status, 200)
+        summary = json.loads(reported)
+        self.assertIn("Import to Collection", " ".join(summary["report"]))
+        self.assertIn("<DJ_PLAYLISTS", summary["xml"])
         status, missing = self.request("/api/export.rekordbox.xml?crate=999")
         self.assertEqual(status, 404)
         self.assertIn("not in this space", missing)

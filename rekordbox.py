@@ -18,9 +18,11 @@ import re
 import sqlite3
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+import unicodedata
+from collections.abc import Mapping, MutableMapping, Sequence
 from contextlib import closing
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
@@ -32,6 +34,73 @@ import tags
 
 
 _ILLEGAL_XML = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]")
+# Cases B and C of the LAME/Xing header (pestrela). Serato's stored time
+# sits this far later than the time Rekordbox uses for the same MP3.
+# Cases A and D, and every file that is not an MP3, stay put.
+_MP3_SHIFT_MS = 26
+_KEY_NOTATIONS = ("asis", "camelot", "classical")
+_CAMELOT_CLASSICAL = {
+    "1A": "Abm",
+    "2A": "Ebm",
+    "3A": "Bbm",
+    "4A": "Fm",
+    "5A": "Cm",
+    "6A": "Gm",
+    "7A": "Dm",
+    "8A": "Am",
+    "9A": "Em",
+    "10A": "Bm",
+    "11A": "F#m",
+    "12A": "C#m",
+    "1B": "B",
+    "2B": "F#",
+    "3B": "Db",
+    "4B": "Ab",
+    "5B": "Eb",
+    "6B": "Bb",
+    "7B": "F",
+    "8B": "C",
+    "9B": "G",
+    "10B": "D",
+    "11B": "A",
+    "12B": "E",
+}
+_CLASSICAL_CAMELOT = {
+    "Abm": "1A",
+    "G#m": "1A",
+    "Ebm": "2A",
+    "D#m": "2A",
+    "Bbm": "3A",
+    "A#m": "3A",
+    "Fm": "4A",
+    "Cm": "5A",
+    "Gm": "6A",
+    "Dm": "7A",
+    "Am": "8A",
+    "Em": "9A",
+    "Bm": "10A",
+    "F#m": "11A",
+    "Gbm": "11A",
+    "C#m": "12A",
+    "Dbm": "12A",
+    "B": "1B",
+    "F#": "2B",
+    "Gb": "2B",
+    "Db": "3B",
+    "C#": "3B",
+    "Ab": "4B",
+    "G#": "4B",
+    "Eb": "5B",
+    "D#": "5B",
+    "Bb": "6B",
+    "A#": "6B",
+    "F": "7B",
+    "C": "8B",
+    "G": "9B",
+    "D": "10B",
+    "A": "11B",
+    "E": "12B",
+}
 _KINDS = {
     ".mp3": "MP3 File",
     ".wav": "WAV File",
@@ -85,52 +154,92 @@ def location_uri(path: str) -> str:
     return "file://localhost" + prefix + encoded
 
 
-def position_marks(parsed: tags.SeratoTags) -> list[dict[str, str]]:
+def position_marks(
+    parsed: tags.SeratoTags,
+    shift_ms: int = 0,
+    *,
+    memory_cues: bool = True,
+    hot_loops: bool = False,
+    stats: MutableMapping[str, int] | None = None,
+) -> list[dict[str, str]]:
     """Turn Serato cues and loops into rekordbox POSITION_MARK attributes.
 
-    Cues are Type 0. Loops are Type 1 and include End. Start and End are
-    seconds with three decimal places, which matches a millisecond source.
-    Num keeps the Serato index when it is a hot-cue slot from 0 through 7.
-    Any other index is a memory cue (Num -1). Red, Green, and Blue are the
-    marker color. A marker with no color is white. Flips are omitted.
+    A hot cue is Type 0 with Num equal to its Serato index when that index
+    is 0 through 7. Each of those cues is also written again as a memory
+    cue (Num -1) when ``memory_cues`` is true, which is what CDJs show in
+    memory-cue mode. An index outside 0 through 7 is only a memory cue.
+    A saved loop is Type 4 and carries End. Its Num is -1 so it does not
+    take the hot cue pad of the same number. ``hot_loops`` true uses the
+    loop index when that pad is free. Start and End are seconds with three
+    decimal places. ``shift_ms`` is subtracted first (the MP3 correction).
+    A time that would fall before 0 is written at 0. Red, Green, and Blue
+    are the marker color. A marker with no color is white. Flips are omitted.
 
     Args:
         parsed: Result of tags.read_serato_tags.
+        shift_ms: Milliseconds to subtract. 0 leaves the stored time.
+        memory_cues: True also writes each hot cue as a memory cue.
+        hot_loops: True puts a loop on a free hot cue pad.
+        stats: Counts named clamped, flips, memory_cues, memory_only,
+            loops_memory, loops_hot, and loops_blocked. None ignores them.
 
     Returns:
-        Attribute dicts in cue order, then loop order.
+        Attribute dicts. Hot cues come first, each followed by its memory
+        copy when that copy is written, then loops.
     """
     marks: list[dict[str, str]] = []
+    hot_slots = {cue["index"] for cue in parsed["cues"] if 0 <= cue["index"] <= 7}
+    _note(stats, "flips", len(parsed["flips"]))
     for cue in parsed["cues"]:
-        marks.append(
-            _mark(cue["name"], "0", cue["start_ms"], None, cue["index"], cue["color"])
-        )
+        start, clamped = _shift_time(cue["start_ms"], shift_ms)
+        _note(stats, "clamped", 1 if clamped else 0)
+        if 0 <= cue["index"] <= 7:
+            marks.append(_mark(cue["name"], "0", start, None, cue["index"], cue["color"]))
+            if memory_cues:
+                marks.append(_mark(cue["name"], "0", start, None, -1, cue["color"]))
+                _note(stats, "memory_cues")
+        else:
+            marks.append(_mark(cue["name"], "0", start, None, -1, cue["color"]))
+            _note(stats, "memory_only")
     for loop in parsed["loops"]:
-        marks.append(
-            _mark(
-                loop["name"],
-                "1",
-                loop["start_ms"],
-                loop["end_ms"],
-                loop["index"],
-                loop["color"],
-            )
-        )
+        start, start_clamped = _shift_time(loop["start_ms"], shift_ms)
+        end, end_clamped = _shift_time(loop["end_ms"], shift_ms)
+        _note(stats, "clamped", int(start_clamped) + int(end_clamped))
+        number = -1
+        if hot_loops and 0 <= loop["index"] <= 7 and loop["index"] not in hot_slots:
+            number = loop["index"]
+            hot_slots.add(loop["index"])
+            _note(stats, "loops_hot")
+        elif hot_loops and 0 <= loop["index"] <= 7:
+            _note(stats, "loops_blocked")
+        else:
+            _note(stats, "loops_memory")
+        marks.append(_mark(loop["name"], "4", start, end, number, loop["color"]))
     return marks
 
 
-def tempo_entries(beatgrid: Sequence[tags.BeatMarker]) -> list[dict[str, str]]:
+def tempo_entries(
+    beatgrid: Sequence[tags.BeatMarker],
+    shift_ms: int = 0,
+    stats: MutableMapping[str, int] | None = None,
+) -> list[dict[str, str]]:
     """Turn a Serato beatgrid into rekordbox TEMPO attributes.
 
-    Each marker becomes one TEMPO. Inizio is the marker position in
+    Each marker becomes one TEMPO, including a Serato 5.0 grid with a
+    marker at every tempo change. Inizio is the marker position in
     seconds. An earlier marker stores a beat count; its BPM is that count
     times 60, divided by the seconds until the next marker. The last
-    marker stores BPM directly. Metro is 4/4 and Battito is 1. A segment
-    with no positive span uses the last marker's BPM. A BPM that is not
-    positive is left out.
+    marker stores BPM directly. Metro is 4/4. Battito is the beat in the
+    bar, counting from the first marker as a downbeat, so a marker every
+    beat walks 1, 2, 3, 4. ``shift_ms`` is subtracted from Inizio only.
+    The BPM still uses the stored positions. A time before 0 is written
+    at 0. A BPM that is not positive is left out.
 
     Args:
         beatgrid: Markers from tags.read_serato_tags. An empty list writes nothing.
+        shift_ms: Milliseconds to subtract from each Inizio.
+        stats: When set, ``clamped`` counts times written at 0, and
+            ``grid_markers`` counts TEMPO entries.
 
     Returns:
         Attribute dicts with Inizio, Bpm, Metro, and Battito.
@@ -140,6 +249,7 @@ def tempo_entries(beatgrid: Sequence[tags.BeatMarker]) -> list[dict[str, str]]:
     terminal = _terminal_bpm(beatgrid)
     entries: list[dict[str, str]] = []
     last = len(beatgrid) - 1
+    beats_before = 0
     for index, marker in enumerate(beatgrid):
         if index == last and "bpm" in marker:
             bpm: float | None = float(marker["bpm"])
@@ -147,20 +257,33 @@ def tempo_entries(beatgrid: Sequence[tags.BeatMarker]) -> list[dict[str, str]]:
             bpm = _segment_bpm(marker, beatgrid[index + 1], terminal)
         else:
             bpm = terminal
-        if bpm is None or not math.isfinite(bpm) or bpm <= 0:
-            continue
-        entries.append(
-            {
-                "Inizio": f"{float(marker['position']):.3f}",
-                "Bpm": f"{bpm:.2f}",
-                "Metro": "4/4",
-                "Battito": "1",
-            }
-        )
+        if bpm is not None and math.isfinite(bpm) and bpm > 0:
+            inizio_ms, clamped = _shift_time(int(round(float(marker["position"]) * 1000)), shift_ms)
+            _note(stats, "clamped", 1 if clamped else 0)
+            entries.append(
+                {
+                    "Inizio": _seconds(inizio_ms),
+                    "Bpm": f"{bpm:.2f}",
+                    "Metro": "4/4",
+                    "Battito": str((beats_before % 4) + 1),
+                }
+            )
+        if index < last:
+            beats = marker.get("beats")
+            if isinstance(beats, int) and not isinstance(beats, bool) and beats > 0:
+                beats_before += beats
+    _note(stats, "grid_markers", len(entries))
     return entries
 
 
-def export_rekordbox(space: str, crate_id: int | None) -> str:
+def export_rekordbox(
+    space: str,
+    crate_id: int | None,
+    *,
+    memory_cues: bool = True,
+    hot_loops: bool = False,
+    key_notation: str = "asis",
+) -> tuple[str, list[str]]:
     """Build a rekordbox.xml document for one Serato space.
 
     The collection lists each track that has a path. Crates become a
@@ -175,11 +298,14 @@ def export_rekordbox(space: str, crate_id: int | None) -> str:
         crate_id: Crate to export, including subcrates. None exports the space.
 
     Returns:
-        XML text, including the declaration, ending in a newline.
+        The XML text, including the declaration and a trailing newline, and
+        the loss-report lines. The report names what Rekordbox will not keep.
 
     Raises:
-        library.LibraryError: If the space is not allowed or the crate is not in that space.
+        library.LibraryError: If the space is not allowed, the crate is not in that space, or the key notation is unknown.
     """
+    if key_notation not in _KEY_NOTATIONS:
+        raise library.LibraryError("Key notation needs to be as stored, Camelot, or classical.")
     if space not in library.ALLOWED_SPACES:
         raise library.LibraryError("That space is not available here.")
     with closing(library.read_conn()) as conn:
@@ -203,9 +329,17 @@ def export_rekordbox(space: str, crate_id: int | None) -> str:
             tracks = [row for row in tracks if int(row["id"]) in wanted]
     present: set[int] = set()
     track_elements: list[ElementTree.Element] = []
+    stats: dict[str, int] = {}
     for row in tracks:
-        element = _track_element(row)
+        element = _track_element(
+            row,
+            memory_cues=memory_cues,
+            hot_loops=hot_loops,
+            key_notation=key_notation,
+            stats=stats,
+        )
         if element is None:
+            _note(stats, "omitted")
             continue
         track_elements.append(element)
         present.add(int(row["id"]))
@@ -231,7 +365,8 @@ def export_rekordbox(space: str, crate_id: int | None) -> str:
     document.append(collection)
     document.append(playlists)
     body = ElementTree.tostring(document, encoding="unicode")
-    return '<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n"
+    xml_text = '<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n"
+    return xml_text, _loss_report(stats, memory_cues, hot_loops, key_notation)
 
 
 def parse_rekordbox(xml_text: str) -> dict[str, object]:
@@ -367,6 +502,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="all",
         help="Crate id to export, including its subcrates, or all (default: all).",
     )
+    parser.add_argument(
+        "--memory-cues",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also write each hot cue as a memory cue (default: on).",
+    )
+    parser.add_argument(
+        "--hot-loops",
+        action="store_true",
+        help="Put a saved loop on a free hot cue pad. Otherwise loops are memory loops.",
+    )
+    parser.add_argument(
+        "--key",
+        default="asis",
+        choices=_KEY_NOTATIONS,
+        help="Key text to write: asis, camelot, or classical (default: asis).",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     crate_text = str(args.crate)
     if crate_text in {"", "all"}:
@@ -378,7 +530,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("Crate id needs a number, or all.", file=sys.stderr)
             return 2
     try:
-        xml_text = export_rekordbox(str(args.space), crate_id)
+        xml_text, report = export_rekordbox(
+            str(args.space),
+            crate_id,
+            memory_cues=bool(args.memory_cues),
+            hot_loops=bool(args.hot_loops),
+            key_notation=str(args.key),
+        )
         write_export(Path(str(args.output)), xml_text)
     except library.LibraryError as exc:
         print(exc.message, file=sys.stderr)
@@ -387,7 +545,381 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Could not write the export: {exc.strerror or exc}", file=sys.stderr)
         return 1
     print(args.output)
+    for line in report:
+        print(line)
     return 0
+
+
+def position_ms(text: str) -> int:
+    """Read a Rekordbox seconds attribute as whole milliseconds.
+
+    Rekordbox keeps three decimal places. The value is read as a decimal,
+    so 1.005 stays 1005 milliseconds.
+
+    Args:
+        text: A Start, End, or Inizio attribute.
+
+    Returns:
+        The nearest millisecond, half up.
+    """
+    return int((Decimal(text) * 1000).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def filesystem_path(path: str) -> str:
+    """Return the path spelling the filesystem uses for one file.
+
+    Rekordbox matches Location by the exact string. macOS stores names in
+    NFD, so a Serato path in NFC is rewritten to the directory entry when
+    that file is on disk. A missing file keeps the stored spelling.
+
+    Args:
+        path: Absolute or relative filesystem path.
+
+    Returns:
+        The directory entry's path when one name matches under NFC, otherwise ``path``.
+    """
+    candidate = Path(path)
+    parent = candidate.parent
+    if not parent.is_dir():
+        return path
+    wanted = unicodedata.normalize("NFC", candidate.name)
+    exact = None
+    folded = None
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return path
+    for entry in entries:
+        if entry.name == candidate.name:
+            exact = entry
+            break
+        if unicodedata.normalize("NFC", entry.name) == wanted:
+            folded = entry
+    chosen = exact or folded
+    if chosen is None:
+        return path
+    return str(chosen)
+
+
+def mp3_timing(path: str) -> tuple[str, int]:
+    """Classify one MP3 and return the cue shift Rekordbox needs.
+
+    The shift is subtracted from Serato's stored milliseconds. It depends
+    on the LAME/Xing header of that file, not on a single correction for
+    every MP3. Case A has no Xing header and case D has a LAME tag whose
+    CRC matches, so both stay at 0. Case B is Xing or Info without a LAME
+    tag (Lavc is the usual one) and case C is a LAME tag with a CRC of 0
+    or any other CRC that does not match. Those two move 26 ms earlier.
+    A file that is not an MP3, or an MP3 with no readable frame, stays at 0.
+
+    Args:
+        path: Filesystem path of one audio file.
+
+    Returns:
+        A case label (``A``, ``B``, ``C``, ``D``, ``unread``, or ``skip``)
+        and the milliseconds to subtract.
+    """
+    if Path(path).suffix.lower() != ".mp3":
+        return "skip", 0
+    try:
+        with Path(path).open("rb") as handle:
+            blob = handle.read(512_000)
+    except OSError:
+        return "unread", 0
+    frame_at = _mpeg_frame_at(blob)
+    if frame_at is None:
+        return "unread", 0
+    header = _mpeg_header(blob[frame_at:frame_at + 4])
+    if header is None:
+        return "unread", 0
+    xing_at = frame_at + header
+    if xing_at + 8 > len(blob) or blob[xing_at:xing_at + 4] not in {b"Xing", b"Info"}:
+        return "A", 0
+    return _xing_case(blob, frame_at, xing_at)
+
+
+def notation_key(stored: str, notation: str) -> tuple[str, str]:
+    """Rewrite a musical key into the notation Rekordbox should show.
+
+    Args:
+        stored: The key text from Serato. Empty stays empty.
+        notation: ``asis``, ``camelot``, or ``classical``.
+
+    Returns:
+        The text to write, and a status of ``asis``, ``converted``, or
+        ``unrecognized``. An empty key is ``asis``.
+
+    Raises:
+        library.LibraryError: If notation is not one of the three names.
+    """
+    if notation not in _KEY_NOTATIONS:
+        raise library.LibraryError("Key notation needs to be as stored, Camelot, or classical.")
+    text = stored.strip()
+    if not text or notation == "asis":
+        return stored, "asis"
+    camelot = _as_camelot(text)
+    if camelot is None:
+        return stored, "unrecognized"
+    if notation == "camelot":
+        return camelot, "converted" if camelot != text else "asis"
+    classical = _CAMELOT_CLASSICAL[camelot]
+    return classical, "converted" if classical != text else "asis"
+
+
+def _as_camelot(text: str) -> str | None:
+    """Map one key name onto a Camelot code.
+
+    Args:
+        text: A Camelot code or a classical name such as ``Am`` or ``A minor``.
+
+    Returns:
+        A code such as ``8A``, or None when the name is not recognized.
+    """
+    compact = text.strip().replace(" ", "")
+    camelot = compact.upper()
+    if camelot in _CAMELOT_CLASSICAL:
+        return camelot
+    minor = compact.lower().endswith("minor") or compact.lower().endswith("min")
+    base = compact
+    for suffix in ("minor", "min", "m"):
+        if base.lower().endswith(suffix) and len(base) > len(suffix):
+            base = base[: -len(suffix)]
+            minor = True
+            break
+    base = base[:1].upper() + base[1:]
+    if minor:
+        return _CLASSICAL_CAMELOT.get(f"{base}m")
+    return _CLASSICAL_CAMELOT.get(base)
+
+
+def _note(stats: MutableMapping[str, int] | None, key: str, amount: int = 1) -> None:
+    """Add a count to a loss-report map.
+
+    Args:
+        stats: Counter map. None does nothing.
+        key: Counter name.
+        amount: How much to add. 0 leaves the map unchanged.
+    """
+    if stats is None or amount == 0:
+        return
+    stats[key] = stats.get(key, 0) + amount
+
+
+def _shift_time(stored_ms: int, shift_ms: int) -> tuple[int, bool]:
+    """Subtract a timing correction and clamp at zero.
+
+    Args:
+        stored_ms: Position from the Serato tag, in milliseconds.
+        shift_ms: Milliseconds to subtract.
+
+    Returns:
+        The written millisecond and True when a positive time was clamped.
+    """
+    adjusted = int(stored_ms) - int(shift_ms)
+    if adjusted < 0:
+        return 0, int(stored_ms) > 0
+    return adjusted, False
+
+
+def _seconds(milliseconds: int) -> str:
+    """Format whole milliseconds as Rekordbox seconds.
+
+    Args:
+        milliseconds: A time that is already on the millisecond grid.
+
+    Returns:
+        Three decimal places, such as ``1.005``.
+    """
+    whole, frac = divmod(max(0, int(milliseconds)), 1000)
+    return f"{whole}.{frac:03d}"
+
+
+def _crc16_lame(data: bytes) -> int:
+    """Compute the CRC-16 LAME stores in an Info tag.
+
+    Args:
+        data: Bytes from the start of the MPEG frame up to the CRC field.
+
+    Returns:
+        The 16-bit CRC. The polynomial is the reflected form of 0x8005.
+    """
+    crc = 0
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+        crc &= 0xFFFF
+    return crc
+
+
+def _mpeg_frame_at(blob: bytes) -> int | None:
+    """Find the first MPEG audio frame after an optional ID3 tag.
+
+    Args:
+        blob: The start of an audio file.
+
+    Returns:
+        The index of the frame header, or None when none is found.
+    """
+    pos = 0
+    if blob.startswith(b"ID3") and len(blob) >= 10:
+        size = 0
+        for byte in blob[6:10]:
+            size = (size << 7) | (byte & 0x7F)
+        pos = 10 + size
+    limit = min(len(blob) - 4, pos + 262144)
+    while pos < limit:
+        if blob[pos] == 0xFF and _mpeg_header(blob[pos:pos + 4]) is not None:
+            return pos
+        pos += 1
+    return None
+
+
+def _mpeg_header(word: bytes) -> int | None:
+    """Return the byte offset of a Xing tag inside one MPEG frame.
+
+    Args:
+        word: Four header bytes.
+
+    Returns:
+        How many bytes from the header to the Xing or Info tag, or None
+        when the word is not an MPEG Layer III header.
+    """
+    if len(word) < 4 or word[0] != 0xFF or word[1] & 0xE0 != 0xE0:
+        return None
+    version_id = (word[1] >> 3) & 0x03
+    layer = (word[1] >> 1) & 0x03
+    bitrate_idx = (word[2] >> 4) & 0x0F
+    sample_idx = (word[2] >> 2) & 0x03
+    if version_id == 1 or layer != 1 or bitrate_idx in {0, 0x0F} or sample_idx == 3:
+        return None
+    channel = (word[3] >> 6) & 0x03
+    if version_id == 3:
+        side = 17 if channel == 3 else 32
+    else:
+        side = 9 if channel == 3 else 17
+    return 4 + side
+
+
+def _xing_case(blob: bytes, frame_at: int, xing_at: int) -> tuple[str, int]:
+    """Classify a Xing or Info tag as LAME case B, C, or D.
+
+    Args:
+        blob: File bytes that contain the frame.
+        frame_at: Index of the MPEG header.
+        xing_at: Index of the Xing or Info magic.
+
+    Returns:
+        The case label and the milliseconds to subtract.
+    """
+    if xing_at + 8 > len(blob):
+        return "unread", 0
+    flags = int.from_bytes(blob[xing_at + 4:xing_at + 8], "big")
+    pos = xing_at + 8
+    if flags & 0x01:
+        pos += 4
+    if flags & 0x02:
+        pos += 4
+    if flags & 0x04:
+        pos += 100
+    if flags & 0x08:
+        pos += 4
+    if pos + 9 > len(blob):
+        return "unread", 0
+    encoder = blob[pos:pos + 9].lower()
+    if not encoder.startswith(b"lame"):
+        return "B", _MP3_SHIFT_MS
+    crc_at = pos + 34
+    if crc_at + 2 > len(blob):
+        return "C", _MP3_SHIFT_MS
+    stored = int.from_bytes(blob[crc_at:crc_at + 2], "big")
+    if stored == 0 or stored != _crc16_lame(blob[frame_at:crc_at]):
+        return "C", _MP3_SHIFT_MS
+    return "D", 0
+
+
+def _loss_report(
+    stats: Mapping[str, int],
+    memory_cues: bool,
+    hot_loops: bool,
+    key_notation: str,
+) -> list[str]:
+    """Build the lines that say what this export cannot carry into Rekordbox.
+
+    Args:
+        stats: Counters from the track loop.
+        memory_cues: Whether hot cues were duplicated as memory cues.
+        hot_loops: Whether loops were allowed onto free hot cue pads.
+        key_notation: The key notation that was requested.
+
+    Returns:
+        One sentence per line. The import warning is always first.
+    """
+    lines = [
+        "Rekordbox 5.6.1 and later leaves tracks that are already in the collection unchanged.",
+        "Overwrite them from the rekordbox xml list: select all, right-click, Import to Collection, and answer Yes to load information from imported library.",
+        "That replaces cues, the beatgrid, and tags. A cue that exists only in Rekordbox is removed.",
+    ]
+    omitted = stats.get("omitted", 0)
+    if omitted:
+        lines.append(f"{omitted} tracks had no path and were left out.")
+    missing = stats.get("missing_file", 0)
+    if missing:
+        lines.append(f"{missing} tracks were not on disk, so the path spelling was left as Serato stored it.")
+    flips = stats.get("flips", 0)
+    if flips:
+        lines.append(f"{flips} flips were left out. Rekordbox has no flip markers.")
+    if stats.get("colored"):
+        lines.append("Cue colors are written as red, green, and blue. Rekordbox may snap them to its palette.")
+    if memory_cues and stats.get("memory_cues"):
+        lines.append(f"{stats['memory_cues']} hot cues were also written as memory cues.")
+    elif not memory_cues:
+        lines.append("Hot cues were not copied to memory cues. Some CDJ screens only list memory cues.")
+    memory_only = stats.get("memory_only", 0)
+    if memory_only:
+        lines.append(f"{memory_only} cues outside slots 0-7 were written only as memory cues.")
+    if stats.get("loops_memory") and not hot_loops:
+        lines.append(
+            f"{stats['loops_memory']} saved loops were written as memory loops so they do not take a hot cue slot."
+        )
+    if stats.get("loops_hot"):
+        lines.append(f"{stats['loops_hot']} saved loops were written on a free hot cue slot.")
+    if stats.get("loops_blocked"):
+        lines.append(
+            f"{stats['loops_blocked']} saved loops stayed memory loops because that slot already has a hot cue."
+        )
+    if stats.get("mp3_shift"):
+        lines.append(
+            f"{stats['mp3_shift']} MP3s were moved 26 ms earlier to match Rekordbox (LAME/Xing case B or C)."
+        )
+    if stats.get("mp3_kept"):
+        lines.append(f"{stats['mp3_kept']} MP3s kept their cue times (LAME/Xing case A or a valid LAME CRC).")
+    if stats.get("mp3_unread"):
+        lines.append(f"{stats['mp3_unread']} MP3s had no readable MPEG frame, so no timing correction was applied.")
+    if stats.get("clamped"):
+        lines.append(
+            f"{stats['clamped']} cue or grid times fell before 0 after the MP3 correction and were written at the start."
+        )
+    if stats.get("grid_unsupported"):
+        lines.append(f"{stats['grid_unsupported']} beatgrids could not be read and were left out.")
+    if stats.get("grid_dynamic"):
+        lines.append(
+            f"{stats['grid_dynamic']} tracks have a beatgrid with more than one marker. "
+            "Each marker is a TEMPO entry. The first marker is treated as a downbeat."
+        )
+    if key_notation == "asis":
+        lines.append("Musical key is the text Serato stores. It was not translated between Camelot and classical.")
+    elif key_notation == "camelot":
+        lines.append("Musical key was written as Camelot.")
+    else:
+        lines.append("Musical key was written as classical names.")
+    unrecognized = stats.get("key_unrecognized", 0)
+    if unrecognized and key_notation != "asis":
+        lines.append(f"{unrecognized} keys were left unchanged because they were not Camelot or a classical name.")
+    return lines
 
 
 def _xml_text(value: str) -> str:
@@ -427,14 +959,14 @@ def _mark(
     attrs = {
         "Name": _xml_text(name),
         "Type": kind,
-        "Start": f"{start_ms / 1000:.3f}",
+        "Start": _seconds(start_ms),
         "Num": _num(index),
         "Red": red,
         "Green": green,
         "Blue": blue,
     }
     if end_ms is not None:
-        attrs["End"] = f"{end_ms / 1000:.3f}"
+        attrs["End"] = _seconds(end_ms)
     return attrs
 
 
@@ -820,11 +1352,22 @@ def _membership(conn: sqlite3.Connection, space: str) -> dict[int, list[int]]:
     return grouped
 
 
-def _track_element(row: Mapping[str, object]) -> ElementTree.Element | None:
+def _track_element(
+    row: Mapping[str, object],
+    *,
+    memory_cues: bool,
+    hot_loops: bool,
+    key_notation: str,
+    stats: MutableMapping[str, int],
+) -> ElementTree.Element | None:
     """Build one TRACK element, including tempo and position marks.
 
     Args:
         row: Asset columns.
+        memory_cues: True also writes each hot cue as a memory cue.
+        hot_loops: True puts a saved loop on a free hot cue pad.
+        key_notation: ``asis``, ``camelot``, or ``classical``.
+        stats: Loss-report counters for this export.
 
     Returns:
         The element, or None when the track has no path.
@@ -835,11 +1378,31 @@ def _track_element(row: Mapping[str, object]) -> ElementTree.Element | None:
     resolved = library._resolved(portable)
     if not resolved:
         return None
+    on_disk = Path(resolved).is_file()
+    spelled = filesystem_path(resolved) if on_disk else resolved
+    if not on_disk:
+        _note(stats, "missing_file")
     try:
-        location = location_uri(resolved)
+        location = location_uri(spelled)
     except UnicodeError:
         return None
-    parsed = tags.read_serato_tags(resolved)
+    parsed = tags.read_serato_tags(spelled if on_disk else resolved)
+    shift = 0
+    if on_disk and Path(spelled).suffix.lower() == ".mp3":
+        case, shift = mp3_timing(spelled)
+        if case in {"B", "C"}:
+            _note(stats, "mp3_shift")
+        elif case in {"A", "D"}:
+            _note(stats, "mp3_kept")
+        else:
+            _note(stats, "mp3_unread")
+    warning = parsed.get("beatgrid_warning")
+    if warning:
+        _note(stats, "grid_unsupported")
+    elif len(parsed["beatgrid"]) > 1:
+        _note(stats, "grid_dynamic")
+    tonality, key_status = notation_key(_text(row, "key"), key_notation)
+    _note(stats, f"key_{key_status}")
     asset_id = int(cast(int, row["id"]))
     name = _text(row, "name") or "Untitled"
     element = ElementTree.Element(
@@ -866,13 +1429,22 @@ def _track_element(row: Mapping[str, object]) -> ElementTree.Element | None:
         Rating=_rating(_cell(row, "rating")),
         Location=location,
         Remixer=_text(row, "remixer"),
-        Tonality=_text(row, "key"),
+        Tonality=tonality,
         Label=_text(row, "label"),
         Mix="",
     )
-    for tempo in tempo_entries(parsed["beatgrid"]):
+    for tempo in tempo_entries(parsed["beatgrid"], shift, stats):
         element.append(ElementTree.Element("TEMPO", tempo))
-    for mark in position_marks(parsed):
+    marks = position_marks(
+        parsed,
+        shift,
+        memory_cues=memory_cues,
+        hot_loops=hot_loops,
+        stats=stats,
+    )
+    if marks:
+        _note(stats, "colored")
+    for mark in marks:
         element.append(ElementTree.Element("POSITION_MARK", mark))
     return element
 

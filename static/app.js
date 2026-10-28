@@ -2528,10 +2528,25 @@ document.getElementById("export-m3u").addEventListener("click", () => {
 
 document.getElementById("export-rekordbox").addEventListener("click", () => {
   const crate = state.mode === "crates" ? state.activeCrate : "all";
-  const link = document.createElement("a");
-  link.href = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`;
-  link.download = "rekordbox.xml";
-  link.click();
+  const memory = document.getElementById("rekordbox-memory").checked ? "1" : "0";
+  const key = document.getElementById("rekordbox-key").value;
+  const url = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}&report=1`;
+  fetch(url)
+    .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
+    .then(({ ok, body }) => {
+      if (!ok) {
+        setNotice(body.error || "The Rekordbox export failed.");
+        return;
+      }
+      setNotice((body.report || []).join(" "));
+      const blob = new Blob([body.xml], { type: "application/xml" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "rekordbox.xml";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    })
+    .catch((error) => setNotice(error.message));
 });
 
 document.getElementById("import-m3u").addEventListener("click", () => {

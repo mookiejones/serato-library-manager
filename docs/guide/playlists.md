@@ -37,13 +37,15 @@ Import matches a line to a track that is already in the library. Put the audio i
 2. Select the crate to export. Select **All tracks** to export the whole space.
 3. Click **Rekordbox**.
 
-The browser downloads `rekordbox.xml`. In History, Missing, Duplicates, or Stems, **Rekordbox** uses the whole current space.
+The browser downloads `rekordbox.xml` and the bar lists what could not be copied across. In History, Missing, Duplicates, or Stems, **Rekordbox** uses the whole current space.
 
-The file lists each track's location, title, artist, album, genre, BPM, key, length, bitrate, and comments. Hot cues and loops are included, with their colors and names, when the audio file has Serato markers. The beatgrid is included when the file has one. A track with no path is left out.
+**Memory cues** is on until you clear it. Each hot cue is then also saved as a memory cue, which is what some CDJ screens show. **Key as stored** leaves the key text Serato has. Choose **Camelot key** or **Classical key** when Rekordbox is set to the other notation.
+
+The file lists each track's location, title, artist, album, genre, BPM, key, length, bitrate, and comments. Hot cues keep their number, name, and color. Saved loops are loops. The beatgrid is included when the file has one, including a grid with a marker at each tempo change. A track with no path is left out. An MP3 is shifted only when its LAME or Xing header says Serato and Rekordbox disagree, which is about 26 milliseconds. An AAC file is not shifted by that amount.
 
 Crates become playlist folders. A subcrate stays inside its parent. A crate that has both tracks and subcrates becomes a folder, and its own tracks are a playlist with the same name inside that folder.
 
-From the project folder, the same file can be written without opening the page:
+From the project folder, the same file can be written without opening the page. The command prints the same loss report the bar shows:
 
 ```bash
 python3 rekordbox.py -o rekordbox.xml
@@ -51,10 +53,17 @@ python3 rekordbox.py -o rekordbox.xml
 
 ## Import into Rekordbox
 
-1. Open Rekordbox.
-2. Open **Preferences**.
-3. Choose **Advanced**.
-4. Choose **rekordbox xml**.
-5. Import `rekordbox.xml`.
+In Rekordbox 6 and 7 the import control is at **Preferences**, **Advanced**, **Database**, **rekordbox xml**.
 
-Rekordbox can then export a USB for CDJs. Device Library Plus and OneLibrary drives are not produced by this export.
+Since Rekordbox 5.6.1, importing an XML file does not update a track that is already in the collection. Rekordbox 6 and 7 do the same. The cues already in Rekordbox stay as they are.
+
+To replace the cues, the beatgrid, and the tags on tracks that are already in the collection:
+
+1. Open the **rekordbox xml** list in the sidebar.
+2. Select all the tracks.
+3. Right-click and choose **Import to Collection**.
+4. Answer **Yes** to **load information from imported library**.
+
+**This overwrites cues, the beatgrid, and tags in Rekordbox.** It does not merge them. A cue that exists only in Rekordbox is removed. Export a Rekordbox XML backup first if you need those cues.
+
+Rekordbox can then export a USB for CDJs. Device Library Plus and OneLibrary drives are not produced by this export. Cue colors may snap to Rekordbox's palette. Flips are left out, because Rekordbox has no flip markers. A beatgrid with more than 4096 markers is left out and named in the loss report.

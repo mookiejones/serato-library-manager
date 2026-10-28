@@ -316,6 +316,22 @@ textarea:focus-visible,
 
 button:disabled { cursor: default; }
 
+.rekordbox-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+
+.rekordbox-option select {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 4px 0;
+}
+
 .notice {
   margin: 0 16px 8px;
   color: var(--quiet);

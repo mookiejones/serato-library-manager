@@ -83,6 +83,18 @@
           <p id="count" class="count" aria-live="polite">Loading the library</p>
           <button id="export-m3u" type="button">Export</button>
           <button id="export-rekordbox" type="button" title="Download rekordbox.xml">Rekordbox</button>
+          <label class="rekordbox-option">
+            <input id="rekordbox-memory" type="checkbox" checked>
+            Memory cues
+          </label>
+          <label class="rekordbox-option">
+            <span class="visually-hidden">Rekordbox key notation</span>
+            <select id="rekordbox-key" aria-label="Rekordbox key notation">
+              <option value="asis">Key as stored</option>
+              <option value="camelot">Camelot key</option>
+              <option value="classical">Classical key</option>
+            </select>
+          </label>
           <button id="import-m3u" type="button">Import</button>
           <input id="import-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl" hidden>
           <button id="reload" type="button">Reload</button>
