@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import cast
@@ -348,27 +351,176 @@ class BackupTests(unittest.TestCase):
             self.assertIn(good.name, names)
 
     def test_partial_leftover_is_removed_on_the_next_run(self) -> None:
-        """Ignore a crashed staging directory and remove it later.
+        """Ignore a crash before publish, and remove it once it is stale.
+
+        A ``.partial`` directory left before ``os.replace`` is not listed.
+        A fresh one survives the next backup. One whose newest mtime is
+        older than an hour, and whose lock is free, is removed.
 
         Returns:
-            None. The test fails if the ``.partial`` directory is listed
-            or survives the next backup.
+            None. The test fails if a fresh staging directory is deleted
+            or a stale one is kept.
         """
         with TempLibrary() as temp:
             parent = temp.db.resolve().parent / "Backups"
             parent.mkdir()
-            partial = parent / ".serato-web-crash.partial"
-            partial.mkdir()
-            (partial / "master.sqlite").write_bytes(b"half")
-            self.assertFalse(library.is_complete(partial))
+            fresh = parent / ".serato-web-29990101-000000.partial"
+            fresh.mkdir()
+            (fresh / "master.sqlite").write_bytes(b"live")
+            stale = parent / ".serato-web-crash.partial"
+            stale.mkdir()
+            (stale / "master.sqlite").write_bytes(b"half")
+            old = time.time() - library.PARTIAL_STALE_SECONDS - 5
+            os.utime(stale, (old, old))
+            os.utime(stale / "master.sqlite", (old, old))
+            self.assertFalse(library.is_complete(fresh))
+            self.assertFalse(library.is_complete(stale))
             self.assertEqual(library.list_backups(parent), [])
             names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
-            self.assertNotIn(partial.name, names)
+            self.assertNotIn(fresh.name, names)
+            self.assertNotIn(stale.name, names)
+            library.MASTER = temp.db
+            library._backed_up.clear()
             folder = library.ensure_backup()
             self.assertIsInstance(folder, Path)
-            self.assertFalse(partial.exists())
+            self.assertTrue(fresh.is_dir())
+            self.assertEqual((fresh / "master.sqlite").read_bytes(), b"live")
+            self.assertFalse(stale.exists())
             self.assertTrue(library.is_complete(cast(Path, folder)))
-            self.assertEqual(library.list_backups(parent), [folder])
+
+    def test_locked_partial_survives_another_backup(self) -> None:
+        """Leave a staging directory alone while another process holds its lock.
+
+        The directory is old enough to be stale. The lock is what keeps it.
+
+        Returns:
+            None. The test fails if the locked directory is removed.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            parent.mkdir()
+            live = parent / ".serato-web-locked.partial"
+            live.mkdir()
+            (live / "master.sqlite").write_bytes(b"live")
+            lock_path = live / library.PARTIAL_LOCK_NAME
+            script = (
+                "import os, sys, time\n"
+                "fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o644)\n"
+                "if os.name == 'nt':\n"
+                "    import msvcrt\n"
+                "    os.write(fd, b'\\0')\n"
+                "    os.lseek(fd, 0, os.SEEK_SET)\n"
+                "    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)\n"
+                "else:\n"
+                "    import fcntl\n"
+                "    fcntl.flock(fd, fcntl.LOCK_EX)\n"
+                "sys.stdout.write('ready\\n')\n"
+                "sys.stdout.flush()\n"
+                "time.sleep(30)\n"
+            )
+            proc = subprocess.Popen(
+                [sys.executable, "-c", script, str(lock_path)],
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                ready = proc.stdout.readline() if proc.stdout is not None else ""
+                self.assertEqual(ready.strip(), "ready")
+                old = time.time() - library.PARTIAL_STALE_SECONDS - 5
+                os.utime(live, (old, old))
+                os.utime(live / "master.sqlite", (old, old))
+                os.utime(lock_path, (old, old))
+                library.MASTER = temp.db
+                library._backed_up.clear()
+                library.ensure_backup()
+                self.assertEqual((live / "master.sqlite").read_bytes(), b"live")
+            finally:
+                proc.kill()
+                proc.wait(timeout=5)
+                if proc.stdout is not None:
+                    proc.stdout.close()
+
+    def test_complete_marker_rejects_bad_contents(self) -> None:
+        """Reject an extra file, a missing file, a bad marker, and a path escape.
+
+        Returns:
+            None. The test fails if any of those folders is complete.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+
+            extra = root / "extra"
+            extra.mkdir()
+            (extra / "master.sqlite").write_bytes(b"db")
+            library._write_complete_marker(extra)
+            (extra / "notes.txt").write_bytes(b"more")
+            self.assertFalse(library.is_complete(extra))
+
+            missing = root / "missing"
+            missing.mkdir()
+            (missing / "master.sqlite").write_bytes(b"db")
+            (missing / "root.sqlite").write_bytes(b"root")
+            library._write_complete_marker(missing)
+            (missing / "root.sqlite").unlink()
+            self.assertFalse(library.is_complete(missing))
+
+            malformed = root / "malformed"
+            malformed.mkdir()
+            (malformed / "master.sqlite").write_bytes(b"db")
+            (malformed / library.BACKUP_COMPLETE_NAME).write_text("not-a-hash\n", encoding="utf-8")
+            self.assertFalse(library.is_complete(malformed))
+
+            escape = root / "escape"
+            escape.mkdir()
+            (escape / "master.sqlite").write_bytes(b"db")
+            digest = hashlib.sha256(b"db").hexdigest()
+            (escape / library.BACKUP_COMPLETE_NAME).write_text(
+                f"{digest}  ../master.sqlite\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(library.is_complete(escape))
+
+    def test_wal_legacy_backup_is_left_unchanged(self) -> None:
+        """Check a WAL legacy backup without writing ``-shm`` beside it.
+
+        Returns:
+            None. The test fails if the backup bytes change or ``-shm`` appears.
+        """
+        from contextlib import closing
+
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            parent.mkdir()
+            legacy = parent / "serato-web-20180101-000000"
+            legacy.mkdir()
+            source = parent / "wal-source.sqlite"
+            with closing(sqlite3.connect(source)) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA wal_autocheckpoint=0")
+                conn.execute("CREATE TABLE asset (id INTEGER PRIMARY KEY)")
+                conn.execute("INSERT INTO asset VALUES (1)")
+                conn.commit()
+                (legacy / "master.sqlite").write_bytes(source.read_bytes())
+                wal = Path(str(source) + "-wal")
+                self.assertGreater(wal.stat().st_size, 0)
+                (legacy / "master.sqlite-wal").write_bytes(wal.read_bytes())
+            source.unlink()
+            before = {
+                path.name: path.read_bytes()
+                for path in legacy.iterdir()
+                if path.is_file()
+            }
+            self.assertNotIn("master.sqlite-shm", before)
+            self.assertEqual(library.backup_status(legacy), library.LEGACY_BACKUP_STATUS)
+            library.verify_legacy_backup(legacy)
+            after = {
+                path.name: path.read_bytes()
+                for path in legacy.iterdir()
+                if path.is_file()
+            }
+            self.assertEqual(after, before)
+            self.assertFalse((legacy / "master.sqlite-shm").exists())
+            self.assertFalse(library.is_complete(legacy))
 
     def test_tampered_backup_fails_hash_verification(self) -> None:
         """Reject a backup whose file no longer matches COMPLETE.
@@ -466,6 +618,11 @@ class BackupTests(unittest.TestCase):
             (uppercase / "master.sqlite").write_bytes(b"old")
             library._write_complete_marker(uppercase)
             self.assertFalse(library.is_complete(uppercase))
+            mixed = parent / "serato-web-old-Failed"
+            mixed.mkdir()
+            (mixed / "master.sqlite").write_bytes(b"old")
+            library._write_complete_marker(mixed)
+            self.assertFalse(library.is_complete(mixed))
 
     def test_is_complete_verifies_a_snapshot_store_anywhere(self) -> None:
         """Require a verified COMPLETE marker in any directory.

@@ -40,7 +40,7 @@ The copy is a folder next to `master.sqlite`:
 
 Do not restore a folder whose name ends with `-failed` or `-failed-02` (any capitalization). Do not restore a hidden folder whose name ends with `.partial`. Do not restore a folder that contains a file named `INCOMPLETE`. Those copies did not finish. Leave them where they are.
 
-An older folder that has `master.sqlite` but no `COMPLETE` file is **legacy, unverified**. The app does not offer it as a finished backup. If you choose that folder yourself, the app checks `master.sqlite` before it restores anything. The check has to come back exactly ok. Otherwise the restore does not start.
+An older folder that has `master.sqlite` but no `COMPLETE` file is **legacy, unverified**. The app does not offer it as a finished backup. Nothing in this app restores that folder yet. When a restore is added, it will check `master.sqlite` first, on a copy, and will not use the folder unless that check is exactly ok.
 
 A file change in the Files view copies the database first as well. During the change, the app also writes `Library/Backups/file-ops-journal.json`. That file is removed when the change finishes. Leave it alone.
 
