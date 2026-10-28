@@ -760,7 +760,14 @@ class SnapshotStore:
             return key
         key = secrets.token_bytes(32)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            # O_BINARY keeps a 0x0A byte as one byte. Without it, Windows
+            # text mode turns that byte into CR LF and the key no longer
+            # matches the 32 bytes that signed the manifest.
+            fd = os.open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                0o600,
+            )
         except FileExistsError:
             key = path.read_bytes()
             if len(key) != 32:

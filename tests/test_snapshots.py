@@ -1124,6 +1124,21 @@ class SnapshotTests(unittest.TestCase):
             paths = [row["path"] for row in loaded["cues"]]
             self.assertTrue(any(str(path).endswith("one-grid.mp3") for path in paths))
 
+    def test_manifest_key_keeps_newline_bytes(self) -> None:
+        """Store a manifest key that contains newline bytes unchanged.
+
+        Returns:
+            None. The test fails if a later read rejects the key. On
+            Windows, a text-mode write would expand each newline.
+        """
+        with TempLibrary() as temp:
+            _music, _serato, store = _drive(temp.root, temp.db)
+            key = b"\n" * 32
+            with mock.patch("snapshots.secrets.token_bytes", return_value=key):
+                saved = store.take("manual", "Key bytes.")
+            self.assertEqual((store.root / "manifest.key").read_bytes(), key)
+            self.assertIn(saved["id"], [item["id"] for item in store.list_snapshots()])
+
     def test_plain_hash_does_not_verify_a_manifest(self) -> None:
         """Reject a manifest whose sha256 was not signed with the store key.
 
