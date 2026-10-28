@@ -204,6 +204,65 @@ class ConsentTests(TelemetryCase):
         install_id = app_config.load_settings().install_id
         self.assertEqual(bucket_event[1], install_id)
 
+    def test_files_changed_sends_a_bucket_and_drops_paths(self) -> None:
+        """Send a file-count range and a change type, never a path or a name.
+
+        A change value that is a path drops the event. A cue value that is
+        a path drops it too. A valid replace sends the bucket, the change,
+        and the cue result. The exact file count is not a property.
+
+        Returns:
+            None. The test fails if a path is present or a bad change is sent.
+        """
+        self._opt_in()
+        dropped = telemetry._allow_properties(
+            telemetry.EVENT_FILES_CHANGED,
+            {"file_count": 3, "change": "/secret/path", "name": "track.mp3"},
+        )
+        self.assertIsNone(dropped)
+        bad_cues = telemetry._allow_properties(
+            telemetry.EVENT_FILES_CHANGED,
+            {"file_count": 1, "change": "replace", "cues": "/tmp/new.mp3"},
+        )
+        self.assertIsNone(bad_cues)
+        install_id = app_config.load_settings().install_id
+        self.assertIsNone(
+            telemetry.limit_posthog_event(
+                {
+                    "event": telemetry.EVENT_FILES_CHANGED,
+                    "distinct_id": install_id,
+                    "properties": {
+                        "file_count_bucket": "1-9",
+                        "change": "/secret/path",
+                        "path": "/secret/song.mp3",
+                        "$geoip_disable": True,
+                    },
+                }
+            )
+        )
+        with mock.patch.dict(os.environ, {"POSTHOG_KEY": "phc_test"}):
+            sent = telemetry.capture(
+                telemetry.EVENT_FILES_CHANGED,
+                {
+                    "file_count": 12,
+                    "change": "rename",
+                    "cues": "copied",
+                    "path": "/tmp/library/song.mp3",
+                    "name": "song.mp3",
+                },
+            )
+        self.assertTrue(sent)
+        event = self.fake.events[-1]
+        self.assertEqual(event[0], "files_changed")
+        self.assertEqual(event[2]["file_count_bucket"], "10-49")
+        self.assertEqual(event[2]["change"], "rename")
+        self.assertEqual(event[2]["cues"], "copied")
+        self.assertNotIn("file_count", event[2])
+        self.assertNotIn("path", event[2])
+        self.assertNotIn("name", event[2])
+        self.assertNotIn("/tmp", json.dumps(event[2]))
+        self.assertNotIn("song.mp3", json.dumps(event[2]))
+
     def test_missing_package_is_a_no_op(self) -> None:
         """Stay quiet when the PostHog package cannot be imported.
 

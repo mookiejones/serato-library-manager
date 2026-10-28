@@ -14,7 +14,14 @@ import sys
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tags import _parse_beatgrid, _parse_cue, _parse_markers2, read_serato_tags
+from tags import (
+    _parse_beatgrid,
+    _parse_cue,
+    _parse_markers2,
+    copy_serato_geob,
+    plan_serato_geob,
+    read_serato_tags,
+)
 
 
 def _entry(kind: str, blob: bytes) -> bytes:
@@ -261,6 +268,160 @@ class TagTests(unittest.TestCase):
             parsed = read_serato_tags(str(path))
         self.assertTrue(parsed["found"])
         self.assertEqual(parsed["cues"][0]["index"], 3)
+
+
+def _text_frame(frame_id: bytes, text: str) -> bytes:
+    """Build one Latin-1 ID3v2.3 text frame.
+
+    Args:
+        frame_id: Four-byte frame name, such as ``TIT2``.
+        text: Frame text.
+
+    Returns:
+        The raw frame, including its header.
+    """
+    body = b"\x00" + text.encode("latin-1")
+    return frame_id + len(body).to_bytes(4, "big") + b"\x00\x00" + body
+
+
+def _tag_file(frames: bytes, audio: bytes, path: Path) -> None:
+    """Write a plain ID3v2.3 tag and an audio tail.
+
+    Args:
+        frames: Raw frames, concatenated.
+        audio: Bytes that must survive a cue copy.
+        path: File to create.
+
+    Returns:
+        None.
+    """
+    size = len(frames)
+    synchsafe = bytes(
+        (
+            (size >> 21) & 0x7F,
+            (size >> 14) & 0x7F,
+            (size >> 7) & 0x7F,
+            size & 0x7F,
+        )
+    )
+    path.write_bytes(b"ID3" + bytes([3, 0, 0]) + synchsafe + frames + audio)
+
+
+class CueCopyTests(unittest.TestCase):
+    """Serato frames are copied only when the destination tag can take them."""
+
+    def test_copy_keeps_other_frames_and_the_audio(self) -> None:
+        """Copy Markers2 onto a tagged file and leave its title and audio.
+
+        The destination starts with a TIT2 frame and a distinctive tail.
+        After the copy, the cue index is readable, the title text is still
+        in the file, and the tail is still the last bytes. Temporary tag
+        files are removed.
+
+        Returns:
+            None. The test fails if the audio tail or the title moves.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "old.mp3"
+            dest = root / "new.mp3"
+            _id3_file(_markers_payload(), source)
+            source.write_bytes(source.read_bytes() + b"SOURCE-AUDIO")
+            _tag_file(_text_frame(b"TIT2", "Hello"), b"DEST-AUDIO", dest)
+            before_title = dest.read_bytes()
+            result = copy_serato_geob(source, dest)
+            copied = dest.read_bytes()
+            leftovers = list(root.glob(".serato-cue*"))
+            parsed = read_serato_tags(str(dest))
+        self.assertEqual(result["status"], "copied")
+        self.assertNotIn("/", result["detail"])
+        self.assertTrue(copied.endswith(b"DEST-AUDIO"))
+        self.assertIn(b"Hello", copied)
+        self.assertNotEqual(copied, before_title)
+        self.assertTrue(parsed["found"])
+        self.assertEqual(parsed["cues"][0]["index"], 3)
+        self.assertEqual(leftovers, [])
+
+    def test_existing_serato_frames_are_left_alone(self) -> None:
+        """Leave a destination that already has Serato frames unchanged.
+
+        Both files carry Markers2. The copy reports kept and the
+        destination bytes stay identical.
+
+        Returns:
+            None. The test fails if the destination is rewritten.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "old.mp3"
+            dest = root / "new.mp3"
+            _id3_file(_markers_payload(), source)
+            _id3_file(_markers_payload(), dest)
+            dest.write_bytes(dest.read_bytes() + b"KEEP")
+            before = dest.read_bytes()
+            result = copy_serato_geob(source, dest)
+            self.assertEqual(result["status"], "kept")
+            self.assertEqual(dest.read_bytes(), before)
+
+    def test_flac_is_not_rewritten(self) -> None:
+        """Refuse a FLAC destination and leave its bytes in place.
+
+        Returns:
+            None. The test fails if the FLAC file changes.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "old.mp3"
+            dest = root / "new.flac"
+            _id3_file(_markers_payload(), source)
+            payload = b"fLaC" + b"\x00" * 12
+            dest.write_bytes(payload)
+            result = plan_serato_geob(source, dest)
+            copied = copy_serato_geob(source, dest)
+            self.assertEqual(result["status"], "unsupported")
+            self.assertEqual(copied["status"], "unsupported")
+            self.assertEqual(dest.read_bytes(), payload)
+
+    def test_mp3_without_a_tag_can_receive_one(self) -> None:
+        """Prepend an ID3v2.3 tag to an MP3 that has none.
+
+        The audio bytes stay at the end of the file.
+
+        Returns:
+            None. The test fails if the cue is missing or the audio moves.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "old.mp3"
+            dest = root / "new.mp3"
+            _id3_file(_markers_payload(), source)
+            dest.write_bytes(b"MPEG-AUDIO")
+            result = copy_serato_geob(source, dest)
+            self.assertEqual(result["status"], "copied")
+            self.assertTrue(dest.read_bytes().endswith(b"MPEG-AUDIO"))
+            self.assertTrue(read_serato_tags(str(dest))["found"])
+
+    def test_a_shortcut_is_not_rewritten(self) -> None:
+        """Refuse a destination that is a shortcut to another file.
+
+        Returns:
+            None. The test fails if the target bytes change. The test is
+            skipped when this user cannot create a shortcut.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "old.mp3"
+            target = root / "target.mp3"
+            link = root / "link.mp3"
+            _id3_file(_markers_payload(), source)
+            target.write_bytes(b"UNTOUCHED")
+            try:
+                link.symlink_to(target)
+            except OSError:
+                self.skipTest("This user cannot create shortcuts.")
+            result = plan_serato_geob(source, link)
+            self.assertEqual(result["status"], "unsupported")
+            self.assertEqual(target.read_bytes(), b"UNTOUCHED")
 
 
 if __name__ == "__main__":

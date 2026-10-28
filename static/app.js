@@ -1,14 +1,15 @@
 /**
  * Serato library page.
  *
- * Loads crates, history, missing tracks, duplicates, and stems from the
- * local server on 127.0.0.1 port 8765. Track and crate edits are POST
+ * Loads crates, history, missing tracks, duplicates, stems, and files from
+ * the local server on 127.0.0.1 port 8765. Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
- * /api/duplicates/merge. Related tracks use /api/related. The track list
- * is virtualized: only rows near the scroll window are in the DOM.
- * Sharing settings and local logs use /api/settings and /api/logs. This
- * file does not open master.sqlite itself, and it does not send library
- * rows anywhere.
+ * /api/duplicates/merge. File moves, renames, replacements, and deletes
+ * use /api/files. A preview is shown before confirm. Related tracks use
+ * /api/related. The track list is virtualized: only rows near the scroll
+ * window are in the DOM. Sharing settings and local logs use
+ * /api/settings and /api/logs. This file does not open master.sqlite
+ * itself, and it does not send library rows anywhere.
  */
 
 // Row height in pixels. It matches --row in app.css. The painter divides
@@ -64,6 +65,17 @@ const state = {
   duplicateSpace: "",
   telemetryConsent: null,
   telemetryConfigured: false,
+  filesPath: "",
+  filesParent: null,
+  filesEntries: [],
+  filesSelected: new Set(),
+  filesPick: null,
+  filesPickPaths: [],
+  filesPickSource: "",
+  filesLoading: false,
+  filesError: "",
+  filesMessage: "",
+  filesTruncated: false,
 };
 
 const crateList = document.getElementById("crate-list");
@@ -680,11 +692,16 @@ function renderShell() {
   crateList.hidden = !cratesMode;
   sessionList.hidden = !historyMode;
   modeNote.hidden = cratesMode || historyMode;
+  const filesMode = state.mode === "files";
+  document.querySelector(".browser").hidden = filesMode;
+  document.getElementById("detail").hidden = filesMode;
+  document.getElementById("files-panel").hidden = !filesMode;
   if (state.mode === "missing") modeNote.textContent = "Tracks Serato has marked missing in this space.";
   if (state.mode === "duplicates") {
     modeNote.textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
   }
   if (state.mode === "stems") modeNote.textContent = "Tracks with a stems analysis state.";
+  if (filesMode) modeNote.textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
   for (const button of document.querySelectorAll("#views button")) {
     button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
   }
@@ -697,6 +714,11 @@ function renderShell() {
   document.getElementById("crate-color").disabled = !state.writable || !crateChosen;
   document.getElementById("crate-delete").disabled = !state.writable || !crateChosen;
   syncMergeButton();
+  if (filesMode) {
+    const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
+    crateFoot.textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
+    return;
+  }
   const pool = state.mode === "history" ? state.entries : footerTracks();
   const bytes = pool.reduce((sum, track) => sum + (Number(track.file_size) || 0), 0);
   const ms = pool.reduce((sum, track) => sum + (Number(track.length_ms) || 0), 0);
@@ -735,6 +757,10 @@ function footerTracks() {
  */
 function renderList() {
   renderShell();
+  if (state.mode === "files") {
+    renderFiles();
+    return;
+  }
   renderColumns();
   const view = buildView();
   const noun = state.mode === "history" ? "play" : "track";
@@ -2439,11 +2465,11 @@ async function loadLibrary() {
 }
 
 /**
- * Switch among crates, history, missing, duplicates, and stems.
+ * Switch among crates, history, missing, duplicates, stems, and files.
  *
  * History sorts by start time descending and loads sessions once.
- * Duplicates load when this space has not been scanned yet. Other modes
- * only change which tracks renderList keeps.
+ * Duplicates load when this space has not been scanned yet. Files loads
+ * the current folder. Other modes only change which tracks renderList keeps.
  *
  * @param {string} mode View name from the rail buttons.
  * @returns {void}
@@ -2461,6 +2487,10 @@ function setMode(mode) {
   }
   if (mode === "duplicates" && state.duplicateSpace !== state.space) {
     loadDuplicates().catch((error) => setNotice(error.message));
+  }
+  if (mode === "files") {
+    state.filesLoading = true;
+    loadFolder(state.filesPath || "").catch((error) => failFiles(error));
   }
   renderList();
 }
@@ -3181,6 +3211,429 @@ document.getElementById("copy-logs").addEventListener("click", async () => {
   } finally {
     button.disabled = false;
   }
+});
+
+const filesDialog = document.getElementById("files-dialog");
+const filesList = document.getElementById("files-list");
+const filesStatus = document.getElementById("files-status");
+const filesName = document.getElementById("files-name");
+const filesReplacement = document.getElementById("files-replacement");
+let filesPreview = null;
+let filesAction = "";
+let filesTrigger = null;
+
+/**
+ * Show a folder error in the Files view.
+ *
+ * @param {Error} error Failed folder read or save.
+ * @returns {void}
+ */
+function failFiles(error) {
+  state.filesLoading = false;
+  state.filesError = error.message || "That folder could not be read.";
+  renderFiles();
+}
+
+/**
+ * Load one folder from GET /api/files.
+ *
+ * An empty path asks for the home directory. Selection is cleared because
+ * the previous paths are no longer the rows on screen. A success message
+ * can be kept when the reload follows a save.
+ *
+ * @param {string} path Folder to open.
+ * @param {{keepMessage?: boolean}} [options] Pass keepMessage to retain the last save note.
+ * @returns {Promise<void>}
+ */
+async function loadFolder(path, options = {}) {
+  state.filesLoading = true;
+  state.filesError = "";
+  if (!options.keepMessage) state.filesMessage = "";
+  state.filesSelected = new Set();
+  renderFiles();
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const response = await fetch(`/api/files${query}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "That folder could not be read.");
+  state.filesPath = payload.path || "";
+  state.filesParent = payload.parent || null;
+  state.filesEntries = Array.isArray(payload.entries) ? payload.entries : [];
+  state.filesTruncated = Boolean(payload.truncated);
+  state.filesLoading = false;
+  if (payload.serato) applyStatus(payload.serato);
+  else renderFiles();
+  if (payload.serato) renderFiles();
+}
+
+/**
+ * Paint the folder, the empty and loading states, and the action buttons.
+ *
+ * Uses text nodes. Shortcuts are labeled and cannot be selected. Writes
+ * stay disabled while Serato holds the library.
+ *
+ * @returns {void}
+ */
+function renderFiles() {
+  if (state.mode !== "files") return;
+  const pick = document.getElementById("files-pick");
+  const moveHere = document.getElementById("files-move-here");
+  const pickCancel = document.getElementById("files-pick-cancel");
+  pick.hidden = !state.filesPick;
+  moveHere.hidden = !state.filesPick;
+  pickCancel.hidden = !state.filesPick;
+  document.getElementById("files-path").textContent = state.filesPath || "Home";
+  document.getElementById("files-up").disabled = !state.filesParent || state.filesLoading;
+  const notes = [];
+  if (state.filesLoading) notes.push("Reading this folder.");
+  if (state.filesError) notes.push(state.filesError);
+  if (state.filesMessage) notes.push(state.filesMessage);
+  if (state.filesTruncated) notes.push("Some files are not listed.");
+  filesStatus.textContent = notes.join(" ");
+  filesList.setAttribute("aria-busy", String(state.filesLoading));
+  filesList.replaceChildren();
+  if (state.filesLoading && !state.filesEntries.length) {
+    const loading = document.createElement("p");
+    loading.className = "files-empty";
+    loading.textContent = "Reading this folder.";
+    filesList.append(loading);
+  } else if (!state.filesEntries.length) {
+    const empty = document.createElement("p");
+    empty.className = "files-empty";
+    empty.textContent = state.filesError || "This folder is empty.";
+    filesList.append(empty);
+  } else {
+    const rank = { dir: 0, file: 1, link: 2 };
+    const entries = [...state.filesEntries].sort((left, right) => {
+      return (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3) || left.name.localeCompare(right.name);
+    });
+    for (const entry of entries) filesList.append(fileRow(entry));
+  }
+  const selected = selectedFiles();
+  const locked = !state.writable || state.filesLoading;
+  document.getElementById("files-rename").disabled = locked || selected.length !== 1;
+  document.getElementById("files-move").disabled = locked || !selected.length || Boolean(state.filesPick);
+  document.getElementById("files-move-folder").disabled = locked || !state.filesPath || Boolean(state.filesPick);
+  document.getElementById("files-replace").disabled = locked || selected.length !== 1;
+  document.getElementById("files-delete").disabled = locked || !selected.length;
+  moveHere.disabled = locked;
+  renderShell();
+}
+
+/**
+ * Build one folder row.
+ *
+ * @param {{name: string, kind: string, path: string, in_library?: boolean}} entry Directory entry.
+ * @returns {HTMLDivElement} The row.
+ */
+function fileRow(entry) {
+  const row = document.createElement("div");
+  row.className = "files-row";
+  if (entry.kind === "dir") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "files-open";
+    button.textContent = entry.name;
+    button.setAttribute("aria-label", `Open ${entry.name}`);
+    button.addEventListener("click", () => {
+      loadFolder(entry.path).catch((error) => failFiles(error));
+    });
+    row.append(button);
+    return row;
+  }
+  if (entry.kind !== "file") {
+    const label = document.createElement("span");
+    label.className = "files-kind";
+    label.textContent = `${entry.name} (shortcut)`;
+    row.append(label);
+    return row;
+  }
+  const label = document.createElement("label");
+  label.className = "files-file";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = state.filesSelected.has(entry.path);
+  box.addEventListener("change", () => {
+    if (box.checked) state.filesSelected.add(entry.path);
+    else state.filesSelected.delete(entry.path);
+    renderFiles();
+  });
+  const name = document.createElement("span");
+  name.textContent = entry.name;
+  label.append(box, name);
+  if (entry.in_library) {
+    const badge = document.createElement("span");
+    badge.className = "files-badge";
+    badge.textContent = "In library";
+    label.append(badge);
+  }
+  row.append(label);
+  return row;
+}
+
+/**
+ * Return the selected files that are still in this folder.
+ *
+ * @returns {object[]} Selected file entries.
+ */
+function selectedFiles() {
+  return state.filesEntries.filter((entry) => entry.kind === "file" && state.filesSelected.has(entry.path));
+}
+
+/**
+ * Open the review dialog for one file action.
+ *
+ * Delete and a chosen move load the preview immediately. Rename and
+ * replace wait until Review, because those need a typed value. Cancel
+ * is focused for a delete.
+ *
+ * @param {string} action File action.
+ * @param {HTMLElement|null} trigger Control that opened the dialog.
+ * @returns {void}
+ */
+function openFilesDialog(action, trigger) {
+  filesAction = action;
+  filesPreview = null;
+  filesTrigger = trigger;
+  document.getElementById("files-name-label").hidden = action !== "rename";
+  document.getElementById("files-replace-label").hidden = action !== "replace";
+  document.getElementById("files-summary").textContent = "";
+  document.getElementById("files-warning").textContent = "";
+  document.getElementById("files-dialog-status").textContent = "";
+  document.getElementById("files-changes").replaceChildren();
+  const selected = selectedFiles();
+  if (action === "rename" && selected.length === 1) filesName.value = selected[0].name;
+  if (action === "replace") filesReplacement.value = "";
+  const confirm = document.getElementById("files-confirm");
+  confirm.classList.toggle("danger", action === "delete");
+  confirm.textContent = action === "delete" ? "Move to Trash" : "Confirm";
+  syncFilesDialog();
+  filesDialog.showModal();
+  if (action === "delete" || action === "move" || action === "move_folder") {
+    document.getElementById("files-cancel").focus();
+    reviewFiles().catch((error) => {
+      document.getElementById("files-dialog-status").textContent = error.message;
+    });
+  } else if (action === "rename") filesName.focus();
+  else filesReplacement.focus();
+}
+
+/**
+ * Enable confirm only after a preview that can be saved.
+ *
+ * @returns {void}
+ */
+function syncFilesDialog() {
+  const confirm = document.getElementById("files-confirm");
+  const review = document.getElementById("files-review");
+  const ready = Boolean(filesPreview?.ok && state.writable && filesPreview.needs_confirm);
+  confirm.disabled = !ready;
+  review.hidden = filesAction === "delete" || filesAction === "move" || filesAction === "move_folder";
+  if (!state.writable) {
+    document.getElementById("files-dialog-status").textContent = statusLine.textContent;
+  }
+}
+
+/**
+ * Ask for a preview and paint the paths that would change.
+ *
+ * The response is 200 even when the save would be refused. ok false
+ * keeps Confirm disabled and shows the refusal.
+ *
+ * @returns {Promise<void>}
+ */
+async function reviewFiles() {
+  const body = filesBody(false);
+  document.getElementById("files-dialog-status").textContent = "Checking what will change.";
+  const payload = await postJSON("/api/files", body);
+  filesPreview = payload;
+  document.getElementById("files-summary").textContent = payload.summary || "";
+  document.getElementById("files-warning").textContent = payload.warning || "";
+  document.getElementById("files-dialog-status").textContent = payload.ok ? "" : (payload.error || "That change was not saved.");
+  const list = document.getElementById("files-changes");
+  list.replaceChildren();
+  for (const change of payload.changes || []) {
+    const item = document.createElement("li");
+    const crates = Array.isArray(change.crates) && change.crates.length ? ` Crates: ${change.crates.join(", ")}.` : "";
+    const effect = change.effect === "trash" ? "Trash" : change.to;
+    item.textContent = `${change.from} → ${effect}${crates}`;
+    list.append(item);
+  }
+  if (payload.more) {
+    const more = document.createElement("li");
+    more.textContent = `And ${payload.more} more.`;
+    list.append(more);
+  }
+  if (payload.serato) applyStatus(payload.serato);
+  syncFilesDialog();
+}
+
+/**
+ * Build the JSON body for the current file action.
+ *
+ * @param {boolean} confirm True only after the person confirms the preview.
+ * @returns {object} Request body for POST /api/files.
+ */
+function filesBody(confirm) {
+  const body = { action: filesAction };
+  if (confirm) body.confirm = true;
+  if (filesAction === "rename") {
+    const selected = selectedFiles();
+    body.path = selected[0]?.path || state.filesPickPaths[0];
+    body.name = filesName.value;
+  } else if (filesAction === "move") {
+    body.paths = state.filesPickPaths.length ? [...state.filesPickPaths] : selectedFiles().map((entry) => entry.path);
+    body.destination = state.filesPath;
+  } else if (filesAction === "move_folder") {
+    body.path = state.filesPickSource || state.filesPath;
+    body.destination = state.filesPath;
+  } else if (filesAction === "replace") {
+    const selected = selectedFiles();
+    body.path = selected[0]?.path || "";
+    body.replacement = filesReplacement.value.trim();
+  } else if (filesAction === "delete") {
+    body.paths = selectedFiles().map((entry) => entry.path);
+  }
+  return body;
+}
+
+/**
+ * Close the file dialog and return focus to the control that opened it.
+ *
+ * @returns {void}
+ */
+function closeFilesDialog() {
+  const trigger = filesTrigger;
+  filesTrigger = null;
+  if (filesDialog.open) filesDialog.close();
+  if (trigger instanceof HTMLElement) trigger.focus();
+}
+
+/**
+ * Save a confirmed file change and reload the folder and the library.
+ *
+ * @returns {Promise<void>}
+ */
+async function confirmFiles() {
+  if (!filesPreview?.ok || !state.writable) return;
+  const confirm = document.getElementById("files-confirm");
+  confirm.disabled = true;
+  document.getElementById("files-dialog-status").textContent = "Saving.";
+  try {
+    const payload = await postJSON("/api/files", filesBody(true));
+    if (payload.serato) applyStatus(payload.serato);
+    closeFilesDialog();
+    state.filesPick = null;
+    state.filesPickPaths = [];
+    state.filesPickSource = "";
+    state.filesMessage = payload.summary || "The files were updated.";
+    if (payload.warning) state.filesMessage = `${state.filesMessage} ${payload.warning}`;
+    await loadFolder(payload.browse || state.filesPath || "", { keepMessage: true });
+    await loadLibrary();
+    state.filesMessage = state.filesMessage;
+    renderFiles();
+  } catch (error) {
+    if (error.status === 409) lockDown(error);
+    document.getElementById("files-dialog-status").textContent = error.message;
+    confirm.disabled = false;
+  }
+}
+
+document.getElementById("files-up").addEventListener("click", () => {
+  if (state.filesParent) loadFolder(state.filesParent).catch((error) => failFiles(error));
+});
+
+document.getElementById("files-refresh").addEventListener("click", () => {
+  loadFolder(state.filesPath || "").catch((error) => failFiles(error));
+});
+
+document.getElementById("files-rename").addEventListener("click", (event) => {
+  if (selectedFiles().length !== 1) {
+    state.filesError = "Choose one file to rename.";
+    renderFiles();
+    return;
+  }
+  openFilesDialog("rename", event.currentTarget);
+});
+
+document.getElementById("files-move").addEventListener("click", () => {
+  const selected = selectedFiles();
+  if (!selected.length) {
+    state.filesError = "Choose files to move.";
+    renderFiles();
+    return;
+  }
+  state.filesPick = "move";
+  state.filesPickPaths = selected.map((entry) => entry.path);
+  state.filesError = "";
+  state.filesMessage = "Choose the destination folder. Then confirm the move.";
+  renderFiles();
+});
+
+document.getElementById("files-move-folder").addEventListener("click", () => {
+  state.filesPick = "move_folder";
+  state.filesPickSource = state.filesPath;
+  state.filesError = "";
+  state.filesMessage = "Choose the destination folder. Then confirm the move.";
+  renderFiles();
+});
+
+document.getElementById("files-move-here").addEventListener("click", (event) => {
+  openFilesDialog(state.filesPick === "move_folder" ? "move_folder" : "move", event.currentTarget);
+});
+
+document.getElementById("files-pick-cancel").addEventListener("click", () => {
+  state.filesPick = null;
+  state.filesPickPaths = [];
+  state.filesPickSource = "";
+  state.filesMessage = "";
+  renderFiles();
+});
+
+document.getElementById("files-replace").addEventListener("click", (event) => {
+  if (selectedFiles().length !== 1) {
+    state.filesError = "Choose one file to replace.";
+    renderFiles();
+    return;
+  }
+  openFilesDialog("replace", event.currentTarget);
+});
+
+document.getElementById("files-delete").addEventListener("click", (event) => {
+  if (!selectedFiles().length) {
+    state.filesError = "Choose files to delete.";
+    renderFiles();
+    return;
+  }
+  openFilesDialog("delete", event.currentTarget);
+});
+
+document.getElementById("files-review").addEventListener("click", () => {
+  reviewFiles().catch((error) => {
+    document.getElementById("files-dialog-status").textContent = error.message;
+  });
+});
+
+document.getElementById("files-confirm").addEventListener("click", () => {
+  confirmFiles().catch((error) => {
+    document.getElementById("files-dialog-status").textContent = error.message;
+  });
+});
+
+document.getElementById("files-cancel").addEventListener("click", () => closeFilesDialog());
+
+filesName.addEventListener("input", () => {
+  filesPreview = null;
+  syncFilesDialog();
+});
+
+filesReplacement.addEventListener("input", () => {
+  filesPreview = null;
+  syncFilesDialog();
+});
+
+filesDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeFilesDialog();
 });
 
 loadLibrary().catch(showFailure);

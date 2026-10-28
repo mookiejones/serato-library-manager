@@ -73,7 +73,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, `related.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `files.py`, `related.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -89,7 +89,7 @@ When `SERATO_LIBRARY_SMOKE` is an absolute file path, `smoke_check` runs first a
 
 A GET path under `/api/` runs a query. Any other GET path is a file in `static/`. The request is joined to that directory and passed through `os.path.realpath`. It is served only when the result starts with the directory plus a separator and the result is a file. `index.html` answers `/` and an empty path. Anything else returns 404.
 
-`load_library` caches one payload per space. The cache key is the size and modification time of `master.sqlite` and its WAL file. A cache miss can record `library_scanned` with a track-count bucket. A POST takes a process lock, drops that cache, then writes. Settings and log routes are answered before that lock.
+`load_library` caches one payload per space. The cache key is the size and modification time of `master.sqlite` and its WAL file. A cache miss can record `library_scanned` with a track-count bucket. A POST takes a process lock, drops that cache, then writes. Settings and log routes are answered before that lock. `serve` calls `files.recover_interrupted` after the database is known to exist. A journal that cannot be repaired is logged. The server still starts.
 
 The HTTP banner is `SeratoLibrary/1.0`. A release tag does not change that banner. The app version is `app_config.APP_VERSION` (`0.1.1`). `__version__` is that same string. Sentry's release and PostHog's `app_version` read the constant.
 
@@ -149,15 +149,33 @@ Suggestions rank other tracks in the space by Camelot key (same, relative, or on
 
 ### `tags.py`
 
-`read_serato_tags` reads. It does not write audio. It scans the first 2,000,000 bytes and, for a longer file, the last 512,000 bytes. It collects ID3 GEOB frames named `Serato Markers2` and `Serato BeatGrid`.
+`read_serato_tags` reads. It scans the first 2,000,000 bytes and, for a longer file, the last 512,000 bytes. It collects ID3 GEOB frames named `Serato Markers2` and `Serato BeatGrid`. Reading a file does not rewrite it.
+
+`plan_serato_geob` and `copy_serato_geob` copy those Serato frames onto another file only when that is safe. A plain ID3v2.3 tag can take the frames. An `.mp3` with no tag can take a new ID3v2.3 tag in front of the existing bytes. Other frames are kept as raw bytes. The audio after the tag is streamed unchanged. A destination that already has Serato frames is left alone. A source with none is skipped. Unsynchronisation, an extended header, a compressed or encrypted Serato frame, a tag larger than 16 MB, and FLAC, RIFF, AIFF, Ogg, or MP4 containers are refused. The destination is not modified in those cases. The copy writes a temporary file beside the destination and replaces it only after the audio bytes still match.
 
 Markers2 is base64 after a `01 01` header. Each entry is `CUE`, `LOOP`, or `FLIP`. A cue has index, start in milliseconds, color, and name. A loop adds end time and a locked flag. A flip has index, enabled, and name. Duplicate merge uses this read to decide whether to warn. It does not write a GEOB frame.
 
 BeatGrid version byte `1` yields markers. Each marker has a position in seconds. The last marker stores BPM. Earlier markers store a beat count. More than 4096 markers, or a payload shorter than the declared marker count, returns an empty list.
 
+### `files.py`
+
+`files.py` renames a file, moves files, moves a folder, points a library track at a replacement file, and moves a file to the Trash. Crates, history, and Prepare stay attached because every stored path that resolves to the old file is rewritten. Cue points travel inside the audio file. A replacement copies them with `tags.copy_serato_geob` when that is safe, and the result says so when it is not. The old file stays on disk.
+
+`list_directory` lists one folder without following shortcuts. An empty path lists the home directory. A request path is normalized and must be absolute on its own drive before the folder is opened. `plan` runs the same path checks as a save and returns a preview. It does not copy the database and it does not repair an interrupted journal. The preview says when Serato is open. `execute` requires `confirm` to be the boolean true. It refuses while Serato is open, copies the database, writes `Library/Backups/file-ops-journal.json`, changes the files, then updates `master.sqlite` and the attached location databases in one transaction. A database failure puts the files back. A filesystem failure rolls the database back and puts back the files that already moved. `recover_interrupted` finishes or undoes a journal the next time a save starts, and when the server starts. It does that only while Serato is quit. A journal that matches only some rows is left in place and the next save is refused until the backup in `Library/Backups` is restored.
+
+Path columns are `portable_id`, `video_portable_id`, `file_path`, `filepath`, `path`, and names that end in `_path` or `_portable_id`. `file_name` is updated on the row whose portable id moved. History keeps its play. A rename or a move that changes the basename updates `history_entry.file_name`. A delete removes the asset from the library and its crates and sets `history_entry.asset_id` to null when that column allows it. The same delete is applied to the mirrored asset by `external_id`.
+
+A file name cannot contain a slash, a backslash, or a null, and it cannot be `.` or `..`. The resolved parent must be the destination folder. Shortcuts are refused, including a shortcut whose name would pass the character check. `master.sqlite`, its sidecars, `root.sqlite`, and anything inside `Library/Backups` are refused. A sibling such as `Library/Backups-extra` is not inside that folder. The library directory, its parents, the home directory, and a filesystem root cannot be moved as a folder. A folder cannot be moved into itself. A name collision refuses the whole batch. A missing file cannot be renamed or moved on its own. A folder move still updates stored paths for missing files inside it. Deleting a missing library file removes the row and does not invent a trash entry.
+
+Cross-drive moves copy the file and remove the source only after the sizes match. A cross-drive folder becomes one copy per file, recorded in the journal before the copies start. The operating-system Trash is used for a delete: Finder's Trash on macOS, the Recycle Bin on Windows (`FOF_ALLOWUNDO`), and the FreeDesktop trash elsewhere. `SERATO_LIBRARY_TRASH`, when it is an absolute path, receives the file instead so a test does not touch the real Trash. On Windows, a failed database commit restores the file from a safety copy. The Recycle Bin can still hold its own copy.
+
+`files_changed` is recorded after a successful save. The properties are a file-count bucket, `change` (`rename`, `move`, `move_folder`, `replace`, or `delete`), and, for a replacement, `cues` (`copied`, `kept`, `skipped`, `unsupported`, or `failed`). Paths and names are not properties. A `change` or `cues` value outside those sets drops the event.
+
+After the database commit, each moved file is passed to `library.update_related_path`, including files inside a moved folder that are not library rows. A related-track path that already belongs to another track is reported as a warning. The file move is not undone.
+
 ### `static/`
 
-`index.html` is one screen. The rail holds the status line, the space menu, and five views: Crates, History, Missing, Duplicates, and Stems. Crate tools search, sort, create, and import an M3U. The sheet holds the track search, the virtualized list, and the detail pane.
+`index.html` is one screen. The rail holds the status line, the space menu, and six views: Crates, History, Missing, Duplicates, Stems, and Files. Crate tools search, sort, create, and import an M3U. The sheet holds the track search, the virtualized list, and the detail pane. Files replaces that sheet with a folder list. Rename, move, replace, and delete open a dialog that previews the paths, crate names, and cue warning. Nothing is written until Confirm. Delete's confirm button is Move to Trash. Move asks for a destination folder first. Writes stay disabled while Serato is open.
 
 `app.js` keeps library state in `state`. The list paints only the rows inside the scroll window. Row height is 36 pixels. Track sort keys include name, artist, album, BPM, key, and the other columns the header exposes. Crate sort is custom order, name, or date added.
 
@@ -175,7 +193,7 @@ The rail ends with Settings. The first launch opens a dialog whose heading is "S
 
 Keys are read from the environment first, then from `_build_config.py`. The committed file sets `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` to empty strings. `scripts/write_build_config.py` overwrites that file for a release build. `POSTHOG_HOST` falls back to `https://us.i.posthog.com`. The script prints `yes` or `no`. It does not print the value.
 
-The events are `app_opened` (once per process after consent), `library_scanned`, `crate_created` (a created crate, or a crate created by an M3U import), `backup_made`, `tags_read`, `related_link_saved`, `related_link_removed`, `related_crate_written`, and `duplicates_merged` (a confirmed merge, not a preview). Properties this process adds are `app` (`serato-library-manager`), `app_version` (the same `app_config.APP_VERSION` string Sentry uses as its release), `os`, for a scan, `track_count_bucket`, and for `related_link_saved`, `link_direction` (`one_way` or `two_way`). Buckets are `0`, `1-9`, `10-49`, `50-99`, `100-499`, `500-999`, `1000-4999`, `5000-9999`, and `10000+`. The exact count is not sent. `duplicates_merged` has no extra properties: no kept id, no removed count, no title, and no path. The PostHog client may also attach its Python and library version fields. A before-send hook drops any other property, including a title or a path, and drops the event if consent is no longer granted. GeoIP is disabled. Feature-flag polling and exception autocapture are off.
+The events are `app_opened` (once per process after consent), `library_scanned`, `crate_created` (a created crate, or a crate created by an M3U import), `backup_made`, `tags_read`, `files_changed`, `related_link_saved`, `related_link_removed`, `related_crate_written`, and `duplicates_merged` (a confirmed merge, not a preview). Properties this process adds are `app` (`serato-library-manager`), `app_version` (the same `app_config.APP_VERSION` string Sentry uses as its release), `os`, for a scan, `track_count_bucket`, for `files_changed`, `file_count_bucket`, `change`, and sometimes `cues`, and for `related_link_saved`, `link_direction` (`one_way` or `two_way`). Buckets are `0`, `1-9`, `10-49`, `50-99`, `100-499`, `500-999`, `1000-4999`, `5000-9999`, and `10000+`. The exact count is not sent. Paths and file names are not sent. `duplicates_merged` has no extra properties: no kept id, no removed count, no title, and no path. The PostHog client may also attach its Python and library version fields. A before-send hook drops any other property, including a title or a path, and drops the event if consent is no longer granted or if `change`, `cues`, or `link_direction` is not one of the allowed words. GeoIP is disabled. Feature-flag polling and exception autocapture are off.
 
 Sentry uses `server_name` `local`, environment `local`, release `app_config.APP_VERSION` (`0.1.1`), and the tag `app=serato-library-manager`. `send_default_pii` is false. Local variables, source context, and request bodies are off. Argv and logging integrations are disabled. Framework auto-enabling is off. `before_send` returns `None` when consent is off. Otherwise it removes request data, frame variables, and absolute paths. A path becomes `[path]`. A final component ending in `.py` is kept as the file name.
 
@@ -195,6 +213,8 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | GET | `/api/history` | none | `{ "sessions": [...] }` |
 | GET | `/api/history` | `session` | One session and its entries |
 | GET | `/api/duplicates` | `space` | Groups, plus `count` |
+| GET | `/api/files` | `path` | One folder. An empty path lists the home directory. Shortcuts are not followed |
+| POST | `/api/files` | `action`, paths, and `confirm` | A preview when `confirm` is not the boolean true. A save when it is |
 | GET | `/api/related` | `path`, optional `space`, `title`, `artist`, `length_ms` | Saved links and suggestions. See [related-tracks.md](related-tracks.md) |
 | POST | `/api/duplicates/merge` | `keep_id`, `space`, `preview`, `confirm`, `delete_files`, `confirm_delete_files` | Plan. `preview` true does not write. A merge needs `confirm` true. Moving files also needs `confirm_delete_files` true |
 | GET | `/api/export.m3u` | `space`, `crate` | M3U file `crate.m3u`. `crate=all` exports the space |
@@ -240,4 +260,6 @@ end
 3. Confirm the status line says edits save to the library.
 4. Leave the audio file in place. Cue data stays in the file.
 
-A full ID3 rewrite from another program can drop Markers2 and BeatGrid. This program does not rewrite those frames.
+A full ID3 rewrite from another program can drop Markers2 and BeatGrid. This program copies those Serato frames only in the cases `tags.py` allows, and only while replacing one library file with another. A rename or a move leaves the audio bytes to travel with the file.
+
+File saves use the same Serato-open check and the same backup as a track edit. The preview does not take that backup. The confirm step writes a journal, changes the files, then commits `master.sqlite` and the attached location databases together. On Windows, a delete that reaches the Recycle Bin before a failed commit is restored from the safety copy. The Recycle Bin may still hold a copy.
