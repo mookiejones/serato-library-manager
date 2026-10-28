@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -775,6 +776,46 @@ def format_bits(value: object) -> str:
     return f"{number} (bits {', '.join(bits)})"
 
 
+def format_beat_position(value: object) -> str:
+    """Format a beatgrid position for the track panel.
+
+    Serato stores the position as a binary float. Printed in full it looks
+    like ``1.2300000190734863``. The panel shows milliseconds. The Rekordbox
+    export does not use this string. It divides by the stored float.
+
+    Args:
+        value: Position in seconds.
+
+    Returns:
+        Three decimal places, or an empty string when the value is not a
+        finite number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    number = float(value)
+    if not math.isfinite(number):
+        return ""
+    return f"{number:.3f}"
+
+
+def display_beatgrid(markers: object) -> list[dict[str, object]]:
+    """Copy beatgrid markers with positions rounded for the track panel.
+
+    Args:
+        markers: Beatgrid list from ``markers_for``.
+
+    Returns:
+        Marker dicts whose ``position`` is a three-decimal seconds string.
+        The export reads the audio file itself and does not use this copy.
+    """
+    shown: list[dict[str, object]] = []
+    for marker in as_dicts(markers):
+        copy = dict(marker)
+        copy["position"] = format_beat_position(marker.get("position"))
+        shown.append(copy)
+    return shown
+
+
 def format_bpm(value: object) -> str:
     """Format a BPM value.
 
@@ -1124,6 +1165,8 @@ def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | N
 
     Returns:
         The detail payload, or None when the track is not in the space.
+        Beatgrid positions in that payload are three-decimal strings for
+        the panel. The export does not read them.
 
     Raises:
         LibraryError: If the space name is not allowed.
@@ -1313,7 +1356,7 @@ def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | N
         "cues": markers["cues"],
         "loops": markers["loops"],
         "flips": markers["flips"],
-        "beatgrid": markers["beatgrid"],
+        "beatgrid": display_beatgrid(markers["beatgrid"]),
         "markers_found": markers["found"],
         "markers_unavailable": markers["unavailable"],
         "serato": as_dict(_library_call("status")),

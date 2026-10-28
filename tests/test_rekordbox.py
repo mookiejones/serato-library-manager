@@ -18,6 +18,7 @@ from xml.etree import ElementTree
 import app_config
 import library
 import rekordbox
+import server
 import tags
 from library import LibraryError
 from tests.fixture import ROOT, TempLibrary, open_database
@@ -764,6 +765,7 @@ class ExportTests(unittest.TestCase):
             stats={},
             unicode_names=[],
             unreadable_names=[],
+            invalid_names=[],
             folder_cache={},
         )
         assert element is not None
@@ -1366,6 +1368,7 @@ class RoundTripChecklistTests(unittest.TestCase):
             stats=stats,
             unicode_names=names,
             unreadable_names=[],
+            invalid_names=[],
             folder_cache={},
         )
         self.assertIsNone(skipped)
@@ -1502,6 +1505,173 @@ class RoundTripChecklistTests(unittest.TestCase):
         )
         self.assertEqual([item["Battito"] for item in tempos], ["1", "3"])
         self.assertEqual(tempos[0]["Bpm"], "120.00")
+
+    def test_a_nan_beatgrid_marker_is_skipped_and_counted(self) -> None:
+        """Skip a non-finite marker instead of aborting the export.
+
+        The first marker is NaN. The marker at 1 second is still a TEMPO.
+        Infinity is left out too. A file that stores the same NaN marker
+        still produces XML, and the loss report counts the skip.
+
+        Returns:
+            None. The test fails if tempo_entries raises or the count is missing.
+        """
+        stats: dict[str, int] = {}
+        entries = rekordbox.tempo_entries(
+            [
+                {"position": float("nan"), "beats": 4},
+                {"position": 1.0, "bpm": 120.0},
+            ],
+            stats=stats,
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["Bpm"], "120.00")
+        self.assertEqual(rekordbox.position_ms(entries[0]["Inizio"]), 1000)
+        self.assertEqual(stats["grid_nonfinite"], 1)
+        inf_stats: dict[str, int] = {}
+        self.assertEqual(
+            rekordbox.tempo_entries([{"position": float("inf"), "bpm": 120.0}], stats=inf_stats),
+            [],
+        )
+        self.assertEqual(inf_stats["grid_nonfinite"], 1)
+        report = rekordbox._loss_report({"grid_nonfinite": 1}, True, False, "asis")
+        self.assertIn("not a real number", " ".join(report))
+        with TempLibrary() as temp:
+            audio = temp.root / "nan-grid.wav"
+            _id3(audio, [_geob("Serato BeatGrid", _beatgrid([(float("nan"), 4), (1.0, 120.0)]))])
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'nan-grid.wav', name = 'Nan grid' WHERE id = 1",
+                    (str(audio),),
+                )
+            xml, exported = rekordbox.export_rekordbox("Serato Library", None)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            grid = next(track for track in tracks if track["name"] == "Nan grid")
+            tempos = grid["tempos"]
+            assert isinstance(tempos, list)
+            self.assertEqual(len(tempos), 1)
+            self.assertEqual(tempos[0]["Bpm"], "120.00")
+            names = {track["name"] for track in tracks}
+            self.assertIn("Same", names)
+            self.assertIn("not a real number", " ".join(exported))
+
+    def test_aac_and_m4a_kinds_differ(self) -> None:
+        """Label a raw AAC file and an M4A file with their own Kind values.
+
+        ``.aac`` is not an M4A container. ``.m4a`` stays ``M4A File``.
+        The labels are the Kind attributes in the XML.
+
+        Returns:
+            None. The test fails if either file is given the other label.
+        """
+        self.assertEqual(rekordbox._kind("/music/song.aac", {}), "AAC File")
+        self.assertEqual(rekordbox._kind("/music/song.m4a", {}), "M4A File")
+        self.assertEqual(rekordbox._kind(r"C:\music\SONG.AAC", {}), "AAC File")
+        with TempLibrary() as temp:
+            aac = str(temp.root / "song.aac")
+            m4a = str(temp.root / "song.m4a")
+            with open_database(temp.db) as conn:
+                conn.execute("DELETE FROM space_asset")
+                conn.execute("DELETE FROM asset")
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                    VALUES
+                        (1, 'Raw', 'DJ', ?, 'song.aac', 1),
+                        (2, 'Wrapped', 'DJ', ?, 'song.m4a', 1)
+                    """,
+                    (aac, m4a),
+                )
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (1, 1)")
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (2, 1)")
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            kinds = {item.get("Name"): item.get("Kind") for item in collection.findall("TRACK")}
+            self.assertEqual(kinds["Raw"], "AAC File")
+            self.assertEqual(kinds["Wrapped"], "M4A File")
+
+    def test_a_null_in_the_path_is_a_missing_file(self) -> None:
+        """Export the rest of the library when one path contains a NUL.
+
+        ``Path.is_file`` raises ``ValueError`` on some Python versions and
+        returns false on others. The track stays in the XML without cue
+        points, the loss report names it, and a warning is logged.
+
+        Returns:
+            None. The test fails if the export raises or the other track is omitted.
+        """
+        with TempLibrary() as temp:
+            stored = str(temp.root / "null-song.mp3").replace("null-song.mp3", "null-\x00song.mp3")
+            self.assertIn("\x00", stored)
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                    VALUES (8, 'Null song', 'DJ', ?, 'null-song.mp3', 1)
+                    """,
+                    (stored,),
+                )
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (8, 1)")
+            with self.assertLogs("serato", level="WARNING") as caught:
+                xml, report = rekordbox.export_rekordbox("Serato Library", None)
+            text = " ".join(report)
+            self.assertIn("null character", text)
+            self.assertIn("missing file", text)
+            self.assertIn("null-", text)
+            self.assertIn("song.mp3", text)
+            self.assertIn("null character", " ".join(caught.output))
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            names = {item.get("Name") for item in collection.findall("TRACK")}
+            self.assertIn("Null song", names)
+            self.assertIn("Same", names)
+            null_track = next(item for item in collection.findall("TRACK") if item.get("Name") == "Null song")
+            self.assertEqual(list(null_track), [])
+
+    def test_display_rounds_a_beatgrid_position_and_the_export_does_not(self) -> None:
+        """Round a beatgrid position on the track panel only.
+
+        The stored float is slightly longer than three decimals. The panel
+        payload uses the millisecond string. The export BPM still divides
+        by the stored float, so it does not match the rounded span.
+
+        Returns:
+            None. The test fails if the panel shows the long float or the BPM uses the rounded span.
+        """
+        payload = bytes([1, 0]) + (2).to_bytes(4, "big")
+        payload += struct.pack(">f", 0.0) + (4).to_bytes(4, "big")
+        payload += struct.pack(">f", 2.0004) + struct.pack(">f", 100.0)
+        with TempLibrary() as temp:
+            audio = temp.root / "long-grid.wav"
+            _id3(audio, [_geob("Serato BeatGrid", payload)])
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'long-grid.wav' WHERE id = 1",
+                    (str(audio),),
+                )
+            detail = server.load_track(1)
+            assert detail is not None
+            grid = detail["beatgrid"]
+            assert isinstance(grid, list)
+            self.assertEqual(len(grid), 2)
+            shown = grid[1]["position"]
+            self.assertIsInstance(shown, str)
+            markers = tags.read_serato_tags(audio)["beatgrid"]
+            end = float(markers[1]["position"])
+            self.assertEqual(shown, f"{end:.3f}")
+            self.assertNotEqual(shown, f"{end:.16f}")
+            self.assertNotIn("00000", str(shown))
+            entries = rekordbox.tempo_entries(markers)
+            full = f"{(4 * 60.0 / end):.2f}"
+            rounded = f"{(4 * 60.0 / round(end, 3)):.2f}"
+            self.assertNotEqual(full, rounded)
+            self.assertEqual(entries[0]["Bpm"], full)
+            self.assertNotEqual(entries[0]["Bpm"], rounded)
 
 
 class ParseTests(unittest.TestCase):
