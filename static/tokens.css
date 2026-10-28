@@ -9,8 +9,9 @@
 
   --color-safe-text and --color-warn-text are the text colors on
   manila (--color-card) and on --color-safe-bg / --color-warn-bg.
-  --color-safe and --color-warn are borders, fills, and icons only.
-  --color-safe-border is the safe color. --color-safe-on-dark and
+  --color-safe and --color-warn are borders, fills, and icons on manila.
+  --color-safe-border is the safe color. A warn border or icon on
+  --color-warn-bg uses --color-warn-border. --color-safe-on-dark and
   --color-warn-on-dark are the text colors on walnut (--color-bg).
 
   Radius tokens are the design scale: 8, 12, and 14. The page keeps its
@@ -49,6 +50,7 @@
   --color-safe-border: #3f7d4e;
   --color-warn: #b7791f;
   --color-warn-text: #7f5417;
+  --color-warn-border: #7f5417;
   --color-warn-on-dark: #e0a83a;
   --color-warn-bg: #f5e6c8;
 
@@ -70,8 +72,8 @@
   --space-6: 32px;
 }
 
-/* Preview of the three meanings. Text uses the -text tokens. Borders
-   use the safe and warn colors. */
+/* Preview of the three meanings. Text uses the -text tokens. The warn
+   border on the warn tint uses --color-warn-border. */
 .pill-preview {
   display: inline-flex;
   align-items: center;
@@ -86,7 +88,7 @@
 }
 
 .pill-preview.warn {
-  border-color: var(--color-warn);
+  border-color: var(--color-warn-border);
   background: var(--color-warn-bg);
   color: var(--color-warn-text);
 }

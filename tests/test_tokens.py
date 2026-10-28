@@ -34,14 +34,14 @@ TEXT_PAIRS = (
     ("warn-on-dark on walnut", "--color-warn-on-dark", "--color-bg", 8.07),
 )
 
-# Borders, fills, and icons need 3:1. Warn on its tint is under that bar.
+# Borders, fills, and icons need 3:1. Warn on the tint uses the border token.
 NON_TEXT_PAIRS = (
     ("safe on manila", "--color-safe", "--color-card", 4.20),
     ("safe on safe-bg", "--color-safe", "--color-safe-bg", 4.13),
     ("safe-border on manila", "--color-safe-border", "--color-card", 4.20),
     ("safe-border on safe-bg", "--color-safe-border", "--color-safe-bg", 4.13),
     ("warn on manila", "--color-warn", "--color-card", 3.10),
-    ("warn on warn-bg", "--color-warn", "--color-warn-bg", 2.95),
+    ("warn-border on warn-bg", "--color-warn-border", "--color-warn-bg", 5.35),
 )
 
 
@@ -218,29 +218,23 @@ class ContrastTests(unittest.TestCase):
     def test_non_text_pairs_clear_ui_contrast(self) -> None:
         """Require 3:1 for borders, fills, and icons.
 
-        Safe and the safe border use ``#3f7d4e``. They clear 3:1 on
-        manila and on the safe tint. Warn clears 3:1 on manila. Warn
-        on the warn tint is 2.95:1, which misses 3:1. That miss stays
-        in the result so a border on the tint cannot pass unnoticed.
+        Safe and the safe border use ``#3f7d4e``. Warn on manila stays
+        ``#b7791f``. A warn border or icon on the warn tint uses
+        ``--color-warn-border`` (``#7f5417``). Every pair clears 3:1.
 
         Returns:
-            None. The test fails if a passing pair drops under 3:1 or
-            the warn-tint ratio changes.
+            None. The test fails if a non-text pair drops under 3:1.
         """
         self.assertEqual(self.colors["--color-safe"], "#3f7d4e")
         self.assertEqual(self.colors["--color-safe-border"], "#3f7d4e")
         self.assertEqual(self.colors["--color-warn"], "#b7791f")
+        self.assertEqual(self.colors["--color-warn-border"], "#7f5417")
         self.assertEqual(self.colors["--color-safe-text"], "#356a41")
         self.assertEqual(self.colors["--color-warn-text"], "#7f5417")
-        under = []
         for label, foreground, background, expected in NON_TEXT_PAIRS:
             ratio = round(contrast(self.colors[foreground], self.colors[background]), 2)
             self.assertEqual(ratio, expected, label)
-            if ratio < 3:
-                under.append((label, ratio))
-            else:
-                self.assertGreaterEqual(ratio, 3, label)
-        self.assertEqual(under, [("warn on warn-bg", 2.95)])
+            self.assertGreaterEqual(ratio, 3, label)
         text_colors = [
             line.split(":", 1)[1].strip().rstrip(";")
             for line in self.sheet.splitlines()
