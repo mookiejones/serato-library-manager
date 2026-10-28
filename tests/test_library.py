@@ -11,6 +11,7 @@ from typing import cast
 from unittest import mock
 
 import library
+import snapshots
 from library import LibraryError, SeratoOpen
 from tests.fixture import TempLibrary, open_database
 
@@ -985,6 +986,9 @@ class MergeTests(unittest.TestCase):
         directory as inside the library and refuse the move. The file must
         land in the trash files directory with a ``.trashinfo`` record, and
         the kept file must stay. ``os.unlink`` is not used on the audio.
+        The platform patch is only for the trash layout. Process detection
+        stays clear, because a missing ``ps`` on Windows would otherwise
+        count as Serato DJ still running.
 
         Returns:
             None. The test fails if the file is unlinked or left in place.
@@ -1021,6 +1025,7 @@ class MergeTests(unittest.TestCase):
                     mock.patch("library.sys.platform", "linux"),
                     mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg)}),
                     mock.patch("os.unlink", guard),
+                    mock.patch("snapshots.serato_dj_running", return_value=False),
                 ):
                     result = library.merge_duplicates(
                         {
