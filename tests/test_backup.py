@@ -406,7 +406,7 @@ class BackupTests(unittest.TestCase):
             legacy = parent / "serato-web-20190101-000000"
             legacy.mkdir()
             healthy = legacy / "master.sqlite"
-            with sqlite3.connect(healthy) as conn:
+            with open_database(healthy) as conn:
                 conn.execute("CREATE TABLE asset (id INTEGER PRIMARY KEY, name TEXT)")
                 conn.execute("INSERT INTO asset VALUES (1, 'kept')")
             corrupt = parent / "serato-web-20190101-000001"
