@@ -4,7 +4,8 @@
  * Loads crates, history, missing tracks, duplicates, stems, and files from
  * the local server on 127.0.0.1 port 8765. Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
- * /api/duplicates/merge. File moves, renames, replacements, and deletes
+ * /api/duplicates/merge. Rekordbox export is GET /api/export.rekordbox.xml.
+ * File moves, renames, replacements, and deletes
  * use /api/files. A preview is shown before confirm. Related tracks use
  * /api/related. The track list is virtualized: only rows near the scroll
  * window are in the DOM. Sharing settings and local logs use
@@ -2497,7 +2498,8 @@ function setMode(mode) {
 
 // Wire the page controls. These listeners call the functions above; they
 // do not open the database themselves. Export builds a download URL for
-// GET /api/export.m3u. Import reads a local file and posts its text.
+// GET /api/export.m3u. Rekordbox builds one for GET /api/export.rekordbox.xml.
+// Import reads a local file and posts its text.
 search.addEventListener("input", () => {
   state.query = search.value;
   list.scrollTop = 0;
@@ -2521,6 +2523,14 @@ document.getElementById("export-m3u").addEventListener("click", () => {
   const link = document.createElement("a");
   link.href = `/api/export.m3u?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`;
   link.download = "crate.m3u";
+  link.click();
+});
+
+document.getElementById("export-rekordbox").addEventListener("click", () => {
+  const crate = state.mode === "crates" ? state.activeCrate : "all";
+  const link = document.createElement("a");
+  link.href = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`;
+  link.download = "rekordbox.xml";
   link.click();
 });
 

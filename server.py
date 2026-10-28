@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 import app_log
 import files
 import library
+import rekordbox
 import related
 import telemetry
 
@@ -1306,8 +1307,8 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a GET request.
 
         Settings and logs are answered before the library routes. Library,
-        status, track, history, duplicate, file, related-track, and M3U paths
-        return data. Every other path is a file under static/.
+        status, track, history, duplicate, file, related-track, M3U, and
+        rekordbox XML paths return data. Every other path is a file under static/.
         """
         try:
             self._do_GET()
@@ -1317,8 +1318,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Library, status, track, history, duplicate, file, and M3U paths return
-        data. Every other path is a file under static/.
+        Library, status, track, history, duplicate, file, M3U, and rekordbox XML
+        paths return data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1379,6 +1380,21 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header(
                     "Content-Disposition", "attachment; filename=crate.m3u"
+                )
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if parsed.path == "/api/export.rekordbox.xml":
+                space = require_space(query_text(query, "space"))
+                raw_crate = query_text(query, "crate", "all") or "all"
+                crate_id = None if raw_crate in {"", "all"} else int(raw_crate)
+                body = rekordbox.export_rekordbox(space, crate_id).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/xml; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header(
+                    "Content-Disposition", "attachment; filename=rekordbox.xml"
                 )
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()

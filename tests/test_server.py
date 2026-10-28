@@ -12,6 +12,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 from http.server import ThreadingHTTPServer
+from xml.etree import ElementTree
 
 import server
 from server import blank, format_bpm, format_bool, format_color, format_when, require_space
@@ -129,7 +130,7 @@ class ApiTests(unittest.TestCase):
             status = exc.code
             exc.close()
         route = path.split("?", 1)[0]
-        if route.endswith(".m3u") or route == "/":
+        if route.endswith(".m3u") or route.endswith(".xml") or route == "/":
             return status, body.decode("utf-8")
         return status, json.loads(body.decode("utf-8"))
 
@@ -239,6 +240,19 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("#EXTM3U", playlist)
         self.assertIn("same-a.mp3", playlist)
+        request = urllib.request.Request(self.base + "/api/export.rekordbox.xml?crate=all")
+        with urllib.request.urlopen(request) as response:
+            body = response.read()
+            self.assertEqual(response.status, 200)
+            self.assertIn("application/xml", response.headers.get("Content-Type", ""))
+            self.assertIn("rekordbox.xml", response.headers.get("Content-Disposition", ""))
+        root = ElementTree.fromstring(body)
+        self.assertEqual(root.tag, "DJ_PLAYLISTS")
+        names = {track.get("Name") for track in root.find("COLLECTION").findall("TRACK")}
+        self.assertIn("Same", names)
+        status, missing = self.request("/api/export.rekordbox.xml?crate=999")
+        self.assertEqual(status, 404)
+        self.assertIn("not in this space", missing)
 
     def test_merge_preview_and_confirm(self) -> None:
         """Preview a duplicate merge, then confirm it over HTTP.

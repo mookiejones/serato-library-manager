@@ -52,6 +52,7 @@ Container(page, "static/", "HTML, CSS, JavaScript", "Crate tree, track list, and
 Container(server, "server.py", "Python HTTP server", "JSON API on 127.0.0.1 port 8765")
 Container(library, "library.py", "Python", "Reads and writes the Serato SQLite schema")
 Container(tags, "tags.py", "Python", "Reads cue, loop, flip, and beatgrid frames")
+Container(rekordbox, "rekordbox.py", "Python", "Writes DJ_PLAYLISTS XML")
 Container(related, "related.py", "Python", "Saved links and key, BPM, and crate suggestions")
 ContainerDb(master, "master.sqlite", "SQLite", "Library Serato displays")
 ContainerDb(root, "root.sqlite", "SQLite", "On-disk location database")
@@ -61,7 +62,10 @@ Container(audio, "Audio file", "ID3 GEOB", "Markers2 and BeatGrid frames")
 Rel(dj, page, "Uses")
 Rel(page, server, "HTTP", "127.0.0.1:8765")
 Rel(server, library, "Calls")
+Rel(server, rekordbox, "Calls")
 Rel(server, related, "Calls")
+Rel(rekordbox, library, "Reads tracks and crates")
+Rel(rekordbox, tags, "Reads markers")
 Rel(server, page, "Serves files")
 Rel(library, master, "Reads and writes")
 Rel(library, root, "Mirrors a write")
@@ -73,7 +77,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, `files.py`, `related.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `files.py`, `related.py`, `rekordbox.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -157,6 +161,20 @@ Markers2 is base64 after a `01 01` header. Each entry is `CUE`, `LOOP`, or `FLIP
 
 BeatGrid version byte `1` yields markers. Each marker has a position in seconds. The last marker stores BPM. Earlier markers store a beat count. More than 4096 markers, or a payload shorter than the declared marker count, returns an empty list.
 
+### `rekordbox.py`
+
+`export_rekordbox` writes a Rekordbox `DJ_PLAYLISTS` document for one space. `crate_id` None exports every track in the space and every crate. A crate id exports that crate and its subcrates, and the collection is the tracks in that tree. The space root (container type `0`) is not a playlist. A crate with subcrates becomes a folder (`NODE Type="0"`). Its own tracks are a playlist of the same name inside that folder. A crate with no subcrates is a playlist (`NODE Type="1"`). Playlist order follows `list_order`. A track in two crates is one `COLLECTION` entry and two playlist references. `TrackID` is the asset id.
+
+A track with no `portable_id` is omitted. `Location` is a `file://localhost` URI. A macOS path stays absolute (`file://localhost/Users/...`). A Windows path uses a forward-slash drive (`file://localhost/C:/Users/...`). Spaces, `#`, and other reserved characters are percent-encoded as UTF-8. The drive colon is not encoded. A colon later in the name is encoded. A UNC path keeps the double slash (`file://localhost//server/share/...`).
+
+`Name`, `Artist`, `Album`, `Genre`, `AverageBpm`, `Tonality`, `TotalTime`, `BitRate`, and `Comments` come from the asset row. `TotalTime` is whole seconds from `length_ms`. `BitRate` is `file_bit_rate` in bits per second, written as kilobits per second. `AverageBpm` uses the library BPM. When that value is empty and the beatgrid has a BPM, the beatgrid BPM is used. Rating is Serato's 0-to-1 value written on rekordbox's 0-to-255 scale.
+
+Cues and loops come from `tags.read_serato_tags`. Each cue is a `POSITION_MARK` with `Type="0"`. Each loop is `Type="1"` and has `End`. `Start` and `End` are seconds. `Num` is the Serato index when it is 0 through 7, and `-1` otherwise. `Red`, `Green`, and `Blue` come from the marker color. A marker with no color is white. Flips are not written. The beatgrid is `TEMPO` entries. An earlier marker's BPM is the beat count times 60 divided by the seconds until the next marker. The last marker's BPM is the BPM stored on that marker. `Inizio` is the marker position in seconds. `Metro` is `4/4` and `Battito` is `1`. A segment with no positive span uses the last marker's BPM. A beatgrid that cannot yield a positive BPM is omitted. The export does not write the audio file or the database, and it does not record `tags_read`.
+
+`parse_rekordbox` reads that XML back into tracks, tempo, position marks, and the playlist tree. `python3 rekordbox.py -o rekordbox.xml` writes the file. `--space` selects the space. `--crate` is a crate id or `all`. The command refuses to write `master.sqlite` or `root.sqlite`.
+
+Device Library Plus and OneLibrary USB drives are not written. Rekordbox imports the file from Preferences, Advanced, rekordbox xml.
+
 ### `files.py`
 
 `files.py` renames a file, moves files, moves a folder, points a library track at a replacement file, and moves a file to the Trash. Crates, history, and Prepare stay attached because every stored path that resolves to the old file is rewritten. Cue points travel inside the audio file. A replacement copies them with `tags.copy_serato_geob` when that is safe, and the result says so when it is not. The old file stays on disk.
@@ -175,7 +193,7 @@ After the database commit, each moved file is passed to `library.update_related_
 
 ### `static/`
 
-`index.html` is one screen. The rail holds the status line, the space menu, and six views: Crates, History, Missing, Duplicates, Stems, and Files. Crate tools search, sort, create, and import an M3U. The sheet holds the track search, the virtualized list, and the detail pane. Files replaces that sheet with a folder list. Rename, move, replace, and delete open a dialog that previews the paths, crate names, and cue warning. Nothing is written until Confirm. Delete's confirm button is Move to Trash. Move asks for a destination folder first. Writes stay disabled while Serato is open.
+`index.html` is one screen. The rail holds the status line, the space menu, and six views: Crates, History, Missing, Duplicates, Stems, and Files. Crate tools search, sort, create, and import an M3U. **Export** downloads an M3U. **Rekordbox** downloads `rekordbox.xml` for the selected crate, including its subcrates, or for the whole space when All tracks is selected. The sheet holds the track search, the virtualized list, and the detail pane. Files replaces that sheet with a folder list. Rename, move, replace, and delete open a dialog that previews the paths, crate names, and cue warning. Nothing is written until Confirm. Delete's confirm button is Move to Trash. Move asks for a destination folder first. Writes stay disabled while Serato is open.
 
 `app.js` keeps library state in `state`. The list paints only the rows inside the scroll window. Row height is 36 pixels. Track sort keys include name, artist, album, BPM, key, and the other columns the header exposes. Crate sort is custom order, name, or date added.
 
@@ -218,6 +236,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | GET | `/api/related` | `path`, optional `space`, `title`, `artist`, `length_ms` | Saved links and suggestions. See [related-tracks.md](related-tracks.md) |
 | POST | `/api/duplicates/merge` | `keep_id`, `space`, `preview`, `confirm`, `delete_files`, `confirm_delete_files` | Plan. `preview` true does not write. A merge needs `confirm` true. Moving files also needs `confirm_delete_files` true |
 | GET | `/api/export.m3u` | `space`, `crate` | M3U file `crate.m3u`. `crate=all` exports the space |
+| GET | `/api/export.rekordbox.xml` | `space`, `crate` | `rekordbox.xml`. `crate=all` exports the space and its crates. A crate id exports that crate and its subcrates |
 | POST | `/api/track` | `id`, `space`, `fields` | Saves track fields |
 | POST | `/api/crate` | `action` plus ids and fields | Crate or membership change |
 | POST | `/api/import.m3u` | `space`, `parent`, `name`, `text` | New crate from playlist text |
