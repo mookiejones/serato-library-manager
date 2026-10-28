@@ -447,6 +447,31 @@ def _related_end(
     return raw_path, raw_title, raw_artist, length
 
 
+def crate_query(raw: str) -> int | None:
+    """Parse a crate query value.
+
+    Args:
+        raw: The crate parameter. ``all`` and an empty string mean the whole space.
+
+    Returns:
+        The crate id, or None for the whole space.
+
+    Raises:
+        library.LibraryError: If the value is not a crate id. The status is 400.
+            A number that does not fit in a SQLite integer is rejected here so
+            the database does not answer with an overflow.
+    """
+    if raw in {"", "all"}:
+        return None
+    try:
+        crate_id = int(raw, 10)
+    except (TypeError, ValueError, OverflowError):
+        raise library.LibraryError("That request is not valid.", 400) from None
+    if crate_id < 0 or crate_id > 2**63 - 1:
+        raise library.LibraryError("That request is not valid.", 400)
+    return crate_id
+
+
 def query_text(
     query: dict[str, list[str]], key: str, default: str | None = None
 ) -> str | None:
@@ -1373,7 +1398,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/export.m3u":
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
-                crate_id = None if raw_crate in {"", "all"} else int(raw_crate)
+                crate_id = crate_query(raw_crate)
                 body = library.export_m3u(space, crate_id).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/x-mpegurl; charset=utf-8")
@@ -1388,7 +1413,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/export.rekordbox.xml":
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
-                crate_id = None if raw_crate in {"", "all"} else int(raw_crate)
+                crate_id = crate_query(raw_crate)
                 memory = (query_text(query, "memory", "1") or "1").lower() not in {"0", "false", "no"}
                 hot_loops = (query_text(query, "hot_loops", "0") or "0").lower() in {"1", "true", "yes"}
                 key_notation = query_text(query, "key", "asis") or "asis"
@@ -1400,7 +1425,7 @@ class Handler(BaseHTTPRequestHandler):
                     key_notation=key_notation,
                 )
                 if (query_text(query, "report", "") or "") == "1":
-                    self.send_json({"xml": xml_text, "report": report, "filename": "rekordbox.xml"})
+                    self.send_json({"report": report, "filename": "rekordbox.xml"})
                     return
                 body = xml_text.encode("utf-8")
                 self.send_response(200)
@@ -1416,7 +1441,7 @@ class Handler(BaseHTTPRequestHandler):
         except library.LibraryError as exc:
             self.send_json({"error": exc.message}, status=exc.status)
             return
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             self.send_json({"error": "That request is not valid."}, status=400)
             return
         self.send_file(parsed.path)

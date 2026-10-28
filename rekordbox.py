@@ -112,7 +112,6 @@ _KINDS = {
     ".mp4": "M4A File",
     ".aac": "M4A File",
     ".ogg": "OGG File",
-    ".alac": "ALAC File",
 }
 
 
@@ -191,6 +190,8 @@ def position_marks(
     hot_slots = {cue["index"] for cue in parsed["cues"] if 0 <= cue["index"] <= 7}
     _note(stats, "flips", len(parsed["flips"]))
     for cue in parsed["cues"]:
+        if len(cue["name"]) > 20:
+            _note(stats, "long_cue_names")
         start, clamped = _shift_time(cue["start_ms"], shift_ms)
         _note(stats, "clamped", 1 if clamped else 0)
         if 0 <= cue["index"] <= 7:
@@ -202,6 +203,8 @@ def position_marks(
             marks.append(_mark(cue["name"], "0", start, None, -1, cue["color"]))
             _note(stats, "memory_only")
     for loop in parsed["loops"]:
+        if len(loop["name"]) > 20:
+            _note(stats, "long_cue_names")
         start, start_clamped = _shift_time(loop["start_ms"], shift_ms)
         end, end_clamped = _shift_time(loop["end_ms"], shift_ms)
         _note(stats, "clamped", int(start_clamped) + int(end_clamped))
@@ -260,10 +263,13 @@ def tempo_entries(
         if bpm is not None and math.isfinite(bpm) and bpm > 0:
             inizio_ms, clamped = _shift_time(int(round(float(marker["position"]) * 1000)), shift_ms)
             _note(stats, "clamped", 1 if clamped else 0)
+            shown = f"{bpm:.2f}"
+            if abs(bpm - float(shown)) > 0.0001:
+                _note(stats, "bpm_rounded")
             entries.append(
                 {
                     "Inizio": _seconds(inizio_ms),
-                    "Bpm": f"{bpm:.2f}",
+                    "Bpm": shown,
                     "Metro": "4/4",
                     "Battito": str((beats_before % 4) + 1),
                 }
@@ -310,7 +316,7 @@ def export_rekordbox(
         raise library.LibraryError("That space is not available here.")
     with closing(library.read_conn()) as conn:
         if crate_id is not None:
-            chosen = library._container(conn, crate_id, space)
+            chosen = library.container_in_space(conn, crate_id, space)
             if int(chosen["type"]) == 0:
                 crate_id = None
         crates = _load_crates(conn, space)
@@ -321,7 +327,7 @@ def export_rekordbox(
             selected = {crate["id"] for crate in crates}
             roots = [crate for crate in crates if _is_top(crate, root_id, selected)]
         else:
-            selected = set(library._descendant_ids(conn, crate_id))
+            selected = set(library.descendant_ids(conn, crate_id))
             roots = [crate for crate in crates if crate["id"] == crate_id]
             wanted: set[int] = set()
             for crate in selected:
@@ -330,6 +336,8 @@ def export_rekordbox(
     present: set[int] = set()
     track_elements: list[ElementTree.Element] = []
     stats: dict[str, int] = {}
+    unicode_names: list[str] = []
+    folder_cache: dict[str, dict[str, str]] = {}
     for row in tracks:
         element = _track_element(
             row,
@@ -337,9 +345,10 @@ def export_rekordbox(
             hot_loops=hot_loops,
             key_notation=key_notation,
             stats=stats,
+            unicode_names=unicode_names,
+            folder_cache=folder_cache,
         )
         if element is None:
-            _note(stats, "omitted")
             continue
         track_elements.append(element)
         present.add(int(row["id"]))
@@ -366,7 +375,7 @@ def export_rekordbox(
     document.append(playlists)
     body = ElementTree.tostring(document, encoding="unicode")
     xml_text = '<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n"
-    return xml_text, _loss_report(stats, memory_cues, hot_loops, key_notation)
+    return xml_text, _loss_report(stats, memory_cues, hot_loops, key_notation, unicode_names)
 
 
 def parse_rekordbox(xml_text: str) -> dict[str, object]:
@@ -565,40 +574,38 @@ def position_ms(text: str) -> int:
     return int((Decimal(text) * 1000).to_integral_value(rounding=ROUND_HALF_UP))
 
 
-def filesystem_path(path: str) -> str:
+def filesystem_path(path: str, cache: dict[str, dict[str, str]] | None = None) -> str:
     """Return the path spelling the filesystem uses for one file.
 
     Rekordbox matches Location by the exact string. macOS stores names in
     NFD, so a Serato path in NFC is rewritten to the directory entry when
     that file is on disk. A missing file keeps the stored spelling.
+    ``cache`` stores one directory listing per folder so a crate of many
+    files in the same folder is not listed once per track.
 
     Args:
         path: Absolute or relative filesystem path.
+        cache: Optional map from a parent path to names found in that folder.
+            None lists the folder on every call.
 
     Returns:
         The directory entry's path when one name matches under NFC, otherwise ``path``.
     """
     candidate = Path(path)
     parent = candidate.parent
-    if not parent.is_dir():
-        return path
-    wanted = unicodedata.normalize("NFC", candidate.name)
-    exact = None
-    folded = None
-    try:
-        entries = list(parent.iterdir())
-    except OSError:
-        return path
-    for entry in entries:
-        if entry.name == candidate.name:
-            exact = entry
-            break
-        if unicodedata.normalize("NFC", entry.name) == wanted:
-            folded = entry
-    chosen = exact or folded
-    if chosen is None:
-        return path
-    return str(chosen)
+    key = str(parent)
+    listing = None if cache is None else cache.get(key)
+    if listing is None:
+        listing = _folder_index(parent)
+        if cache is not None:
+            cache[key] = listing
+    exact = listing.get("\n" + candidate.name)
+    if exact is not None:
+        return exact
+    folded = listing.get(unicodedata.normalize("NFC", candidate.name))
+    if folded is not None:
+        return folded
+    return path
 
 
 def mp3_timing(path: str) -> tuple[str, int]:
@@ -623,19 +630,147 @@ def mp3_timing(path: str) -> tuple[str, int]:
         return "skip", 0
     try:
         with Path(path).open("rb") as handle:
-            blob = handle.read(512_000)
+            return _mp3_timing_handle(handle)
     except OSError:
         return "unread", 0
-    frame_at = _mpeg_frame_at(blob)
+
+
+def _folder_index(parent: Path) -> dict[str, str]:
+    """Index one folder by exact name and by NFC name.
+
+    Args:
+        parent: Directory to list. A missing directory yields an empty index.
+
+    Returns:
+        Map keys are ``\\n`` plus the exact name, or the NFC name. Values are paths.
+    """
+    found: dict[str, str] = {}
+    if not parent.is_dir():
+        return found
+    try:
+        entries = list(parent.iterdir())
+    except OSError:
+        return found
+    for entry in entries:
+        found.setdefault("\n" + entry.name, str(entry))
+        found.setdefault(unicodedata.normalize("NFC", entry.name), str(entry))
+    return found
+
+
+def _mp3_timing_handle(handle: object) -> tuple[str, int]:
+    """Classify an open MP3 from the frame that follows its ID3 tag.
+
+    Args:
+        handle: A binary file positioned anywhere. It is seeked to the start.
+
+    Returns:
+        The same pair ``mp3_timing`` returns.
+    """
+    window = _mp3_header_window(handle)
+    frame_at = _mpeg_frame_at(window)
     if frame_at is None:
         return "unread", 0
-    header = _mpeg_header(blob[frame_at:frame_at + 4])
+    header = _mpeg_header(window[frame_at:frame_at + 4])
     if header is None:
         return "unread", 0
     xing_at = frame_at + header
-    if xing_at + 8 > len(blob) or blob[xing_at:xing_at + 4] not in {b"Xing", b"Info"}:
+    if xing_at + 8 > len(window) or window[xing_at:xing_at + 4] not in {b"Xing", b"Info"}:
         return "A", 0
-    return _xing_case(blob, frame_at, xing_at)
+    return _xing_case(window, frame_at, xing_at)
+
+
+def _mp3_header_window(handle: object) -> bytes:
+    """Read the first MPEG frame after an ID3 tag.
+
+    The tag size is the synchsafe length in the ID3 header. A footer flag
+    adds ten more bytes. About 4 KB after that point holds the Xing or
+    Info header, even when the tag itself is a megabyte of artwork.
+
+    Args:
+        handle: A binary file. It must support seek and read.
+
+    Returns:
+        The bytes at the start of the audio, or an empty string when the
+        header cannot be read.
+    """
+    reader = cast("object", handle)
+    seek = getattr(reader, "seek")
+    read = getattr(reader, "read")
+    seek(0)
+    header = read(10)
+    start = 0
+    if isinstance(header, bytes) and len(header) >= 10 and header[:3] == b"ID3":
+        size = 0
+        for byte in header[6:10]:
+            size = (size << 7) | (byte & 0x7F)
+        footer = 10 if header[5] & 0x10 else 0
+        start = 10 + size + footer
+    seek(start)
+    chunk = read(4096)
+    return chunk if isinstance(chunk, bytes) else b""
+
+
+def _inspect_audio(path: str, on_disk: bool) -> tuple[tags.SeratoTags, tuple[str, int]]:
+    """Read Serato tags and the MP3 timing case in one open.
+
+    Args:
+        path: Filesystem path.
+        on_disk: False skips the open and returns an empty tag result.
+
+    Returns:
+        Parsed tags, and the MP3 timing pair. A file that is not an MP3
+        is ``skip`` with a shift of 0.
+    """
+    if not on_disk:
+        return tags.serato_tags_from_regions(b""), ("skip", 0)
+    file = Path(path)
+    size = file.stat().st_size
+    with file.open("rb") as handle:
+        head = handle.read(min(size, 2_000_000))
+        tail = b""
+        if size > 2_000_000:
+            handle.seek(max(0, size - 512_000))
+            tail = handle.read(512_000)
+        timing = ("skip", 0)
+        if file.suffix.lower() == ".mp3":
+            timing = _mp3_timing_handle(handle)
+    return tags.serato_tags_from_regions(head, tail), timing
+
+
+def _file_label(portable: str) -> str:
+    """Return a file name that can be printed when the path will not encode.
+
+    Args:
+        portable: Stored path, which may contain a lone surrogate.
+
+    Returns:
+        The last path segment, with characters that cannot be encoded replaced.
+    """
+    text = portable.replace("\\", "/")
+    name = text.rsplit("/", 1)[-1]
+    safe = name.encode("utf-8", "replace").decode("utf-8")
+    return safe or "a track"
+
+
+def _track_colour(value: object) -> str | None:
+    """Format a Serato track color for the Rekordbox Colour attribute.
+
+    Args:
+        value: Integer color from the asset row, or None. White is Serato's
+            empty color and is not written.
+
+    Returns:
+        ``#RRGGBB``, or None when there is no color.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        color = int(cast(int, value))
+    except (TypeError, ValueError):
+        return None
+    if color < 0 or color > 0xFFFFFF or color == 0xFFFFFF:
+        return None
+    return f"#{color:06X}"
 
 
 def notation_key(stored: str, notation: str) -> tuple[str, str]:
@@ -846,6 +981,7 @@ def _loss_report(
     memory_cues: bool,
     hot_loops: bool,
     key_notation: str,
+    unicode_names: Sequence[str] = (),
 ) -> list[str]:
     """Build the lines that say what this export cannot carry into Rekordbox.
 
@@ -854,6 +990,7 @@ def _loss_report(
         memory_cues: Whether hot cues were duplicated as memory cues.
         hot_loops: Whether loops were allowed onto free hot cue pads.
         key_notation: The key notation that was requested.
+        unicode_names: File names whose paths could not be encoded.
 
     Returns:
         One sentence per line. The import warning is always first.
@@ -872,8 +1009,15 @@ def _loss_report(
     flips = stats.get("flips", 0)
     if flips:
         lines.append(f"{flips} flips were left out. Rekordbox has no flip markers.")
-    if stats.get("colored"):
+    if stats.get("marks_written"):
         lines.append("Cue colors are written as red, green, and blue. Rekordbox may snap them to its palette.")
+    long_names = stats.get("long_cue_names", 0)
+    if long_names:
+        lines.append(
+            f"{long_names} cue names are longer than 20 characters. A CDJ shows only the start of the name."
+        )
+    else:
+        lines.append("A CDJ shows only about the first 20 characters of a cue name.")
     if memory_cues and stats.get("memory_cues"):
         lines.append(f"{stats['memory_cues']} hot cues were also written as memory cues.")
     elif not memory_cues:
@@ -908,8 +1052,20 @@ def _loss_report(
     if stats.get("grid_dynamic"):
         lines.append(
             f"{stats['grid_dynamic']} tracks have a beatgrid with more than one marker. "
-            "Each marker is a TEMPO entry. The first marker is treated as a downbeat."
+            "Each marker is a TEMPO entry. The first marker is treated as a downbeat. "
+            "If it is not a downbeat, the bars in Rekordbox are shifted."
         )
+    if stats.get("bpm_rounded") or stats.get("grid_dynamic"):
+        lines.append("TEMPO BPM values are written to two decimal places, so a grid can drift.")
+    if unicode_names:
+        shown = ", ".join(unicode_names[:20])
+        extra = f" and {len(unicode_names) - 20} more" if len(unicode_names) > 20 else ""
+        lines.append(
+            f"{len(unicode_names)} tracks had a path that could not be encoded and were left out: {shown}{extra}."
+        )
+    lines.append("Track color is written as Colour when Serato has one. Rekordbox may ignore it.")
+    lines.append("Beatgrid lock, replay gain, overview waveforms, stems, and play history are not copied.")
+    lines.append("Smart crates are ordinary playlists in this file. Their rules are not copied.")
     if key_notation == "asis":
         lines.append("Musical key is the text Serato stores. It was not translated between Camelot and classical.")
     elif key_notation == "camelot":
@@ -1176,14 +1332,18 @@ def _date_added(value: object) -> str:
 
 
 def _rating(value: object) -> str:
-    """Map Serato's 0-to-1 rating onto rekordbox's 0-to-255 rating.
+    """Map Serato's 0-to-1 rating onto a Rekordbox star step.
+
+    Rekordbox stores stars as 0, 51, 102, 153, 204, or 255. The Serato
+    value is split into those six steps.
 
     Args:
         value: Stored rating, or None.
 
     Returns:
-        A whole number from 0 to 255.
+        One of 0, 51, 102, 153, 204, or 255.
     """
+    steps = (0, 51, 102, 153, 204, 255)
     if value is None or value == "":
         return "0"
     try:
@@ -1192,9 +1352,10 @@ def _rating(value: object) -> str:
         return "0"
     if not math.isfinite(number) or number <= 0:
         return "0"
-    if number > 1:
-        number = 1.0
-    return str(int(round(number * 255)))
+    if number >= 1:
+        return "255"
+    index = min(5, int(number * 5 + 0.5))
+    return str(steps[index])
 
 
 def _whole(value: object) -> str:
@@ -1359,6 +1520,8 @@ def _track_element(
     hot_loops: bool,
     key_notation: str,
     stats: MutableMapping[str, int],
+    unicode_names: list[str],
+    folder_cache: dict[str, dict[str, str]],
 ) -> ElementTree.Element | None:
     """Build one TRACK element, including tempo and position marks.
 
@@ -1368,28 +1531,33 @@ def _track_element(
         hot_loops: True puts a saved loop on a free hot cue pad.
         key_notation: ``asis``, ``camelot``, or ``classical``.
         stats: Loss-report counters for this export.
+        unicode_names: File names whose paths could not be encoded.
+        folder_cache: Directory listings shared by every track in this export.
 
     Returns:
-        The element, or None when the track has no path.
+        The element, or None when the track has no path or the path cannot be encoded.
     """
     portable = _cell(row, "portable_id")
     if not isinstance(portable, str) or not portable.strip():
+        _note(stats, "omitted")
         return None
-    resolved = library._resolved(portable)
-    if not resolved:
-        return None
-    on_disk = Path(resolved).is_file()
-    spelled = filesystem_path(resolved) if on_disk else resolved
-    if not on_disk:
-        _note(stats, "missing_file")
     try:
+        resolved = library.resolved_path(portable)
+        if not resolved:
+            _note(stats, "omitted")
+            return None
+        on_disk = Path(resolved).is_file()
+        spelled = filesystem_path(resolved, folder_cache) if on_disk else resolved
+        if not on_disk:
+            _note(stats, "missing_file")
         location = location_uri(spelled)
+        parsed, timing = _inspect_audio(spelled if on_disk else resolved, on_disk)
     except UnicodeError:
+        unicode_names.append(_file_label(portable))
         return None
-    parsed = tags.read_serato_tags(spelled if on_disk else resolved)
     shift = 0
     if on_disk and Path(spelled).suffix.lower() == ".mp3":
-        case, shift = mp3_timing(spelled)
+        case, shift = timing
         if case in {"B", "C"}:
             _note(stats, "mp3_shift")
         elif case in {"A", "D"}:
@@ -1443,7 +1611,10 @@ def _track_element(
         stats=stats,
     )
     if marks:
-        _note(stats, "colored")
+        _note(stats, "marks_written", len(marks))
+    colour = _track_colour(_cell(row, "color"))
+    if colour:
+        element.set("Colour", colour)
     for mark in marks:
         element.append(ElementTree.Element("POSITION_MARK", mark))
     return element

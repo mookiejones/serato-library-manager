@@ -729,6 +729,11 @@ class ExportTests(unittest.TestCase):
         self.assertIn("rekordbox.xml", script)
         self.assertIn("#export-rekordbox", style)
         self.assertIn('id="rekordbox-memory"', html)
+        self.assertIn('id="rekordbox-dialog"', html)
+        self.assertIn('id="rekordbox-report"', html)
+        self.assertIn("showModal", script)
+        self.assertIn('createElement("li")', script)
+        self.assertNotIn("revokeObjectURL", script)
         self.assertIn("report=1", script)
         self.assertIn("Preferences", guide)
         self.assertIn("rekordbox xml", guide)
@@ -1031,6 +1036,8 @@ class RoundTripChecklistTests(unittest.TestCase):
             self.assertIn("could not be read", " ".join(report))
             self.assertIn("more than one marker", " ".join(report))
             self.assertIn("downbeat", " ".join(report))
+            self.assertIn("bars in Rekordbox are shifted", " ".join(report))
+            self.assertIn("two decimal places", " ".join(report))
 
     def test_key_notation_and_filesystem_spelling(self) -> None:
         """Convert a known key, and use the directory entry's Unicode form.
@@ -1077,6 +1084,142 @@ class RoundTripChecklistTests(unittest.TestCase):
         self.assertEqual(stats["clamped"], 1)
         self.assertEqual(marks[0]["Num"], "1")
         self.assertEqual(marks[0]["Red"], "1")
+
+    def test_large_id3_tag_still_finds_the_lame_header(self) -> None:
+        """Seek past a 1 MB ID3 tag, including its footer, before reading the frame.
+
+        A read of the first 512 KB would stop inside the tag and miss the
+        Info header.
+
+        Returns:
+            None. The test fails if the file is not classified as case D.
+        """
+        frame = _lame_frame(b"LAME3.100")
+        body = b"\x00" * 1_000_000
+        flags = 0x10
+        size = bytes(
+            (
+                (len(body) >> 21) & 0x7F,
+                (len(body) >> 14) & 0x7F,
+                (len(body) >> 7) & 0x7F,
+                len(body) & 0x7F,
+            )
+        )
+        header = b"ID3" + bytes([4, 0, flags]) + size
+        footer = b"3DI" + bytes([4, 0, flags]) + size
+        with TempLibrary() as temp:
+            path = temp.root / "large-tag.mp3"
+            path.write_bytes(header + body + footer + frame)
+            self.assertEqual(rekordbox.mp3_timing(str(path)), ("D", 0))
+
+    def test_folder_listing_is_reused_and_an_mp3_is_opened_once(self) -> None:
+        """List a folder once for two files, and open an MP3 once per export.
+
+        Returns:
+            None. The test fails if the folder is listed again or the file is opened twice.
+        """
+        from unittest.mock import patch
+
+        with TempLibrary() as temp:
+            folder = temp.root / "batch"
+            folder.mkdir()
+            (folder / "a.wav").write_bytes(b"a")
+            (folder / "b.wav").write_bytes(b"b")
+            cache: dict[str, dict[str, str]] = {}
+            calls = 0
+            original = Path.iterdir
+
+            def wrapped(self: Path):
+                nonlocal calls
+                if self == folder:
+                    calls += 1
+                return original(self)
+
+            with patch.object(Path, "iterdir", wrapped):
+                self.assertEqual(Path(rekordbox.filesystem_path(str(folder / "a.wav"), cache)).name, "a.wav")
+                self.assertEqual(Path(rekordbox.filesystem_path(str(folder / "b.wav"), cache)).name, "b.wav")
+            self.assertEqual(calls, 1)
+            audio = temp.root / "once.mp3"
+            _write_audio(audio, _cue_payload([(0, 1000, b"\xCC\x00\x00", "Hit")]), _lame_frame(b"LAME3.100"))
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'once.mp3' WHERE id = 1",
+                    (str(audio),),
+                )
+            opens = 0
+            real_open = Path.open
+
+            def counting(self: Path, *args: object, **kwargs: object):
+                nonlocal opens
+                if self.suffix.lower() == ".mp3":
+                    opens += 1
+                return real_open(self, *args, **kwargs)
+
+            with patch.object(Path, "open", counting):
+                rekordbox.export_rekordbox("Serato Library", None, memory_cues=False)
+            self.assertEqual(opens, 1)
+
+    def test_unencodable_path_is_named_and_rating_uses_star_steps(self) -> None:
+        """Count a path that cannot be encoded apart from a missing path.
+
+        Rating 0.5 is the middle Rekordbox step, 153. A real track color is
+        written as Colour. A non-integer segment BPM is rounded to two decimals.
+
+        Returns:
+            None. The test fails if the file name is missing or the rating step is wrong.
+        """
+        self.assertEqual(rekordbox._rating(0.5), "153")
+        self.assertEqual(rekordbox._rating(1), "255")
+        self.assertEqual(rekordbox._rating(0), "0")
+        rounded: dict[str, int] = {}
+        tempos = rekordbox.tempo_entries(
+            [
+                {"position": 0.0, "beats": 1},
+                {"position": 0.47, "bpm": 120.0},
+            ],
+            stats=rounded,
+        )
+        self.assertEqual(tempos[0]["Bpm"], "127.66")
+        self.assertGreater(rounded["bpm_rounded"], 0)
+        report = rekordbox._loss_report(
+            {"bpm_rounded": 1, "grid_dynamic": 1, "long_cue_names": 2},
+            True,
+            False,
+            "asis",
+            ["drop\ufffd.mp3"],
+        )
+        text = " ".join(report)
+        self.assertIn("two decimal places", text)
+        self.assertIn("bars in Rekordbox are shifted", text)
+        self.assertIn("drop\ufffd.mp3", text)
+        self.assertIn("could not be encoded", text)
+        self.assertIn("Beatgrid lock", text)
+        self.assertIn("Smart crates", text)
+        self.assertIn("20 characters", text)
+        stats: dict[str, int] = {}
+        names: list[str] = []
+        skipped = rekordbox._track_element(
+            {"id": 8, "portable_id": "Music/drop\udcff.mp3", "name": "Odd", "color": 0xCC0000, "rating": 0.5},
+            memory_cues=False,
+            hot_loops=False,
+            key_notation="asis",
+            stats=stats,
+            unicode_names=names,
+            folder_cache={},
+        )
+        self.assertIsNone(skipped)
+        self.assertEqual(stats.get("omitted", 0), 0)
+        self.assertIn("drop", names[0])
+        with TempLibrary() as temp:
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET color = ?, rating = 0.5 WHERE id = 1", (0xCC0000,))
+            xml, _exported = rekordbox.export_rekordbox("Serato Library", None)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            colored = next(item for item in collection.findall("TRACK") if item.get("TrackID") == "1")
+            self.assertEqual(colored.get("Colour"), "#CC0000")
+            self.assertEqual(colored.get("Rating"), "153")
 
 
 class ParseTests(unittest.TestCase):

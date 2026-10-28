@@ -37,7 +37,7 @@ Import matches a line to a track that is already in the library. Put the audio i
 2. Select the crate to export. Select **All tracks** to export the whole space.
 3. Click **Rekordbox**.
 
-The browser downloads `rekordbox.xml` and the bar lists what could not be copied across. In History, Missing, Duplicates, or Stems, **Rekordbox** uses the whole current space.
+**Rekordbox** opens a dialog that lists what could not be copied. The file downloads after you confirm. In History, Missing, Duplicates, or Stems, **Rekordbox** uses the whole current space.
 
 **Memory cues** is on until you clear it. Each hot cue is then also saved as a memory cue, which is what some CDJ screens show. **Key as stored** leaves the key text Serato has. Choose **Camelot key** or **Classical key** when Rekordbox is set to the other notation.
 

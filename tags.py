@@ -137,6 +137,22 @@ def read_serato_tags(path: str | None) -> SeratoTags:
     except OSError:
         return empty
 
+    return serato_tags_from_regions(head, tail)
+
+
+def serato_tags_from_regions(head: bytes, tail: bytes = b"") -> SeratoTags:
+    """Parse Serato frames from bytes already read from a file.
+
+    ``read_serato_tags`` uses this after it has opened the file. An export
+    can open the file once, keep those bytes, and parse them here.
+
+    Args:
+        head: The first bytes of the file.
+        tail: The last bytes. Used when an ID3 tag sits at the end of a WAV.
+
+    Returns:
+        The same dict ``read_serato_tags`` returns.
+    """
     frames = _geob_frames(head) + _geob_frames(tail)
     cues: list[Cue] = []
     loops: list[Loop] = []

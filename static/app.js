@@ -2526,27 +2526,66 @@ document.getElementById("export-m3u").addEventListener("click", () => {
   link.click();
 });
 
-document.getElementById("export-rekordbox").addEventListener("click", () => {
+/**
+ * Build the Rekordbox export URL for the current space and crate.
+ *
+ * The report form asks for the loss report as JSON. The file form is the
+ * XML download, which starts only after the dialog is confirmed.
+ *
+ * @param {boolean} report True asks for the loss report instead of the file.
+ * @returns {string} The request path and query.
+ */
+function rekordboxExportUrl(report) {
   const crate = state.mode === "crates" ? state.activeCrate : "all";
   const memory = document.getElementById("rekordbox-memory").checked ? "1" : "0";
   const key = document.getElementById("rekordbox-key").value;
-  const url = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}&report=1`;
-  fetch(url)
+  const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}`;
+  return report ? `${base}&report=1` : base;
+}
+
+/**
+ * Fill the export dialog list with one item per loss-report line.
+ *
+ * Text is set with textContent. An empty report leaves the list empty.
+ *
+ * @param {string[]} lines Sentences from the export.
+ * @returns {void}
+ */
+function fillRekordboxReport(lines) {
+  const list = document.getElementById("rekordbox-report");
+  list.replaceChildren();
+  for (const line of lines) {
+    const item = document.createElement("li");
+    item.textContent = line;
+    list.append(item);
+  }
+}
+
+document.getElementById("export-rekordbox").addEventListener("click", () => {
+  fetch(rekordboxExportUrl(true))
     .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
     .then(({ ok, body }) => {
       if (!ok) {
         setNotice(body.error || "The Rekordbox export failed.");
         return;
       }
-      setNotice((body.report || []).join(" "));
-      const blob = new Blob([body.xml], { type: "application/xml" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "rekordbox.xml";
-      link.click();
-      URL.revokeObjectURL(link.href);
+      fillRekordboxReport(body.report || []);
+      document.getElementById("rekordbox-status").textContent = "";
+      document.getElementById("rekordbox-dialog").showModal();
     })
     .catch((error) => setNotice(error.message));
+});
+
+document.getElementById("rekordbox-cancel").addEventListener("click", () => {
+  document.getElementById("rekordbox-dialog").close();
+});
+
+document.getElementById("rekordbox-download").addEventListener("click", () => {
+  const link = document.createElement("a");
+  link.href = rekordboxExportUrl(false);
+  link.download = "rekordbox.xml";
+  link.click();
+  document.getElementById("rekordbox-dialog").close();
 });
 
 document.getElementById("import-m3u").addEventListener("click", () => {
