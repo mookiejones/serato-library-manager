@@ -31,7 +31,7 @@ Import matches a line to a track that is already in the library. Put the audio i
 
 ## Rekordbox
 
-**Rekordbox** writes `rekordbox.xml`, the file Rekordbox imports. A CDJ USB is then prepared in Rekordbox. This app does not write the newer USB formats (Device Library Plus or OneLibrary). A follow-up can cover those.
+**Rekordbox** writes `rekordbox.xml`, the file Rekordbox imports. A CDJ USB is then prepared in Rekordbox. This app does not write the newer USB formats (Device Library Plus or OneLibrary). A follow-up can cover those. [Moving between Serato and Rekordbox](../coming-from-rekordbox.md) lists what the file keeps.
 
 1. Select **Crates**.
 2. Select the crate to export. Select **All tracks** to export the whole space.

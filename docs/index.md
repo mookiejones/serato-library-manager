@@ -15,7 +15,7 @@ The app talks only to this computer. It is not a website you log in to. Your tra
 - Read [History](guide/history.md), find [missing files](guide/missing.md), and see [stems](guide/stems.md).
 - [Merge duplicate copies](guide/duplicates.md) into the file you want to keep.
 - Send tracks to [Prepare](guide/prepare.md).
-- [Import and export M3U playlists](guide/playlists.md), and export rekordbox.xml for CDJs.
+- [Import and export M3U playlists](guide/playlists.md), and export rekordbox.xml for CDJs. [Moving between Serato and Rekordbox](coming-from-rekordbox.md) lists what that file keeps.
 - [Save related tracks](guide/related.md), and open the live view in the separate listener app while you play.
 - [Rename, move, replace, and trash files](guide/files.md) so crates and history follow the file.
 - Change [sharing, and open the log](guide/settings.md).

@@ -745,6 +745,22 @@ class ExportTests(unittest.TestCase):
         self.assertIn("overwrites", guide.lower())
         self.assertIn("Device Library Plus", guide)
         self.assertIn("OneLibrary", guide)
+        self.assertIn("coming-from-rekordbox.md", guide)
+        page = (ROOT / "docs" / "coming-from-rekordbox.md").read_text(encoding="utf-8")
+        nav = (ROOT / "docs" / "mkdocs.yml").read_text(encoding="utf-8")
+        index = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("coming-from-rekordbox.md", nav)
+        self.assertIn("coming-from-rekordbox.md", index)
+        self.assertIn("docs/coming-from-rekordbox.md", readme)
+        self.assertIn("Status: preview.", page)
+        self.assertIn("0xRRGGBB", page)
+        self.assertIn("without its cue points", page)
+        self.assertIn("as Serato stored it", page)
+        self.assertIn("Hot cues A–H", page)
+        self.assertIn("outside slots 0–7", page)
+        self.assertIn("treated as a downbeat", page)
+        self.assertIn("26 ms earlier", page)
 
 
 def _cue_payload(cues: list[tuple[int, int, bytes, str]], loops: list[tuple[int, int, int, bytes, str]] | None = None) -> bytes:
