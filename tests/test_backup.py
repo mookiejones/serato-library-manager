@@ -212,6 +212,65 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(_sha256(temp.db), digest)
             self.assertNotIn(str(temp.db.resolve()), library._backed_up)
 
+    def test_failed_root_copy_removes_the_folder(self) -> None:
+        """Remove the claimed folder when the location database copy fails.
+
+        The master copy runs. The root copy raises ``OSError`` 28. No
+        ``serato-web-`` folder remains. A sibling of ``Backups`` is left
+        in place, and neither source file is deleted.
+
+        Returns:
+            None. The test fails if the error is swallowed or a backup folder remains.
+        """
+        with TempLibrary() as temp:
+            library_dir = temp.db.resolve().parent
+            root = library_dir / "root.sqlite"
+            root.write_bytes(b"location")
+            extra = library_dir / "Backups-extra"
+            extra.mkdir()
+            (extra / "keep.txt").write_text("keep")
+            digest = _sha256(temp.db)
+            real = library._backup_database
+
+            def copy_master_only(source: Path, dest: Path) -> None:
+                if Path(source).name == "root.sqlite":
+                    raise OSError(28, "No space left on device")
+                real(source, dest)
+
+            with mock.patch.object(library, "_backup_database", side_effect=copy_master_only):
+                with self.assertRaises(OSError) as caught:
+                    library.ensure_backup()
+            self.assertEqual(caught.exception.errno, 28)
+            self.assertEqual(list(library_dir.glob("Backups/serato-web-*")), [])
+            self.assertEqual((extra / "keep.txt").read_text(), "keep")
+            self.assertEqual(root.read_bytes(), b"location")
+            self.assertEqual(_sha256(temp.db), digest)
+            self.assertTrue(temp.db.is_file())
+            self.assertNotIn(str(temp.db.resolve()), library._backed_up)
+
+    def test_failed_backup_cleanup_leaves_a_symlink(self) -> None:
+        """Do not follow a backup-shaped symlink out of ``Backups``.
+
+        Returns:
+            None. The test fails if the link target is removed. Skipped when
+            this host cannot create a directory symlink.
+        """
+        with TempLibrary() as temp:
+            library_dir = temp.db.resolve().parent
+            backups = library_dir / "Backups"
+            backups.mkdir()
+            outside = library_dir / "outside"
+            outside.mkdir()
+            (outside / "keep.txt").write_text("keep")
+            link = backups / "serato-web-link"
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            library._discard_failed_backup(link, backups)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual((outside / "keep.txt").read_text(), "keep")
+
     def test_wal_snapshot_keeps_uncheckpointed_rows(self) -> None:
         """Include a location-database row that exists only in the WAL.
 

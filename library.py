@@ -12,6 +12,7 @@ import errno
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -537,12 +538,36 @@ def _match_quiescent_header(source: Path, dest: Path) -> None:
         if len(current) < 100:
             return
         updated = bytearray(current)
+        # Patching these counters assumes writes happen only after Serato quits.
+        # ensure_backup runs before this process writes, so a quiescent file
+        # differs from the backup API output only in these fields. A live
+        # writer can change pages the snapshot includes and the main file does not.
         for offset in _SQLITE_HEADER_COUNTERS:
             updated[offset : offset + 4] = header[offset : offset + 4]
         if updated == current:
             return
         handle.seek(0)
         handle.write(updated)
+
+
+def _discard_failed_backup(folder: Path, backups: Path) -> None:
+    """Remove a backup folder this call created.
+
+    Args:
+        folder: Directory claimed for this backup.
+        backups: The ``Backups`` directory that must contain ``folder``.
+
+    The folder must be a real directory strictly inside ``backups``. A
+    symlink is left in place so the removal cannot follow a link out of
+    that directory. ``backups`` itself is not removed.
+    """
+    if folder.is_symlink() or not folder.is_dir():
+        return
+    resolved = folder.resolve()
+    root = backups.resolve()
+    if root not in resolved.parents:
+        return
+    shutil.rmtree(folder)
 
 
 def ensure_backup() -> Path | None:
@@ -552,7 +577,8 @@ def ensure_backup() -> Path | None:
     already exists, the next free name is ``-02``, then ``-03``, through
     ``-99``. Each name is claimed with ``mkdir(parents=True, exist_ok=False)``,
     which fails atomically when another process already took it. Nothing is
-    copied until a folder is claimed.
+    copied until a folder is claimed. If the copy fails, that new folder is
+    removed and the error is re-raised.
 
     Returns:
         The new backup directory, or None when this process already backed
@@ -585,12 +611,16 @@ def ensure_backup() -> Path | None:
             f"Every backup folder for this second already exists: "
             f"{base} through {base}-99. Nothing was copied."
         )
-    _backup_database(master, folder / "master.sqlite")
-    _match_quiescent_header(master, folder / "master.sqlite")
-    root = master.resolve().parent / "root.sqlite"
-    if root.is_file() and _mirror_allowed(root):
-        _backup_database(root, folder / "root.sqlite")
-        _match_quiescent_header(root, folder / "root.sqlite")
+    try:
+        _backup_database(master, folder / "master.sqlite")
+        _match_quiescent_header(master, folder / "master.sqlite")
+        root = master.resolve().parent / "root.sqlite"
+        if root.is_file() and _mirror_allowed(root):
+            _backup_database(root, folder / "root.sqlite")
+            _match_quiescent_header(root, folder / "root.sqlite")
+    except Exception:
+        _discard_failed_backup(folder, parent)
+        raise
     _backed_up.add(key)
     telemetry.capture(telemetry.EVENT_BACKUP_MADE)
     return folder
