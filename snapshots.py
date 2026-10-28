@@ -1402,9 +1402,14 @@ class SnapshotStore:
             SnapshotError: If the blob is missing, a shortcut, or mismatched.
         """
         path = self._blob_path(digest)
-        if not path.is_file() or path.is_symlink():
+        base = os.path.realpath(self.objects)
+        resolved = os.path.realpath(path)
+        prefix = base + os.sep
+        if not resolved.startswith(prefix) or Path(base) not in Path(resolved).parents:
+            raise SnapshotError("A snapshot blob escapes the store.")
+        if os.path.islink(resolved) or not os.path.isfile(resolved):
             raise SnapshotError("A snapshot blob is missing.")
-        data = path.read_bytes()
+        data = Path(resolved).read_bytes()
         if hashlib.sha256(data).hexdigest() != digest:
             raise SnapshotError("A snapshot blob does not match its hash.")
         return data
@@ -1424,11 +1429,10 @@ class SnapshotStore:
         """
         if not _HEX_RE.fullmatch(digest):
             raise SnapshotError("A snapshot hash is not valid.")
-        base = self.objects.resolve()
-        path = (self.objects / digest[:2] / digest).resolve()
-        if not _contained(path, base):
-            raise SnapshotError("A snapshot blob escapes the store.")
-        return path
+        try:
+            return _realpath_within(self.objects, digest[:2], digest)
+        except OSError as exc:
+            raise SnapshotError("A snapshot blob escapes the store.") from exc
 
     def _manifest(self, snapshot_id: str) -> dict[str, object]:
         """Load one manifest.
@@ -1445,8 +1449,16 @@ class SnapshotStore:
         folder = self._snapshot_dir(snapshot_id)
         if not completeness.is_complete(folder):
             raise SnapshotError("That snapshot is incomplete.", 404)
+        base = os.path.realpath(folder)
+        full = os.path.normpath(os.path.join(base, "manifest.json"))
+        prefix = base + os.sep
+        if not full.startswith(prefix):
+            raise SnapshotError("That snapshot could not be read.")
         try:
-            manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+            resolved = os.path.realpath(full)
+            if not resolved.startswith(prefix) or Path(base) not in Path(resolved).parents:
+                raise SnapshotError("That snapshot could not be read.")
+            manifest = json.loads(Path(resolved).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, UnicodeError) as exc:
             raise SnapshotError("That snapshot could not be read.") from exc
         if not isinstance(manifest, dict) or manifest.get("id") != snapshot_id:
@@ -1469,11 +1481,10 @@ class SnapshotStore:
         """
         if not _ID_RE.fullmatch(snapshot_id):
             raise SnapshotError("That snapshot id is not valid.")
-        base = self.manifests.resolve()
-        path = (self.manifests / snapshot_id).resolve()
-        if not _contained(path, base):
-            raise SnapshotError("That snapshot id is not valid.")
-        return path
+        try:
+            return _realpath_within(self.manifests, snapshot_id)
+        except OSError as exc:
+            raise SnapshotError("That snapshot id is not valid.") from exc
 
     def _manifest_path(self, snapshot_id: str) -> Path:
         """Return the directory for one snapshot id.
@@ -2597,6 +2608,38 @@ def _atomic_write(path: Path, data: bytes) -> None:
             temporary.unlink()
 
 
+def _realpath_within(root: Path, *parts: str) -> Path:
+    """Resolve a child of a directory and refuse a path that leaves it.
+
+    The path is normalized, then checked with a prefix that ends in a
+    separator, then checked again as a parent. A shortcut that points
+    outside the directory fails the second check.
+
+    Args:
+        root: Directory the result must stay inside.
+        parts: Path components under ``root``.
+
+    Returns:
+        The resolved path.
+
+    Raises:
+        OSError: If the path leaves ``root``.
+    """
+    base = os.path.realpath(root)
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    full = os.path.normpath(os.path.join(base, *parts))
+    if full != base and not full.startswith(prefix):
+        raise OSError("That path leaves the directory.")
+    resolved = os.path.realpath(full)
+    if resolved != base and not resolved.startswith(prefix):
+        raise OSError("That path leaves the directory.")
+    base_path = Path(base)
+    resolved_path = Path(resolved)
+    if resolved_path != base_path and base_path not in resolved_path.parents:
+        raise OSError("That path leaves the directory.")
+    return resolved_path
+
+
 def _contained(path: Path, root: Path) -> bool:
     """Return whether a path stays inside a directory.
 
@@ -2605,11 +2648,19 @@ def _contained(path: Path, root: Path) -> bool:
         root: Directory that must contain it.
 
     Returns:
-        True when the path is the directory or a child of it.
+        True when the resolved path is the directory or a child of it.
     """
-    resolved_root = root.resolve()
-    resolved = path.resolve()
-    return resolved == resolved_root or resolved_root in resolved.parents
+    try:
+        base = os.path.realpath(root)
+        resolved = os.path.realpath(path)
+    except OSError:
+        return False
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    if resolved != base and not resolved.startswith(prefix):
+        return False
+    base_path = Path(base)
+    resolved_path = Path(resolved)
+    return resolved_path == base_path or base_path in resolved_path.parents
 
 
 def _chunks(data: bytes) -> list[tuple[str, bytes]]:

@@ -158,9 +158,15 @@ def write_complete_marker(folder: Path) -> None:
         "algorithm": HASH_ALGORITHM,
         "hashes": {rel: _sha256_inside(root, rel) for rel in files},
     }
-    marker = _child_inside(root, COMPLETE_NAME, allow_missing=True)
-    if marker is None:
+    base = os.path.realpath(root)
+    full = os.path.normpath(os.path.join(base, COMPLETE_NAME))
+    prefix = base + os.sep
+    if not full.startswith(prefix):
         raise OSError("The marker leaves the directory.")
+    resolved = os.path.realpath(full)
+    if not resolved.startswith(prefix) or Path(base) not in Path(resolved).parents:
+        raise OSError("The marker leaves the directory.")
+    marker = Path(resolved)
     marker.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _fsync_file(marker)
 
@@ -177,11 +183,18 @@ def _hashes_match(folder: Path) -> bool:
     root = _resolved_directory(folder)
     if root is None:
         return False
-    marker = _file_inside(root, COMPLETE_NAME)
-    if marker is None:
+    base = os.path.realpath(root)
+    full = os.path.normpath(os.path.join(base, COMPLETE_NAME))
+    prefix = base + os.sep
+    if not full.startswith(prefix):
         return False
     try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
+        resolved = os.path.realpath(full)
+        if not resolved.startswith(prefix) or Path(base) not in Path(resolved).parents:
+            return False
+        if os.path.islink(resolved) or not os.path.isfile(resolved):
+            return False
+        payload = json.loads(Path(resolved).read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
     if not isinstance(payload, dict) or set(payload) != {"version", "algorithm", "hashes"}:
@@ -246,11 +259,14 @@ def _resolved_directory(path: Path) -> Path | None:
         unreadable.
     """
     try:
-        if path.is_symlink() or not path.is_dir():
+        if os.path.islink(path):
             return None
-        return path.resolve()
+        resolved = os.path.realpath(path)
     except OSError:
         return None
+    if not os.path.isdir(resolved):
+        return None
+    return Path(resolved)
 
 
 def _single_component(name: str) -> bool:
@@ -286,18 +302,25 @@ def _child_inside(root: Path, relative: str, *, allow_missing: bool = False) -> 
     if any(part in {"", ".", ".."} or ":" in part for part in parts):
         return None
     try:
-        base = root.resolve()
-        candidate = base.joinpath(*parts)
-        if candidate.is_symlink():
+        base = os.path.realpath(root)
+        prefix = base if base.endswith(os.sep) else base + os.sep
+        full = os.path.normpath(os.path.join(base, *parts))
+        if not full.startswith(prefix):
             return None
-        if not allow_missing and not candidate.is_file():
+        if os.path.islink(full):
             return None
-        resolved = candidate.resolve()
+        resolved = os.path.realpath(full)
     except OSError:
         return None
-    if resolved != base and base not in resolved.parents:
+    if resolved != base and not resolved.startswith(prefix):
         return None
-    return resolved
+    base_path = Path(base)
+    resolved_path = Path(resolved)
+    if resolved_path != base_path and base_path not in resolved_path.parents:
+        return None
+    if not allow_missing and not os.path.isfile(resolved):
+        return None
+    return resolved_path
 
 
 def _file_inside(root: Path, relative: str) -> Path | None:
@@ -327,10 +350,17 @@ def _sha256_inside(root: Path, relative: str) -> str:
     Raises:
         OSError: If the file is outside the directory or cannot be read.
     """
-    path = _file_inside(root, relative)
-    if path is None:
+    base = os.path.realpath(root)
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    full = os.path.normpath(os.path.join(base, relative))
+    if not full.startswith(prefix):
         raise OSError("That file is outside the directory.")
-    return _sha256_file(path)
+    resolved = os.path.realpath(full)
+    if not resolved.startswith(prefix) or Path(base) not in Path(resolved).parents:
+        raise OSError("That file is outside the directory.")
+    if os.path.islink(resolved) or not os.path.isfile(resolved):
+        raise OSError("That file is outside the directory.")
+    return _sha256_file(Path(resolved))
 
 
 def _sha256_file(path: Path) -> str:
@@ -364,20 +394,22 @@ def _relative_files(folder: Path) -> list[str] | None:
     """
     found: list[str] = []
     try:
-        base = folder.resolve()
-        for path in folder.rglob("*"):
-            if path.is_symlink():
+        base = os.path.realpath(folder)
+        prefix = base if base.endswith(os.sep) else base + os.sep
+        for path in Path(base).rglob("*"):
+            if os.path.islink(path):
                 return None
             if not path.is_file():
                 continue
-            resolved = path.resolve()
-            if base not in resolved.parents:
+            resolved = os.path.realpath(path)
+            if not resolved.startswith(prefix) or Path(base) not in Path(resolved).parents:
                 return None
-            if path.name == COMPLETE_NAME and path.parent == folder:
+            root = Path(base)
+            if path.name == COMPLETE_NAME and path.parent == root:
                 continue
             if path.name == PARTIAL_LOCK_NAME:
                 continue
-            found.append(path.relative_to(folder).as_posix())
+            found.append(path.relative_to(root).as_posix())
     except OSError:
         return None
     return sorted(found)
