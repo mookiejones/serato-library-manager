@@ -1,6 +1,6 @@
 # GitHub
 
-This repository is a local program. `server.py` binds `127.0.0.1` port `8765` and has no login. GitHub Actions builds and tests that program. It does not host the server, and this project does not use GitHub Pages. Do not publish the port or put the process behind a tunnel.
+This repository is a local program. `server.py` binds `127.0.0.1` port `8765` and has no login. GitHub Actions builds and tests that program. It does not host the library server. GitHub Pages hosts the user guide only, as a static site built from `docs/`. Do not publish the port or put the process behind a tunnel.
 
 The HTTP banner in `server.py` is `SeratoLibrary/1.0`. A release tag does not change that string.
 
@@ -12,10 +12,11 @@ The HTTP banner in `server.py` is `SeratoLibrary/1.0`. A release tag does not ch
 | CodeQL | Push to `main`, and every pull request | Analyzes the Python source. There is no autobuild |
 | Dependency review | Pull requests only | Reviews dependency changes. It does not comment on the pull request |
 | Release | Tag `v*.*.*`, or a manual run | Builds the desktop zips. A tag also publishes a GitHub Release |
+| Pages | Push to `main` when `docs/` or `.github/workflows/pages.yml` changes, a pull request that changes those paths, or a manual run | Builds the user guide with MkDocs. A push to `main` also publishes it. A pull request builds the site and does not publish it |
 
-A push to `main` runs CI and CodeQL once. A pull request runs CI, CodeQL, and dependency review. The two events do not both fire for the same commit on a feature branch, because CI and CodeQL listen to `push` only on `main`.
+A push to `main` runs CI and CodeQL once. When that push also changes `docs/` or the Pages workflow, Pages runs too. A pull request runs CI, CodeQL, and dependency review. A pull request that changes the guide also builds the site. The two events do not both fire for the same commit on a feature branch, because CI, CodeQL, and Pages listen to `push` only on `main`.
 
-Each workflow sets `permissions: contents: read` and a `timeout-minutes` value. A job that needs more access sets its own permissions, which replace the workflow floor. CI, CodeQL, and dependency review cancel an older run on the same ref. The release workflow does not.
+Each workflow sets `permissions: contents: read` and a `timeout-minutes` value. A job that needs more access sets its own permissions, which replace the workflow floor. CI, CodeQL, and dependency review cancel an older run on the same ref. The release workflow does not. The Pages workflow does not cancel an in-progress run, because a publish should finish. The Pages deploy job sets `contents: read`, `pages: write`, and `id-token: write`.
 
 Actions are pinned to a commit SHA. The trailing comment is the version Dependabot matches. Dependabot opens a weekly Monday pull request for Python dependencies and another for GitHub Actions. Each group is one pull request, with a `deps` commit prefix, and at most five Python pull requests stay open.
 
@@ -102,6 +103,16 @@ Use the next `vMAJOR.MINOR.PATCH` tag. Push the tag only when `main` is the comm
 
 To build without publishing, open Actions, choose Release, and run the workflow. Download the artifacts from that run. Those zips are the same shape as a release, and they carry attestations, but they are not attached to a GitHub Release.
 
+## User guide
+
+The guide source is `docs/index.md`, `docs/guide/`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
+
+The published URL is `https://mookiejones.github.io/serato-library-manager/`.
+
+One repository setting is required before the first publish. Open Settings, then Pages, then Build and deployment. Set Source to **GitHub Actions**. A push to `main` that changes the guide then deploys the site. The workflow does not change that setting by itself.
+
+The library server is still not on Pages. The site is the static guide.
+
 ## Repository settings
 
 Secret scanning and push protection are on. Vulnerability alerts, Dependabot security updates, and private vulnerability reporting are on. Dependabot version updates are in `.github/dependabot.yml`. Private reports go to [the advisory form](https://github.com/mookiejones/serato-library-manager/security/advisories/new). Do not attach `master.sqlite`, `root.sqlite`, or audio.
@@ -122,4 +133,4 @@ Require `review dependency changes` on pull requests. That check does not run on
 
 ## Where a change has to land
 
-A workflow, release, or GitHub setting change updates this file in the same commit. Behavior, the API, the layout, or the run path also updates [architecture.md](architecture.md). The run command or the layout summary also updates `CLAUDE.md`. The README keeps the local test command and points here for Actions. `SECURITY.md` keeps the attestation commands and the rule that the server stays on `127.0.0.1`. `PRIVACY.md` keeps what sharing can send. The release footer in `scripts/release-notes-footer.md` is what GitHub appends to the generated notes.
+A workflow, release, or GitHub setting change updates this file in the same commit. A change a DJ can see also updates the user guide under `docs/index.md` and `docs/guide/` in the same commit. Behavior, the API, the layout, or the run path also updates [architecture.md](architecture.md). The run command or the layout summary also updates `CLAUDE.md`. The README keeps the local test command and points here for Actions. `SECURITY.md` keeps the attestation commands and the rule that the server stays on `127.0.0.1`. `PRIVACY.md` keeps what sharing can send. The release footer in `scripts/release-notes-footer.md` is what GitHub appends to the generated notes.
