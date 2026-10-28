@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlparse
 import app_log
 import files
 import library
+import rekordbox
 import related
 import telemetry
 
@@ -444,6 +445,33 @@ def _related_end(
         raise library.LibraryError("That request is not valid.")
     length = related.clean_length(payload[length_key]) if length_key in payload else None
     return raw_path, raw_title, raw_artist, length
+
+
+def crate_query(raw: str) -> int | None:
+    """Parse a crate query value.
+
+    Args:
+        raw: The crate parameter. ``all`` and an empty string mean the whole space.
+
+    Returns:
+        The crate id, or None for the whole space.
+
+    Raises:
+        library.LibraryError: If the value is not a crate id. The status is 400.
+            A number that does not fit in a SQLite integer is rejected here so
+            the database does not answer with an overflow.
+    """
+    if raw in {"", "all"}:
+        return None
+    if not raw.isascii() or not raw.isdigit():
+        raise library.LibraryError("That request is not valid.", 400)
+    try:
+        crate_id = int(raw, 10)
+    except (TypeError, ValueError, OverflowError):
+        raise library.LibraryError("That request is not valid.", 400) from None
+    if crate_id < 0 or crate_id > 2**63 - 1:
+        raise library.LibraryError("That request is not valid.", 400)
+    return crate_id
 
 
 def query_text(
@@ -1306,8 +1334,8 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a GET request.
 
         Settings and logs are answered before the library routes. Library,
-        status, track, history, duplicate, file, related-track, and M3U paths
-        return data. Every other path is a file under static/.
+        status, track, history, duplicate, file, related-track, M3U, and
+        rekordbox XML paths return data. Every other path is a file under static/.
         """
         try:
             self._do_GET()
@@ -1317,8 +1345,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Library, status, track, history, duplicate, file, and M3U paths return
-        data. Every other path is a file under static/.
+        Library, status, track, history, duplicate, file, M3U, and rekordbox XML
+        paths return data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1372,7 +1400,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/export.m3u":
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
-                crate_id = None if raw_crate in {"", "all"} else int(raw_crate)
+                crate_id = crate_query(raw_crate)
                 body = library.export_m3u(space, crate_id).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/x-mpegurl; charset=utf-8")
@@ -1384,10 +1412,38 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if parsed.path == "/api/export.rekordbox.xml":
+                space = require_space(query_text(query, "space"))
+                raw_crate = query_text(query, "crate", "all") or "all"
+                crate_id = crate_query(raw_crate)
+                memory = (query_text(query, "memory", "1") or "1").lower() not in {"0", "false", "no"}
+                hot_loops = (query_text(query, "hot_loops", "0") or "0").lower() in {"1", "true", "yes"}
+                key_notation = query_text(query, "key", "asis") or "asis"
+                xml_text, report = rekordbox.export_rekordbox(
+                    space,
+                    crate_id,
+                    memory_cues=memory,
+                    hot_loops=hot_loops,
+                    key_notation=key_notation,
+                )
+                if (query_text(query, "report", "") or "") == "1":
+                    self.send_json({"report": report, "xml": xml_text, "filename": "rekordbox.xml"})
+                    return
+                body = xml_text.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/xml; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header(
+                    "Content-Disposition", "attachment; filename=rekordbox.xml"
+                )
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
         except library.LibraryError as exc:
             self.send_json({"error": exc.message}, status=exc.status)
             return
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             self.send_json({"error": "That request is not valid."}, status=400)
             return
         self.send_file(parsed.path)

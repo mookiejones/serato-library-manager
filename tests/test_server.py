@@ -8,10 +8,12 @@ import json
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 from http.server import ThreadingHTTPServer
+from xml.etree import ElementTree
 
 import server
 from server import blank, format_bpm, format_bool, format_color, format_when, require_space
@@ -129,7 +131,7 @@ class ApiTests(unittest.TestCase):
             status = exc.code
             exc.close()
         route = path.split("?", 1)[0]
-        if route.endswith(".m3u") or route == "/":
+        if route.endswith(".m3u") or route.endswith(".xml") or route == "/":
             return status, body.decode("utf-8")
         return status, json.loads(body.decode("utf-8"))
 
@@ -239,6 +241,40 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("#EXTM3U", playlist)
         self.assertIn("same-a.mp3", playlist)
+        request = urllib.request.Request(self.base + "/api/export.rekordbox.xml?crate=all")
+        with urllib.request.urlopen(request) as response:
+            body = response.read()
+            self.assertEqual(response.status, 200)
+            self.assertIn("application/xml", response.headers.get("Content-Type", ""))
+            self.assertIn("rekordbox.xml", response.headers.get("Content-Disposition", ""))
+        root = ElementTree.fromstring(body)
+        self.assertEqual(root.tag, "DJ_PLAYLISTS")
+        names = {track.get("Name") for track in root.find("COLLECTION").findall("TRACK")}
+        self.assertIn("Same", names)
+        status, reported = self.request("/api/export.rekordbox.xml?crate=all&report=1")
+        self.assertEqual(status, 200)
+        summary = json.loads(reported)
+        self.assertIn("Import to Collection", " ".join(summary["report"]))
+        self.assertTrue(summary["xml"].startswith("<?xml"))
+        self.assertIn("Colour", " ".join(summary["report"]))
+        self.assertIn("smart crate", " ".join(summary["report"]).lower())
+        status, bad_crate = self.request("/api/export.rekordbox.xml?crate=nope")
+        self.assertEqual(status, 400)
+        self.assertIn("not valid", bad_crate)
+        refused = urllib.request.Request(self.base + "/api/export.rekordbox.xml?crate=nope")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(refused)
+        self.assertEqual(caught.exception.code, 400)
+        self.assertNotIn("rekordbox.xml", caught.exception.headers.get("Content-Disposition", ""))
+        caught.exception.close()
+        for raw in ("+1", "1_2", "١"):
+            status, _body = self.request("/api/export.rekordbox.xml?crate=" + urllib.parse.quote(raw))
+            self.assertEqual(status, 400, raw)
+        status, huge = self.request("/api/export.rekordbox.xml?crate=" + ("9" * 40))
+        self.assertEqual(status, 400)
+        status, missing = self.request("/api/export.rekordbox.xml?crate=999")
+        self.assertEqual(status, 404)
+        self.assertIn("not in this space", missing)
 
     def test_merge_preview_and_confirm(self) -> None:
         """Preview a duplicate merge, then confirm it over HTTP.

@@ -635,6 +635,23 @@ def _container(conn: sqlite3.Connection, crate_id: int, space: str) -> sqlite3.R
     return row
 
 
+def container_in_space(conn: sqlite3.Connection, crate_id: int, space: str) -> sqlite3.Row:
+    """Load one crate that belongs to a space.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+        space: Space name.
+
+    Returns:
+        The container row.
+
+    Raises:
+        LibraryError: If the crate is not in that space.
+    """
+    return _container(conn, crate_id, space)
+
+
 def display_name(name: str) -> str:
     """Return the visible portion of a stored crate name.
 
@@ -710,6 +727,19 @@ def _descendant_ids(conn: sqlite3.Connection, crate_id: int) -> list[int]:
         (crate_id,),
     ).fetchall()
     return [int(row[0]) for row in rows]
+
+
+def descendant_ids(conn: sqlite3.Connection, crate_id: int) -> list[int]:
+    """Return a crate id and the ids of crates nested under it.
+
+    Args:
+        conn: Open connection.
+        crate_id: Container id.
+
+    Returns:
+        Ids from a recursive container query, including crate_id.
+    """
+    return _descendant_ids(conn, crate_id)
 
 
 def _stored_name(conn: sqlite3.Connection, parent_id: int, display: str, crate_type: int, existing_id: int | None) -> str:
@@ -3784,6 +3814,18 @@ def _resolved(portable_id: str | None) -> str | None:
         except OSError:
             continue
     return str(candidates[0])
+
+
+def resolved_path(portable_id: str | None) -> str | None:
+    """Resolve a portable id to a path string.
+
+    Args:
+        portable_id: Stored path, or None.
+
+    Returns:
+        An existing file path when one of the candidates is a file, otherwise the first candidate. None when the id is empty.
+    """
+    return _resolved(portable_id)
 
 
 def export_m3u(space: str, crate_id: int | None) -> str:

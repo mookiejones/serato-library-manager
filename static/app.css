@@ -305,6 +305,7 @@ textarea:focus-visible,
 
 #reload,
 #export-m3u,
+#export-rekordbox,
 #import-m3u,
 .text-button,
 .actions button {
@@ -314,6 +315,22 @@ textarea:focus-visible,
 }
 
 button:disabled { cursor: default; }
+
+.rekordbox-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+
+.rekordbox-option select {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 4px 0;
+}
 
 .notice {
   margin: 0 16px 8px;
@@ -735,6 +752,30 @@ dialog .check input {
 }
 
 #merge-dialog { max-width: 36rem; }
+
+#rekordbox-dialog { max-width: 36rem; }
+
+#rekordbox-report {
+  margin: 12px 0 0;
+  padding-left: 1.2rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+#rekordbox-report li {
+  margin: 6px 0;
+}
+
+#rekordbox-download {
+  background: var(--ink);
+  color: var(--manila);
+}
+
+#rekordbox-cancel {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+}
 
 #merge-dialog fieldset {
   border: 1px solid var(--rule);

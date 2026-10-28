@@ -4,7 +4,8 @@
  * Loads crates, history, missing tracks, duplicates, stems, and files from
  * the local server on 127.0.0.1 port 8765. Track and crate edits are POST
  * requests to /api/track, /api/crate, /api/import.m3u, /api/reveal, and
- * /api/duplicates/merge. File moves, renames, replacements, and deletes
+ * /api/duplicates/merge. Rekordbox export is GET /api/export.rekordbox.xml.
+ * File moves, renames, replacements, and deletes
  * use /api/files. A preview is shown before confirm. Related tracks use
  * /api/related. The track list is virtualized: only rows near the scroll
  * window are in the DOM. Sharing settings and local logs use
@@ -2497,7 +2498,8 @@ function setMode(mode) {
 
 // Wire the page controls. These listeners call the functions above; they
 // do not open the database themselves. Export builds a download URL for
-// GET /api/export.m3u. Import reads a local file and posts its text.
+// GET /api/export.m3u. Rekordbox builds one for GET /api/export.rekordbox.xml.
+// Import reads a local file and posts its text.
 search.addEventListener("input", () => {
   state.query = search.value;
   list.scrollTop = 0;
@@ -2522,6 +2524,82 @@ document.getElementById("export-m3u").addEventListener("click", () => {
   link.href = `/api/export.m3u?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`;
   link.download = "crate.m3u";
   link.click();
+});
+
+/**
+ * Build the Rekordbox export URL for the current space and crate.
+ *
+ * The report form asks for the loss report as JSON. The file form is the
+ * XML download, which starts only after the dialog is confirmed.
+ *
+ * @param {boolean} report True asks for the loss report instead of the file.
+ * @returns {string} The request path and query.
+ */
+function rekordboxExportUrl(report) {
+  const crate = state.mode === "crates" ? state.activeCrate : "all";
+  const memory = document.getElementById("rekordbox-memory").checked ? "1" : "0";
+  const key = document.getElementById("rekordbox-key").value;
+  const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}`;
+  return report ? `${base}&report=1` : base;
+}
+
+/**
+ * Fill the export dialog list with one item per loss-report line.
+ *
+ * Text is set with textContent. An empty report leaves the list empty.
+ *
+ * @param {string[]} lines Sentences from the export.
+ * @returns {void}
+ */
+function fillRekordboxReport(lines) {
+  const list = document.getElementById("rekordbox-report");
+  list.replaceChildren();
+  for (const line of lines) {
+    const item = document.createElement("li");
+    item.textContent = line;
+    list.append(item);
+  }
+}
+
+let rekordboxXml = "";
+
+document.getElementById("export-rekordbox").addEventListener("click", () => {
+  rekordboxXml = "";
+  fetch(rekordboxExportUrl(true))
+    .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
+    .then(({ ok, body }) => {
+      if (!ok || typeof body.xml !== "string" || !body.xml.startsWith("<?xml")) {
+        setNotice(body.error || "The Rekordbox export failed.");
+        return;
+      }
+      rekordboxXml = body.xml;
+      fillRekordboxReport(body.report || []);
+      document.getElementById("rekordbox-status").textContent = "";
+      document.getElementById("rekordbox-dialog").showModal();
+    })
+    .catch((error) => setNotice(error.message));
+});
+
+document.getElementById("rekordbox-cancel").addEventListener("click", () => {
+  rekordboxXml = "";
+  document.getElementById("rekordbox-dialog").close();
+});
+
+document.getElementById("rekordbox-download").addEventListener("click", () => {
+  if (!rekordboxXml.startsWith("<?xml")) {
+    document.getElementById("rekordbox-status").textContent = "The export did not produce an XML file.";
+    return;
+  }
+  const blob = new Blob([rekordboxXml], { type: "application/xml" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "rekordbox.xml";
+  link.click();
+  // Safari and Firefox need the object URL until the download has started.
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  rekordboxXml = "";
+  document.getElementById("rekordbox-dialog").close();
 });
 
 document.getElementById("import-m3u").addEventListener("click", () => {
