@@ -474,6 +474,33 @@ def crate_query(raw: str) -> int | None:
     return crate_id
 
 
+def export_option(value: str, *, default: bool, name: str) -> bool:
+    """Read one Rekordbox export switch from a query value.
+
+    Args:
+        value: The query text. The caller passes the default word when the
+            parameter is absent.
+        default: Value used when the text is not a known on or off word.
+        name: Parameter name included in the warning.
+
+    Returns:
+        True for ``1``, ``true``, and ``yes``. False for ``0``, ``false``,
+        and ``no``. Any other text logs a warning and returns ``default``.
+    """
+    token = value.lower()
+    if token in {"1", "true", "yes"}:
+        return True
+    if token in {"0", "false", "no"}:
+        return False
+    app_log.logger.warning(
+        "Rekordbox option %s=%r is not recognized. Using %s.",
+        name,
+        value,
+        "on" if default else "off",
+    )
+    return default
+
+
 def query_text(
     query: dict[str, list[str]], key: str, default: str | None = None
 ) -> str | None:
@@ -1416,8 +1443,10 @@ class Handler(BaseHTTPRequestHandler):
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
                 crate_id = crate_query(raw_crate)
-                memory = (query_text(query, "memory", "1") or "1").lower() not in {"0", "false", "no"}
-                hot_loops = (query_text(query, "hot_loops", "0") or "0").lower() in {"1", "true", "yes"}
+                memory = export_option(query_text(query, "memory", "1") or "1", default=True, name="memory")
+                hot_loops = export_option(
+                    query_text(query, "hot_loops", "0") or "0", default=False, name="hot_loops"
+                )
                 key_notation = query_text(query, "key", "asis") or "asis"
                 xml_text, report = rekordbox.export_rekordbox(
                     space,

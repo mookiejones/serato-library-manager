@@ -500,7 +500,7 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
         payload: BeatGrid bytes. Version byte 1 is accepted. More than 4096 markers is rejected.
 
     Returns:
-        Marker dicts. Earlier markers store a beat count. The last marker stores BPM. A payload shorter than the declared marker count is empty.
+        Marker dicts. Earlier markers store a beat count. The last marker stores BPM, rounded to two decimal places. Positions keep the stored float so a later BPM calculation is not based on a three-decimal rounding. A payload shorter than the declared marker count is empty.
     """
     # Version byte 1 is the only layout this reader accepts. The marker
     # count is a big-endian integer at bytes 2-5. Byte 1 is unused.
@@ -521,11 +521,11 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
         if index == count - 1:
             bpm = struct.unpack(">f", payload[pos:pos + 4])[0]
             pos += 4
-            markers.append({"position": round(position, 3), "bpm": round(bpm, 2)})
+            markers.append({"position": position, "bpm": round(bpm, 2)})
         else:
             beats = int.from_bytes(payload[pos:pos + 4], "big")
             pos += 4
-            markers.append({"position": round(position, 3), "beats": beats})
+            markers.append({"position": position, "beats": beats})
     return markers
 
 
