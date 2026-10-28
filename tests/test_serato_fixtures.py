@@ -2,7 +2,8 @@
 
 The builder writes the bytes from the published notes. These tests read
 them back. MP3 and AIFF go through ``tags.read_serato_tags``. FLAC and
-M4A are expected to fail that reader until it understands those carriers.
+M4A are expected to fail that reader until it understands those carriers
+(issue #47).
 """
 
 from __future__ import annotations
@@ -349,10 +350,10 @@ class AudioParseTests(unittest.TestCase):
         """Read SERATO_MARKERS_V2 from the FLAC fixtures.
 
         ``tags.read_serato_tags`` only walks ID3 GEOB frames, so a FLAC
-        Vorbis comment comes back with ``found`` false. QA confirmed that
-        on main. The failure is expected until the reader understands
-        ``SERATO_MARKERS_V2``. That gap blocks the tag half of the backup
-        in issue #35 and the format work in issue #40.
+        Vorbis comment comes back with ``found`` false. That bug is issue
+        #47. The failure is expected until the reader understands
+        ``SERATO_MARKERS_V2``. The same gap blocks the tag half of the
+        backup in issue #35 and the format work in issue #40.
 
         Returns:
             None. The test fails while the reader ignores FLAC.
@@ -364,10 +365,10 @@ class AudioParseTests(unittest.TestCase):
         """Read ``com.serato.dj`` ``markersv2`` atoms from the M4A fixtures.
 
         ``tags.read_serato_tags`` only walks ID3 GEOB frames, so an M4A
-        atom comes back with ``found`` false. QA confirmed that on main.
+        atom comes back with ``found`` false. That bug is issue #47.
         The failure is expected until the reader understands that atom.
-        That gap blocks the tag half of the backup in issue #35 and the
-        format work in issue #40.
+        The same gap blocks the tag half of the backup in issue #35 and
+        the format work in issue #40.
 
         Returns:
             None. The test fails while the reader ignores M4A.
