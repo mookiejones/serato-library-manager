@@ -75,6 +75,7 @@ nav:
       - Related tracks file: https://github.com/mookiejones/serato-library-manager/blob/main/docs/related-tracks.md
       - Research notes: https://github.com/mookiejones/serato-library-manager/blob/main/docs/serato-library-tools.md
       - Privacy note: https://github.com/mookiejones/serato-library-manager/blob/main/PRIVACY.md
+      - Roadmap: https://github.com/users/mookiejones/projects/3
 
 plugins:
   - search
