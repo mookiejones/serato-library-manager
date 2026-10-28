@@ -1,0 +1,169 @@
+/**
+ * Virtual track list.
+ *
+ * Row height is ROW from state.ts, which matches --row in app.css. Only
+ * the rows inside the scroll window are in the DOM. mountTrackList appends
+ * the spacer once, before the first paint.
+ */
+
+import { bridge } from "./bridge";
+import { el } from "./dom";
+import { clockLabel, colorHex, lengthLabel } from "./format";
+import { ROW, state } from "./state";
+
+const spacer = document.createElement("div");
+const rows = document.createElement("div");
+spacer.className = "spacer";
+rows.className = "rows";
+spacer.append(rows);
+
+/**
+ * Append the scroll spacer to the track list.
+ *
+ * Called once when the page starts, and again in a test after the
+ * document body is replaced. Appending an existing node moves it.
+ * Does not fetch.
+ *
+ * @returns {void}
+ */
+export function mountTrackList(): void {
+  el("list").append(spacer);
+}
+
+/**
+ * Paint only the track rows inside the scroll window.
+ *
+ * Row height is ROW. Six extra rows above and below the window keep a
+ * fast scroll from flashing empty space. Replaces the row container.
+ * Does not fetch track details.
+ *
+ * @returns {void}
+ */
+export function paintRows() {
+  const view = state.view || [];
+  const height = el("list").clientHeight || 600;
+  // Paint six rows past the window so a fast scroll does not flash empty space.
+  const start = Math.max(0, Math.floor(el("list").scrollTop / ROW) - 6);
+  const end = Math.min(view.length, Math.ceil((el("list").scrollTop + height) / ROW) + 6);
+  spacer.style.height = `${view.length * ROW}px`;
+  rows.style.transform = `translateY(${start * ROW}px)`;
+  rows.replaceChildren();
+  if (!view.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-list";
+    empty.textContent = state.mode === "duplicates" && !state.duplicateIds ? "Reading duplicates" : "No tracks match.";
+    rows.append(empty);
+    return;
+  }
+  for (let index = start; index < end; index += 1) {
+    const track = view[index]!;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "row";
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(track.id === state.selectedId));
+    button.dataset.id = String(track.id);
+
+    const titleCell = document.createElement("span");
+    titleCell.className = "cell";
+    const line = document.createElement("span");
+    line.className = "title-line";
+    const hex = colorHex(track.color);
+    if (hex) {
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = hex;
+      line.append(swatch);
+    }
+    if (track.emoji) {
+      const emoji = document.createElement("span");
+      emoji.textContent = track.emoji;
+      line.append(emoji);
+    }
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = track.name || "Untitled";
+    line.append(title);
+    if (track.missing) {
+      const missing = document.createElement("span");
+      missing.className = "missing-word";
+      missing.textContent = "missing";
+      line.append(missing);
+    }
+    if (track.stems) {
+      const stems = document.createElement("span");
+      stems.className = "missing-word";
+      stems.textContent = "stems";
+      line.append(stems);
+    }
+    titleCell.append(line);
+
+    const artist = document.createElement("span");
+    artist.className = "cell";
+    artist.textContent = track.artist ?? "";
+
+    const third = document.createElement("span");
+    third.className = "cell num";
+    const fourth = document.createElement("span");
+    fourth.className = "cell num";
+    const fifth = document.createElement("span");
+    fifth.className = "cell num";
+    if (track.entry) {
+      third.textContent = track.deck || "";
+      fourth.textContent = track.played || "";
+      fifth.textContent = clockLabel(track.start);
+    } else {
+      third.textContent = track.bpm == null ? "" : String(Math.round(Number(track.bpm) * 100) / 100);
+      fourth.textContent = track.key ?? "";
+      fifth.textContent = lengthLabel(track.length_ms);
+    }
+
+    button.append(titleCell, artist, third, fourth, fifth);
+    button.addEventListener("click", () => (track.entry ? bridge.selectEntry(track.id) : bridge.selectTrack(track.id)));
+    rows.append(button);
+  }
+}
+
+/**
+ * Move the list selection by one visible row and keep it on screen.
+ *
+ * History rows call selectEntry. Library rows call selectTrack. The scroll
+ * window follows the row so the selection does not leave the viewport.
+ *
+ * @param {number} delta 1 for the next row, -1 for the previous row.
+ * @returns {void}
+ */
+function moveSelection(delta: number) {
+  const view = state.view || [];
+  const index = view.findIndex((track) => track.id === state.selectedId);
+  const next = view[Math.max(0, Math.min(view.length - 1, index + delta))];
+  if (!next) return;
+  if (next.entry) bridge.selectEntry(next.id);
+  else bridge.selectTrack(next.id);
+  const rowTop = view.indexOf(next) * ROW;
+  if (rowTop < el("list").scrollTop) el("list").scrollTop = rowTop;
+  if (rowTop + ROW > el("list").scrollTop + el("list").clientHeight) {
+    el("list").scrollTop = rowTop + ROW - el("list").clientHeight;
+  }
+}
+
+/**
+ * Attach scroll and arrow-key listeners on the track list.
+ *
+ * Called once from app.ts after mountTrackList. Scrolling paints the
+ * window. Arrow keys move the selection.
+ *
+ * @returns {void}
+ */
+export function wireVirtualScroll(): void {
+  el("list").addEventListener("scroll", () => paintRows());
+  el("list").addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveSelection(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveSelection(-1);
+    }
+  });
+}

@@ -27,6 +27,17 @@
     return payload;
   }
 
+  // src/bridge.ts
+  var bridge = {
+    selectTrack(_id) {
+    },
+    selectEntry(_id) {
+    },
+    openMergeDialog() {
+      return Promise.resolve();
+    }
+  };
+
   // src/dom.ts
   function el(id) {
     const node = document.getElementById(id);
@@ -105,6 +116,66 @@
     view: []
   };
 
+  // src/format.ts
+  function lengthLabel(ms) {
+    if (ms == null || ms === "") return "";
+    const total = Math.floor(Number(ms) / 1e3);
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+  function clockLabel(stamp) {
+    if (stamp == null || stamp === "") return "";
+    const date = new Date(Number(stamp) * 1e3);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString(void 0, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+  function durationLabel(ms) {
+    const total = Math.round(Number(ms) / 1e3);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor(total % 3600 / 60);
+    if (hours) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  }
+  function sizeLabel(bytes) {
+    const size = Number(bytes) || 0;
+    if (size < 1024) return `${size} bytes`;
+    const units = ["KB", "MB", "GB"];
+    let amount = size / 1024;
+    let unit = 0;
+    while (amount >= 1024 && unit < units.length - 1) {
+      amount /= 1024;
+      unit += 1;
+    }
+    return `${amount.toFixed(1)} ${units[unit]}`;
+  }
+  function colorHex(color) {
+    if (color == null || Number(color) === 16777215) return "";
+    return `#${Number(color).toString(16).padStart(6, "0")}`;
+  }
+  function compare(a, b) {
+    const key = state.sort;
+    const dir = state.sortDir;
+    let av = a[key];
+    let bv = b[key];
+    if (key === "bpm" || key === "length_ms" || key === "start") {
+      const an = av == null || av === "" ? null : Number(av);
+      const bn = bv == null || bv === "" ? null : Number(bv);
+      if (an == null && bn == null) return a.id - b.id;
+      if (an == null) return 1;
+      if (bn == null) return -1;
+      if (an !== bn) return (an - bn) * dir;
+      return a.id - b.id;
+    }
+    av = String(av || "").toLocaleLowerCase();
+    bv = String(bv || "").toLocaleLowerCase();
+    if (!av && bv) return 1;
+    if (av && !bv) return -1;
+    const order = av.localeCompare(bv, void 0, { numeric: true, sensitivity: "base" });
+    if (order !== 0) return order * dir;
+    return a.id - b.id;
+  }
+
   // src/restore.ts
   var reloadLibrary = async () => {
   };
@@ -134,8 +205,8 @@
     const status = el("snapshots-status");
     const block = el("snapshots-block");
     const undo = el("snapshots-undo");
-    const list2 = el("snapshots-list");
-    list2.setAttribute("aria-busy", String(state.snapshotLoading));
+    const list = el("snapshots-list");
+    list.setAttribute("aria-busy", String(state.snapshotLoading));
     if (state.writeBlock) {
       block.hidden = false;
       block.textContent = state.writeBlock;
@@ -150,7 +221,7 @@
     } else {
       undo.hidden = true;
     }
-    list2.replaceChildren();
+    list.replaceChildren();
     if (state.snapshotLoading) {
       status.textContent = "Reading snapshots";
       return;
@@ -161,14 +232,14 @@
       retry.type = "button";
       retry.textContent = "Try again";
       retry.addEventListener("click", () => loadSnapshots().catch((error) => failSnapshots(error)));
-      list2.append(retry);
+      list.append(retry);
       return;
     }
     status.textContent = state.snapshotMessage;
     if (!state.snapshots.length) {
       const empty = document.createElement("p");
       empty.textContent = "No snapshots yet. Take a snapshot to keep a point you can restore. Snapshots are kept, and this page does not expire them.";
-      list2.append(empty);
+      list.append(empty);
       return;
     }
     for (const item of state.snapshots) {
@@ -177,16 +248,16 @@
       card.setAttribute("role", "listitem");
       const title = document.createElement("p");
       title.textContent = `${item.created || "Unknown time"} · ${item.trigger || "snapshot"}`;
-      const detail2 = document.createElement("p");
+      const detail = document.createElement("p");
       const version = item.serato_version && item.serato_version !== "unknown" ? `Serato ${item.serato_version} (build ${item.serato_build})` : "Serato version unknown";
       const drives = (item.unavailable_drives || []).length ? ` Unavailable: ${(item.unavailable_drives || []).join(", ")}.` : "";
-      detail2.textContent = `${version}. ${item.reason || ""}${drives}`;
+      detail.textContent = `${version}. ${item.reason || ""}${drives}`;
       const restore = document.createElement("button");
       restore.type = "button";
       restore.textContent = "Review restore";
       restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));
-      card.append(title, detail2, restore);
-      list2.append(card);
+      card.append(title, detail, restore);
+      list.append(card);
     }
   }
   async function openSnapshotPlan(snapshotId) {
@@ -300,82 +371,122 @@
     }
   }
 
-  // src/app.ts
-  var crateList = el("crate-list");
-  var sessionList = el("session-list");
-  var list = el("list");
-  var count = el("count");
-  var search = el("search");
-  var detail = el("detail");
-  var statusLine = el("status");
-  var notice = el("notice");
-  var crateFoot = el("crate-foot");
-  var modeNote = el("mode-note");
-  var spaceSelect = el("space");
+  // src/virtual-scroll.ts
   var spacer = document.createElement("div");
   var rows = document.createElement("div");
   spacer.className = "spacer";
   rows.className = "rows";
   spacer.append(rows);
-  list.append(spacer);
-  function lengthLabel(ms) {
-    if (ms == null || ms === "") return "";
-    const total = Math.floor(Number(ms) / 1e3);
-    const minutes = Math.floor(total / 60);
-    const seconds = total % 60;
-    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  function mountTrackList() {
+    el("list").append(spacer);
   }
-  function clockLabel(stamp) {
-    if (stamp == null || stamp === "") return "";
-    const date = new Date(Number(stamp) * 1e3);
-    if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleString(void 0, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  }
-  function durationLabel(ms) {
-    const total = Math.round(Number(ms) / 1e3);
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor(total % 3600 / 60);
-    if (hours) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  }
-  function sizeLabel(bytes) {
-    const size = Number(bytes) || 0;
-    if (size < 1024) return `${size} bytes`;
-    const units = ["KB", "MB", "GB"];
-    let amount = size / 1024;
-    let unit = 0;
-    while (amount >= 1024 && unit < units.length - 1) {
-      amount /= 1024;
-      unit += 1;
+  function paintRows() {
+    const view = state.view || [];
+    const height = el("list").clientHeight || 600;
+    const start = Math.max(0, Math.floor(el("list").scrollTop / ROW) - 6);
+    const end = Math.min(view.length, Math.ceil((el("list").scrollTop + height) / ROW) + 6);
+    spacer.style.height = `${view.length * ROW}px`;
+    rows.style.transform = `translateY(${start * ROW}px)`;
+    rows.replaceChildren();
+    if (!view.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-list";
+      empty.textContent = state.mode === "duplicates" && !state.duplicateIds ? "Reading duplicates" : "No tracks match.";
+      rows.append(empty);
+      return;
     }
-    return `${amount.toFixed(1)} ${units[unit]}`;
-  }
-  function colorHex(color) {
-    if (color == null || Number(color) === 16777215) return "";
-    return `#${Number(color).toString(16).padStart(6, "0")}`;
-  }
-  function compare(a, b) {
-    const key = state.sort;
-    const dir = state.sortDir;
-    let av = a[key];
-    let bv = b[key];
-    if (key === "bpm" || key === "length_ms" || key === "start") {
-      const an = av == null || av === "" ? null : Number(av);
-      const bn = bv == null || bv === "" ? null : Number(bv);
-      if (an == null && bn == null) return a.id - b.id;
-      if (an == null) return 1;
-      if (bn == null) return -1;
-      if (an !== bn) return (an - bn) * dir;
-      return a.id - b.id;
+    for (let index = start; index < end; index += 1) {
+      const track = view[index];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "row";
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(track.id === state.selectedId));
+      button.dataset.id = String(track.id);
+      const titleCell = document.createElement("span");
+      titleCell.className = "cell";
+      const line = document.createElement("span");
+      line.className = "title-line";
+      const hex = colorHex(track.color);
+      if (hex) {
+        const swatch = document.createElement("span");
+        swatch.className = "swatch";
+        swatch.style.background = hex;
+        line.append(swatch);
+      }
+      if (track.emoji) {
+        const emoji = document.createElement("span");
+        emoji.textContent = track.emoji;
+        line.append(emoji);
+      }
+      const title = document.createElement("span");
+      title.className = "title";
+      title.textContent = track.name || "Untitled";
+      line.append(title);
+      if (track.missing) {
+        const missing = document.createElement("span");
+        missing.className = "missing-word";
+        missing.textContent = "missing";
+        line.append(missing);
+      }
+      if (track.stems) {
+        const stems = document.createElement("span");
+        stems.className = "missing-word";
+        stems.textContent = "stems";
+        line.append(stems);
+      }
+      titleCell.append(line);
+      const artist = document.createElement("span");
+      artist.className = "cell";
+      artist.textContent = track.artist ?? "";
+      const third = document.createElement("span");
+      third.className = "cell num";
+      const fourth = document.createElement("span");
+      fourth.className = "cell num";
+      const fifth = document.createElement("span");
+      fifth.className = "cell num";
+      if (track.entry) {
+        third.textContent = track.deck || "";
+        fourth.textContent = track.played || "";
+        fifth.textContent = clockLabel(track.start);
+      } else {
+        third.textContent = track.bpm == null ? "" : String(Math.round(Number(track.bpm) * 100) / 100);
+        fourth.textContent = track.key ?? "";
+        fifth.textContent = lengthLabel(track.length_ms);
+      }
+      button.append(titleCell, artist, third, fourth, fifth);
+      button.addEventListener("click", () => track.entry ? bridge.selectEntry(track.id) : bridge.selectTrack(track.id));
+      rows.append(button);
     }
-    av = String(av || "").toLocaleLowerCase();
-    bv = String(bv || "").toLocaleLowerCase();
-    if (!av && bv) return 1;
-    if (av && !bv) return -1;
-    const order = av.localeCompare(bv, void 0, { numeric: true, sensitivity: "base" });
-    if (order !== 0) return order * dir;
-    return a.id - b.id;
   }
+  function moveSelection(delta) {
+    const view = state.view || [];
+    const index = view.findIndex((track) => track.id === state.selectedId);
+    const next = view[Math.max(0, Math.min(view.length - 1, index + delta))];
+    if (!next) return;
+    if (next.entry) bridge.selectEntry(next.id);
+    else bridge.selectTrack(next.id);
+    const rowTop = view.indexOf(next) * ROW;
+    if (rowTop < el("list").scrollTop) el("list").scrollTop = rowTop;
+    if (rowTop + ROW > el("list").scrollTop + el("list").clientHeight) {
+      el("list").scrollTop = rowTop + ROW - el("list").clientHeight;
+    }
+  }
+  function wireVirtualScroll() {
+    el("list").addEventListener("scroll", () => paintRows());
+    el("list").addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        moveSelection(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        moveSelection(-1);
+      }
+    });
+  }
+
+  // src/views.ts
+  var relatedRequest = 0;
   function matchesQuery(track, terms) {
     if (!terms.length) return true;
     const hay = `${track.name} ${track.artist} ${track.album} ${track.genre} ${track.key} ${track.file}`.toLocaleLowerCase();
@@ -392,8 +503,8 @@
       const bucket = children.get(key);
       bucket.push(crate);
     }
-    for (const list2 of children.values()) {
-      list2.sort((a, b) => {
+    for (const list of children.values()) {
+      list.sort((a, b) => {
         if (state.crateSort === "name") {
           return a.name.localeCompare(b.name, void 0, { sensitivity: "base" }) || a.id - b.id;
         }
@@ -578,22 +689,22 @@
     return row;
   }
   function placeCrateFocus(previousId) {
-    const items = [...crateList.querySelectorAll(".crate")];
+    const items = [...el("crate-list").querySelectorAll(".crate")];
     if (!items.length) return null;
     const current = items.find((item) => item.dataset.id === previousId) || items[0];
     for (const item of items) item.tabIndex = item === current ? 0 : -1;
     return current;
   }
   function renderCrates() {
-    const scroll = crateList.scrollTop;
+    const scroll = el("crate-list").scrollTop;
     const active = document.activeElement;
-    const restore = crateList.contains(active) ? active.closest(".crate-row")?.querySelector(".crate")?.dataset.id ?? null : null;
+    const restore = el("crate-list").contains(active) ? active.closest(".crate-row")?.querySelector(".crate")?.dataset.id ?? null : null;
     const terms = queryTerms();
     const matched = terms.length ? new Set(state.tracks.filter((track) => matchesQuery(track, terms)).map((track) => track.id)) : null;
     const crates = visibleCrates();
     const holder = hiddenSelectionHolder(crates);
-    crateList.replaceChildren();
-    crateList.append(crateRow({
+    el("crate-list").replaceChildren();
+    el("crate-list").append(crateRow({
       id: "all",
       name: "All tracks",
       depth: 0,
@@ -608,7 +719,7 @@
         shown = 0;
         for (const id of members) if (matched.has(id)) shown += 1;
       }
-      crateList.append(crateRow({
+      el("crate-list").append(crateRow({
         id: crate.id,
         name: crate.name,
         depth: crate.depth || 0,
@@ -622,7 +733,7 @@
     }
     const focused = placeCrateFocus(restore);
     if (restore && focused) focused.focus({ preventScroll: true });
-    crateList.scrollTop = scroll;
+    el("crate-list").scrollTop = scroll;
     renderRules();
   }
   function renderRules() {
@@ -675,23 +786,23 @@
     const historyMode = state.mode === "history";
     el("crate-tools").hidden = !cratesMode;
     el("crate-actions").hidden = !cratesMode;
-    crateList.hidden = !cratesMode;
-    sessionList.hidden = !historyMode;
-    modeNote.hidden = cratesMode || historyMode;
+    el("crate-list").hidden = !cratesMode;
+    el("session-list").hidden = !historyMode;
+    el("mode-note").hidden = cratesMode || historyMode;
     const filesMode = state.mode === "files";
     const snapshotsMode = state.mode === "snapshots";
     document.querySelector(".browser").hidden = filesMode || snapshotsMode;
     el("detail").hidden = filesMode || snapshotsMode;
     el("files-panel").hidden = !filesMode;
     el("snapshots-panel").hidden = !snapshotsMode;
-    if (state.mode === "missing") modeNote.textContent = "Tracks Serato has marked missing in this space.";
+    if (state.mode === "missing") el("mode-note").textContent = "Tracks Serato has marked missing in this space.";
     if (state.mode === "duplicates") {
-      modeNote.textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
+      el("mode-note").textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
     }
-    if (state.mode === "stems") modeNote.textContent = "Tracks with a stems analysis state.";
-    if (filesMode) modeNote.textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
+    if (state.mode === "stems") el("mode-note").textContent = "Tracks with a stems analysis state.";
+    if (filesMode) el("mode-note").textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
     if (snapshotsMode) {
-      modeNote.textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
+      el("mode-note").textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
     }
     for (const button of document.querySelectorAll("#views button")) {
       button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
@@ -707,17 +818,17 @@
     syncMergeButton();
     if (filesMode) {
       const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
-      crateFoot.textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
+      el("crate-foot").textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
       return;
     }
     if (snapshotsMode) {
-      crateFoot.textContent = state.snapshotLoading ? "Reading snapshots" : `${state.snapshots.length.toLocaleString()} snapshots`;
+      el("crate-foot").textContent = state.snapshotLoading ? "Reading snapshots" : `${state.snapshots.length.toLocaleString()} snapshots`;
       return;
     }
     const pool = state.mode === "history" ? state.entries : footerTracks();
     const bytes = pool.reduce((sum, track) => sum + (Number(track.file_size) || 0), 0);
     const ms = pool.reduce((sum, track) => sum + (Number(track.length_ms) || 0), 0);
-    crateFoot.textContent = `${pool.length.toLocaleString()} · ${durationLabel(ms)} · ${sizeLabel(bytes)}`;
+    el("crate-foot").textContent = `${pool.length.toLocaleString()} · ${durationLabel(ms)} · ${sizeLabel(bytes)}`;
   }
   function footerTracks() {
     if (state.mode === "crates" && state.activeCrate !== "all") {
@@ -741,7 +852,7 @@
     renderColumns();
     const view = buildView();
     const noun = state.mode === "history" ? "play" : "track";
-    count.textContent = `${view.length.toLocaleString()} ${noun}${view.length === 1 ? "" : "s"}`;
+    el("count").textContent = `${view.length.toLocaleString()} ${noun}${view.length === 1 ? "" : "s"}`;
     if (state.mode === "crates") renderCrates();
     else document.querySelector(".rules")?.remove();
     paintRows();
@@ -751,88 +862,9 @@
         const empty = document.createElement("p");
         empty.className = "detail-empty";
         empty.textContent = state.mode === "history" && !state.historyId ? "Choose a session." : "No tracks match.";
-        detail.replaceChildren(empty);
+        el("detail").replaceChildren(empty);
       } else if (state.mode === "history") selectEntry(view[0].id);
       else selectTrack(view[0].id);
-    }
-  }
-  function paintRows() {
-    const view = state.view || [];
-    const height = list.clientHeight || 600;
-    const start = Math.max(0, Math.floor(list.scrollTop / ROW) - 6);
-    const end = Math.min(view.length, Math.ceil((list.scrollTop + height) / ROW) + 6);
-    spacer.style.height = `${view.length * ROW}px`;
-    rows.style.transform = `translateY(${start * ROW}px)`;
-    rows.replaceChildren();
-    if (!view.length) {
-      const empty = document.createElement("p");
-      empty.className = "empty-list";
-      empty.textContent = state.mode === "duplicates" && !state.duplicateIds ? "Reading duplicates" : "No tracks match.";
-      rows.append(empty);
-      return;
-    }
-    for (let index = start; index < end; index += 1) {
-      const track = view[index];
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "row";
-      button.setAttribute("role", "option");
-      button.setAttribute("aria-selected", String(track.id === state.selectedId));
-      button.dataset.id = String(track.id);
-      const titleCell = document.createElement("span");
-      titleCell.className = "cell";
-      const line = document.createElement("span");
-      line.className = "title-line";
-      const hex = colorHex(track.color);
-      if (hex) {
-        const swatch = document.createElement("span");
-        swatch.className = "swatch";
-        swatch.style.background = hex;
-        line.append(swatch);
-      }
-      if (track.emoji) {
-        const emoji = document.createElement("span");
-        emoji.textContent = track.emoji;
-        line.append(emoji);
-      }
-      const title = document.createElement("span");
-      title.className = "title";
-      title.textContent = track.name || "Untitled";
-      line.append(title);
-      if (track.missing) {
-        const missing = document.createElement("span");
-        missing.className = "missing-word";
-        missing.textContent = "missing";
-        line.append(missing);
-      }
-      if (track.stems) {
-        const stems = document.createElement("span");
-        stems.className = "missing-word";
-        stems.textContent = "stems";
-        line.append(stems);
-      }
-      titleCell.append(line);
-      const artist = document.createElement("span");
-      artist.className = "cell";
-      artist.textContent = track.artist ?? "";
-      const third = document.createElement("span");
-      third.className = "cell num";
-      const fourth = document.createElement("span");
-      fourth.className = "cell num";
-      const fifth = document.createElement("span");
-      fifth.className = "cell num";
-      if (track.entry) {
-        third.textContent = track.deck || "";
-        fourth.textContent = track.played || "";
-        fifth.textContent = clockLabel(track.start);
-      } else {
-        third.textContent = track.bpm == null ? "" : String(Math.round(Number(track.bpm) * 100) / 100);
-        fourth.textContent = track.key ?? "";
-        fifth.textContent = lengthLabel(track.length_ms);
-      }
-      button.append(titleCell, artist, third, fourth, fifth);
-      button.addEventListener("click", () => track.entry ? selectEntry(track.id) : selectTrack(track.id));
-      rows.append(button);
     }
   }
   function toggleCrate(id) {
@@ -856,12 +888,12 @@
   function selectCrate(id) {
     state.activeCrate = id;
     if (id !== "all") expandAncestors(id);
-    list.scrollTop = 0;
+    el("list").scrollTop = 0;
     renderList();
   }
   function focusCrateItem(item) {
     if (!item) return;
-    for (const button of crateList.querySelectorAll(".crate")) button.tabIndex = -1;
+    for (const button of el("crate-list").querySelectorAll(".crate")) button.tabIndex = -1;
     item.tabIndex = 0;
     item.focus();
   }
@@ -873,7 +905,7 @@
     const pending = document.createElement("p");
     pending.className = "detail-empty";
     pending.textContent = "Reading attributes";
-    detail.replaceChildren(pending);
+    el("detail").replaceChildren(pending);
     try {
       const response = await fetch(`/api/track?id=${id}&space=${encodeURIComponent(state.space)}`);
       const payload = await readJSONOr(response, {});
@@ -886,7 +918,7 @@
       const failure = document.createElement("p");
       failure.className = "detail-error";
       failure.textContent = failureOf(error).message;
-      detail.replaceChildren(failure);
+      el("detail").replaceChildren(failure);
     }
   }
   function selectEntry(id) {
@@ -932,7 +964,7 @@
       open.addEventListener("click", () => openInLibrary(entry.asset_id));
       body.append(open);
     }
-    detail.replaceChildren(body);
+    el("detail").replaceChildren(body);
   }
   function fieldInput(name, label, value, wide = false) {
     const wrap = document.createElement("label");
@@ -990,7 +1022,7 @@
     body.append(deck);
     const note = document.createElement("p");
     note.className = "lock-note";
-    note.textContent = track.serato?.message || statusLine.textContent;
+    note.textContent = track.serato?.message || el("status").textContent;
     body.append(note);
     const form = document.createElement("form");
     form.className = "editor";
@@ -1094,7 +1126,7 @@
       merge.textContent = "Merge copies";
       merge.disabled = !writable;
       merge.addEventListener("click", () => {
-        openMergeDialog().catch((error) => setNotice(failureOf(error).message));
+        bridge.openMergeDialog().catch((error) => setNotice(failureOf(error).message));
       });
       actions.append(merge);
     }
@@ -1152,7 +1184,7 @@
       }
       body.append(section);
     }
-    detail.replaceChildren(body);
+    el("detail").replaceChildren(body);
   }
   function markerSection(track) {
     const section = document.createElement("section");
@@ -1257,7 +1289,6 @@
     }
     return section;
   }
-  var relatedRequest = 0;
   function relatedSection(track, writable) {
     const section = document.createElement("section");
     section.className = "group";
@@ -1325,8 +1356,8 @@
     section.append(crate, crateNote);
   }
   function relatedSavedList(track, section, saved) {
-    const list2 = document.createElement("ul");
-    list2.className = "related-list";
+    const list = document.createElement("ul");
+    list.className = "related-list";
     for (const link of saved) {
       const item = document.createElement("li");
       item.className = "related-row";
@@ -1369,9 +1400,9 @@
       remove.setAttribute("aria-label", `Remove link to ${label}`);
       remove.addEventListener("click", () => removeRelated(track, section, link));
       item.append(main, remove);
-      list2.append(item);
+      list.append(item);
     }
-    return list2;
+    return list;
   }
   function relatedSearch(track, section, query) {
     const block = document.createElement("div");
@@ -1473,8 +1504,8 @@
     form.append(chosen, noteLabel, ratingLabel, mutualLabel, save);
   }
   function relatedSuggestList(track, section, suggested) {
-    const list2 = document.createElement("ul");
-    list2.className = "related-list";
+    const list = document.createElement("ul");
+    list.className = "related-list";
     for (const item of suggested) {
       const row = document.createElement("li");
       row.className = "related-row";
@@ -1503,9 +1534,9 @@
         }, "");
       });
       row.append(main, save);
-      list2.append(row);
+      list.append(row);
     }
-    return list2;
+    return list;
   }
   async function saveRelated(track, section, body, query) {
     try {
@@ -1583,27 +1614,14 @@
     section.append(holder);
     return section;
   }
-  function moveSelection(delta) {
-    const view = state.view || [];
-    const index = view.findIndex((track) => track.id === state.selectedId);
-    const next = view[Math.max(0, Math.min(view.length - 1, index + delta))];
-    if (!next) return;
-    if (next.entry) selectEntry(next.id);
-    else selectTrack(next.id);
-    const rowTop = view.indexOf(next) * ROW;
-    if (rowTop < list.scrollTop) list.scrollTop = rowTop;
-    if (rowTop + ROW > list.scrollTop + list.clientHeight) {
-      list.scrollTop = rowTop + ROW - list.clientHeight;
-    }
-  }
   function setNotice(text) {
-    notice.textContent = text || "";
-    notice.hidden = !text;
+    el("notice").textContent = text || "";
+    el("notice").hidden = !text;
   }
   function applyStatus(info) {
     state.serato = info;
     state.writable = Boolean(info?.writable);
-    statusLine.textContent = info?.message || "Library";
+    el("status").textContent = info?.message || "Library";
     renderShell();
   }
   function lockDown(error) {
@@ -1811,7 +1829,7 @@
     }
   }
   function renderSessions() {
-    sessionList.replaceChildren();
+    el("session-list").replaceChildren();
     for (const session of state.historySessions) {
       const button = document.createElement("button");
       button.type = "button";
@@ -1826,7 +1844,7 @@
       meta.textContent = String(session.played || 0);
       button.append(name, meta);
       button.addEventListener("click", () => openSession(session.id));
-      sessionList.append(button);
+      el("session-list").append(button);
     }
   }
   async function loadHistory() {
@@ -1847,7 +1865,7 @@
       return;
     }
     state.entries = payload.entries || [];
-    list.scrollTop = 0;
+    el("list").scrollTop = 0;
     renderList();
   }
   async function loadDuplicates() {
@@ -1865,7 +1883,7 @@
   }
   async function openInLibrary(assetId) {
     state.space = "Serato Library";
-    spaceSelect.value = state.space;
+    el("space").value = state.space;
     state.mode = "crates";
     state.activeCrate = "all";
     state.selectedId = assetId;
@@ -1873,7 +1891,7 @@
     selectTrack(assetId);
   }
   async function loadLibrary() {
-    count.textContent = "Loading the library";
+    el("count").textContent = "Loading the library";
     const response = await fetch(`/api/library?space=${encodeURIComponent(state.space)}`);
     const library = await readJSONOr(response, {});
     if (!response.ok) throw new Error(library.error || `Could not read the library (${response.status})`);
@@ -1896,7 +1914,7 @@
   }
   function setMode(mode) {
     state.mode = mode;
-    list.scrollTop = 0;
+    el("list").scrollTop = 0;
     if (mode === "history") {
       state.sort = "start";
       state.sortDir = -1;
@@ -1917,201 +1935,12 @@
     }
     renderList();
   }
-  search.addEventListener("input", () => {
-    state.query = search.value;
-    list.scrollTop = 0;
-    renderList();
-  });
-  el("crate-search").addEventListener("input", (event) => {
-    state.crateQuery = event.target.value;
-    renderCrates();
-  });
-  el("reload").addEventListener("click", () => {
-    const jobs = [loadLibrary()];
-    if (state.mode === "history") jobs.push(loadHistory());
-    if (state.mode === "duplicates") jobs.push(loadDuplicates());
-    Promise.all(jobs).catch(showFailure);
-  });
-  el("export-m3u").addEventListener("click", () => {
-    const crate = state.mode === "crates" ? state.activeCrate : "all";
-    const link = document.createElement("a");
-    link.href = `/api/export.m3u?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`;
-    link.download = "crate.m3u";
-    link.click();
-  });
-  function rekordboxExportUrl(report) {
-    const crate = state.mode === "crates" ? state.activeCrate : "all";
-    const memory = el("rekordbox-memory").checked ? "1" : "0";
-    const key = el("rekordbox-key").value;
-    const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}`;
-    return report ? `${base}&report=1` : base;
-  }
-  function fillRekordboxReport(lines) {
-    const list2 = el("rekordbox-report");
-    list2.replaceChildren();
-    for (const line of lines) {
-      const item = document.createElement("li");
-      item.textContent = line;
-      list2.append(item);
-    }
-  }
-  var rekordboxXml = "";
-  el("export-rekordbox").addEventListener("click", () => {
-    rekordboxXml = "";
-    fetch(rekordboxExportUrl(true)).then((response) => response.json().then((body) => ({ ok: response.ok, body }))).then(({ ok, body }) => {
-      if (!ok || typeof body.xml !== "string" || !body.xml.startsWith("<?xml")) {
-        setNotice(body.error || "The Rekordbox export failed.");
-        return;
-      }
-      rekordboxXml = body.xml;
-      fillRekordboxReport(body.report || []);
-      el("rekordbox-status").textContent = "";
-      el("rekordbox-dialog").showModal();
-    }).catch((error) => setNotice(failureOf(error).message));
-  });
-  el("rekordbox-cancel").addEventListener("click", () => {
-    rekordboxXml = "";
-    el("rekordbox-dialog").close();
-  });
-  el("rekordbox-download").addEventListener("click", () => {
-    if (!rekordboxXml.startsWith("<?xml")) {
-      el("rekordbox-status").textContent = "The export did not produce an XML file.";
-      return;
-    }
-    const blob = new Blob([rekordboxXml], { type: "application/xml" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "rekordbox.xml";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-    rekordboxXml = "";
-    el("rekordbox-dialog").close();
-  });
-  el("import-m3u").addEventListener("click", () => {
-    if (!state.writable) {
-      setNotice(statusLine.textContent);
-      return;
-    }
-    el("import-file").click();
-  });
-  el("import-file").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (file) importPlaylist(file).catch((error) => setNotice(failureOf(error).message));
-  });
-  spaceSelect.addEventListener("change", () => {
-    state.space = spaceSelect.value;
-    state.activeCrate = "all";
-    state.selectedId = null;
-    state.duplicateIds = null;
-    state.duplicateGroups = [];
-    loadLibrary().then(() => {
-      if (state.mode === "duplicates") return loadDuplicates();
-      return null;
-    }).catch(showFailure);
-  });
-  el("views").addEventListener("click", (event) => {
-    const button = event.target.closest("button");
-    if (button?.dataset.view) setMode(button.dataset.view);
-  });
-  el("snapshots-refresh").addEventListener("click", () => {
-    loadSnapshots().catch((error) => failSnapshots(error));
-  });
-  el("snapshots-take").addEventListener("click", () => {
-    takeSnapshot().catch((error) => failSnapshots(error));
-  });
-  el("snapshots-undo-button").addEventListener("click", () => {
-    const pending = state.snapshotUndo;
-    if (!pending || !pending.restore_id) return;
-    openSnapshotPlan(pending.restore_id).catch((error) => failSnapshots(error));
-  });
-  el("snapshot-cancel").addEventListener("click", () => {
-    el("snapshot-dialog").close();
-  });
-  el("snapshot-confirm").addEventListener("click", () => {
-    confirmSnapshotRestore().catch((error) => setSnapshotDialogStatus(failureOf(error).message));
-  });
-  document.querySelector(".sort-crates").addEventListener("click", (event) => {
-    const button = event.target.closest("button");
-    if (!button?.dataset.crateSort) return;
-    state.crateSort = button.dataset.crateSort;
-    renderCrates();
-    renderShell();
-  });
-  el("crate-new").addEventListener("click", () => createCrate().catch((error) => setNotice(failureOf(error).message)));
-  el("crate-rename").addEventListener("click", () => renameCrate().catch((error) => setNotice(failureOf(error).message)));
-  el("crate-color").addEventListener("click", () => colorCrate().catch((error) => setNotice(failureOf(error).message)));
-  el("crate-delete").addEventListener("click", () => deleteCrate().catch((error) => setNotice(failureOf(error).message)));
-  el("merge-duplicates").addEventListener("click", () => {
-    openMergeDialog().catch((error) => setNotice(failureOf(error).message));
-  });
-  el("merge-cancel").addEventListener("click", () => mergeDialog.close());
-  el("merge-confirm").addEventListener("click", () => {
-    confirmMerge().catch((error) => setNotice(failureOf(error).message));
-  });
-  el("merge-trash").addEventListener("change", () => syncTrashChoice());
-  document.querySelector(".columns").addEventListener("click", (event) => {
-    const button = event.target.closest("button");
-    if (!button?.dataset.sort) return;
-    const key = button.dataset.sort;
-    if (state.sort === key) state.sortDir *= -1;
-    else {
-      state.sort = key;
-      state.sortDir = key === "bpm" || key === "length_ms" || key === "start" ? -1 : 1;
-    }
-    renderColumns();
-    renderList();
-  });
-  crateList.addEventListener("keydown", (event) => {
-    const item = event.target.closest(".crate");
-    if (!item || !crateList.contains(item)) return;
-    const items = [...crateList.querySelectorAll(".crate")];
-    const index = items.indexOf(item);
-    const id = item.dataset.id === "all" ? "all" : Number(item.dataset.id);
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      focusCrateItem(items[Math.min(items.length - 1, index + 1)]);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      focusCrateItem(items[Math.max(0, index - 1)]);
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      focusCrateItem(items[0]);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      focusCrateItem(items[items.length - 1]);
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      if (!state.crateQuery && item.getAttribute("aria-expanded") === "false") toggleCrate(id);
-      else if (item.getAttribute("aria-expanded") === "true") focusCrateItem(items[index + 1]);
-    } else if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      if (!state.crateQuery && item.getAttribute("aria-expanded") === "true") toggleCrate(id);
-      else if (item.dataset.parent) {
-        focusCrateItem(items.find((button) => button.dataset.id === item.dataset.parent));
-      }
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      selectCrate(id);
-    }
-  });
-  list.addEventListener("scroll", () => paintRows());
-  list.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      moveSelection(1);
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      moveSelection(-1);
-    }
-  });
   function showFailure(error) {
-    count.textContent = "Library unavailable";
+    el("count").textContent = "Library unavailable";
     const failure = document.createElement("p");
     failure.className = "detail-error";
     failure.textContent = failureOf(error).message;
-    detail.replaceChildren(failure);
+    el("detail").replaceChildren(failure);
   }
   function selectedDuplicateGroup() {
     if (state.mode !== "duplicates" || state.selectedId == null) return null;
@@ -2128,382 +1957,6 @@
   function crateNamesFor(assetId) {
     return state.crates.filter((crate) => !crate.smart && (crate.tracks || []).includes(assetId)).map((crate) => crate.name);
   }
-  var mergeDialog = el("merge-dialog");
-  var mergeChoices = el("merge-choices");
-  var mergePreviewBox = el("merge-preview");
-  var mergeStatus = el("merge-status");
-  var mergeTrash = el("merge-trash");
-  var mergeConfirm = el("merge-confirm");
-  var mergePreview = null;
-  var mergeToken = 0;
-  var mergeLoading = false;
-  function selectedMergeKeepId() {
-    const checked = mergeChoices.querySelector("input:checked");
-    if (checked) return Number(checked.value);
-    return state.selectedId;
-  }
-  function previewFieldValue(field, value) {
-    if (value == null || value === "") return "empty";
-    if (field === "time_added") {
-      const date = new Date(Number(value) * 1e3);
-      if (!Number.isNaN(date.getTime())) {
-        return date.toLocaleString(void 0, {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-          second: "2-digit"
-        });
-      }
-    }
-    return String(value);
-  }
-  function renderMergePreview(preview) {
-    mergePreviewBox.replaceChildren();
-    if (!preview) {
-      const pending = document.createElement("p");
-      pending.textContent = "Reading the preview…";
-      mergePreviewBox.append(pending);
-      return;
-    }
-    const list2 = document.createElement("ul");
-    list2.className = "merge-preview";
-    const added = preview.crates_added || [];
-    const item = (text) => {
-      const line = document.createElement("li");
-      line.textContent = text;
-      list2.append(line);
-    };
-    if (added.length) {
-      const names = added.map((crate) => crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name);
-      item(`Add the kept copy to ${names.join(", ")}.`);
-    } else if ((preview.crates_kept || []).length) {
-      item("The kept copy is already in every crate the others use. It stays where it is.");
-    } else {
-      item("None of the copies are in a crate.");
-    }
-    for (const space of preview.spaces_added || []) item(`Add the kept copy to the ${space} space.`);
-    if ((preview.fields || []).length) {
-      for (const field of preview.fields || []) {
-        const before = previewFieldValue(field.field || "", field.before);
-        const after = previewFieldValue(field.field || "", field.after);
-        item(`${field.label} changes from ${before} to ${after}.`);
-      }
-    } else {
-      item("No empty fields or higher play count to copy.");
-    }
-    if (preview.history_repointed) {
-      const count2 = Number(preview.history_entries) || 0;
-      item(count2 ? `Point ${count2} history ${count2 === 1 ? "entry" : "entries"} at the kept copy.` : "No history entries point at the other copies.");
-    } else {
-      item("This library has no history track id to repoint.");
-    }
-    const removed = (preview.removed || []).length;
-    item(`Remove ${removed} ${removed === 1 ? "copy" : "copies"} from the library.`);
-    for (const file of preview.files || []) {
-      if (file.reason) item(`${file.file}: ${file.reason}`);
-    }
-    mergePreviewBox.append(list2);
-    if (preview.cue_warning) {
-      const warning = document.createElement("p");
-      warning.className = "merge-warning";
-      warning.textContent = preview.cue_warning;
-      mergePreviewBox.append(warning);
-    }
-    const files = document.createElement("p");
-    files.id = "merge-file-note";
-    files.className = "dialog-note";
-    mergePreviewBox.append(files);
-  }
-  function syncTrashChoice() {
-    const files = mergePreview?.files || [];
-    const trashable = files.filter((file) => file.on_disk && !file.blocks_trash);
-    const blocked = files.some((file) => file.blocks_trash);
-    mergeTrash.disabled = !mergePreview || mergeLoading || blocked || trashable.length === 0;
-    if (mergeTrash.disabled) mergeTrash.checked = false;
-    const danger = mergeTrash.checked;
-    mergeConfirm.classList.toggle("danger", danger);
-    mergeConfirm.textContent = mergeLoading ? "Merging…" : danger ? "Merge and move files to Trash" : "Merge copies";
-    mergeConfirm.disabled = mergeLoading || !mergePreview || mergePreview.writable === false;
-    const note = el("merge-file-note");
-    if (!note) return;
-    if (danger) note.textContent = `Move ${trashable.map((file) => file.file).join(", ")} to the Trash.`;
-    else note.textContent = "Audio files stay on disk.";
-  }
-  async function refreshMergePreview() {
-    const keepId = selectedMergeKeepId();
-    const token = ++mergeToken;
-    mergeLoading = false;
-    mergePreview = null;
-    mergeStatus.textContent = "";
-    renderMergePreview(null);
-    syncTrashChoice();
-    mergeConfirm.disabled = true;
-    try {
-      const preview = await postJSON("/api/duplicates/merge", {
-        space: state.space,
-        keep_id: keepId,
-        preview: true
-      });
-      if (token !== mergeToken) return;
-      mergePreview = preview;
-      renderMergePreview(preview);
-      if (preview.writable === false) {
-        mergeStatus.textContent = "Quit Serato before merging. The preview shows the plan.";
-      }
-      syncTrashChoice();
-    } catch (error) {
-      if (token !== mergeToken) return;
-      mergePreview = null;
-      mergePreviewBox.replaceChildren();
-      const failed = document.createElement("p");
-      failed.textContent = "The preview could not be read.";
-      mergePreviewBox.append(failed);
-      mergeStatus.textContent = failureOf(error).message;
-      syncTrashChoice();
-    }
-  }
-  function renderMergeChoices() {
-    const group = selectedDuplicateGroup();
-    mergeChoices.replaceChildren();
-    if (!group) return;
-    for (const id of group.ids || []) {
-      const track = state.byId.get(id) || { id, file: "", play_count: null, missing: false };
-      const label = document.createElement("label");
-      label.className = "merge-choice";
-      label.htmlFor = `merge-keep-${id}`;
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = "merge-keep";
-      input.id = `merge-keep-${id}`;
-      input.value = String(id);
-      input.checked = id === state.selectedId;
-      input.addEventListener("change", () => {
-        if (input.checked) refreshMergePreview().catch((error) => setNotice(failureOf(error).message));
-      });
-      const text = document.createElement("span");
-      const name = document.createElement("span");
-      name.textContent = track.file || `Track ${id}`;
-      const meta = document.createElement("span");
-      meta.className = "merge-meta";
-      const parts = [];
-      if (track.play_count != null) parts.push(`${track.play_count} plays`);
-      const crates = crateNamesFor(id);
-      if (crates.length) parts.push(crates.join(", "));
-      if (track.missing) parts.push("missing");
-      meta.textContent = parts.join(" · ");
-      text.append(name, meta);
-      label.append(input, text);
-      mergeChoices.append(label);
-    }
-  }
-  async function openMergeDialog() {
-    if (!selectedDuplicateGroup() || !state.writable) return;
-    if (typeof mergeDialog.showModal !== "function") return;
-    mergeTrash.checked = false;
-    mergeStatus.textContent = "";
-    renderMergeChoices();
-    if (!mergeDialog.open) mergeDialog.showModal();
-    el("merge-cancel").focus();
-    await refreshMergePreview();
-  }
-  async function confirmMerge() {
-    const keepId = selectedMergeKeepId();
-    if (keepId == null || mergeLoading) return;
-    const trash = mergeTrash.checked;
-    mergeLoading = true;
-    syncTrashChoice();
-    mergeStatus.textContent = "";
-    try {
-      const result = await postJSON("/api/duplicates/merge", {
-        space: state.space,
-        keep_id: keepId,
-        confirm: true,
-        delete_files: trash,
-        confirm_delete_files: trash
-      });
-      mergeDialog.close();
-      const count2 = (result.removed || []).length;
-      const name = result.kept?.file || "the kept copy";
-      let message = `Merged ${count2} ${count2 === 1 ? "copy" : "copies"} into ${name}.`;
-      if (result.warning) message = `${message} ${result.warning}`;
-      if (result.cue_warning) message = `${message} ${result.cue_warning}`;
-      setNotice(message);
-      state.selectedId = keepId;
-      await loadLibrary();
-      if (state.mode === "duplicates") await loadDuplicates();
-      if (state.byId.has(keepId)) selectTrack(keepId);
-    } catch (error) {
-      mergeStatus.textContent = failureOf(error).message;
-      if (failureOf(error).status === 409) {
-        lockDown(error);
-        mergeDialog.close();
-      }
-    } finally {
-      mergeLoading = false;
-      syncTrashChoice();
-    }
-  }
-  var consentDialog = el("consent-dialog");
-  var settingsDialog = el("settings-dialog");
-  var telemetryToggle = el("telemetry-toggle");
-  var telemetryNote = el("telemetry-note");
-  var consentStatus = el("consent-status");
-  var settingsStatus = el("settings-status");
-  var logFallback = el("log-fallback");
-  var consentSettled = false;
-  var privacySync = false;
-  function telemetryNoteText() {
-    if (!state.telemetryConfigured) {
-      return "This copy has no telemetry keys, so nothing is sent either way.";
-    }
-    if (state.telemetryConsent === true) {
-      return "Anonymous counts and crash reports can be sent.";
-    }
-    return "Nothing is sent.";
-  }
-  function applyPrivacy(payload) {
-    state.telemetryConsent = payload.telemetry_consent ?? null;
-    state.telemetryConfigured = Boolean(payload.telemetry_configured);
-    privacySync = true;
-    telemetryToggle.checked = state.telemetryConsent === true;
-    privacySync = false;
-    telemetryNote.textContent = telemetryNoteText();
-  }
-  async function saveConsent(value, status) {
-    status.textContent = "Saving…";
-    try {
-      const payload = await postJSON("/api/settings", { telemetry_consent: value });
-      applyPrivacy(payload);
-      status.textContent = value ? "Sharing is on. Anonymous counts and crash reports can be sent." : "Sharing is off. Nothing is sent.";
-      return true;
-    } catch (error) {
-      status.textContent = "Couldn't save that choice. Try again.";
-      return false;
-    }
-  }
-  function showConsent() {
-    if (typeof consentDialog.showModal !== "function") return;
-    if (consentDialog.open) return;
-    consentSettled = false;
-    consentStatus.textContent = "";
-    consentDialog.showModal();
-    el("consent-decline").focus();
-  }
-  async function loadPrivacy() {
-    const response = await fetch("/api/settings");
-    const payload = await readJSONOr(response, {});
-    if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
-    applyPrivacy(payload);
-    if (payload.needs_consent_prompt) showConsent();
-  }
-  el("consent-decline").addEventListener("click", () => {
-    saveConsent(false, consentStatus).then((ok) => {
-      if (!ok) return;
-      consentSettled = true;
-      consentDialog.close();
-    });
-  });
-  el("consent-accept").addEventListener("click", () => {
-    saveConsent(true, consentStatus).then((ok) => {
-      if (!ok) return;
-      consentSettled = true;
-      consentDialog.close();
-    });
-  });
-  consentDialog.addEventListener("close", () => {
-    if (consentSettled || state.telemetryConsent !== null) return;
-    saveConsent(false, consentStatus).then((ok) => {
-      if (ok) {
-        consentSettled = true;
-        return;
-      }
-      consentDialog.showModal();
-    });
-  });
-  el("open-settings").addEventListener("click", () => {
-    settingsStatus.textContent = "";
-    logFallback.hidden = true;
-    telemetryNote.textContent = telemetryNoteText();
-    settingsDialog.showModal();
-  });
-  el("settings-close").addEventListener("click", () => {
-    settingsDialog.close();
-  });
-  telemetryToggle.addEventListener("change", () => {
-    if (privacySync) return;
-    const want = telemetryToggle.checked;
-    telemetryToggle.disabled = true;
-    saveConsent(want, settingsStatus).then((ok) => {
-      telemetryToggle.disabled = false;
-      if (ok) {
-        consentSettled = true;
-        return;
-      }
-      privacySync = true;
-      telemetryToggle.checked = state.telemetryConsent === true;
-      privacySync = false;
-    });
-  });
-  el("open-logs").addEventListener("click", () => {
-    const button = el("open-logs");
-    button.disabled = true;
-    settingsStatus.textContent = "Opening…";
-    postJSON("/api/logs/open", {}).then(() => {
-      settingsStatus.textContent = "Opened the logs folder.";
-    }).catch(() => {
-      settingsStatus.textContent = "Couldn't open the logs folder.";
-    }).finally(() => {
-      button.disabled = false;
-    });
-  });
-  el("copy-logs").addEventListener("click", async () => {
-    const button = el("copy-logs");
-    button.disabled = true;
-    settingsStatus.textContent = "Copying…";
-    try {
-      const response = await fetch("/api/logs");
-      const payload = await readJSONOr(response, {});
-      if (!response.ok) throw new Error(payload.error || "Couldn't copy the logs.");
-      const text = payload.text || "";
-      if (!text) {
-        settingsStatus.textContent = "No log entries yet.";
-        return;
-      }
-      let copied = false;
-      if (navigator.clipboard && window.isSecureContext) {
-        try {
-          await navigator.clipboard.writeText(text);
-          copied = true;
-        } catch (error) {
-          copied = false;
-        }
-      }
-      if (copied) {
-        logFallback.hidden = true;
-        settingsStatus.textContent = payload.truncated ? "Copied the latest log entries. Older entries were left out." : "Copied the logs.";
-        return;
-      }
-      logFallback.hidden = false;
-      logFallback.value = text;
-      logFallback.focus();
-      logFallback.select();
-      settingsStatus.textContent = "Couldn't copy automatically. Select the log text and copy it.";
-    } catch (error) {
-      settingsStatus.textContent = "Couldn't copy the logs.";
-    } finally {
-      button.disabled = false;
-    }
-  });
-  var filesDialog = el("files-dialog");
-  var filesList = el("files-list");
-  var filesStatus = el("files-status");
-  var filesName = el("files-name");
-  var filesReplacement = el("files-replacement");
-  var filesPreview = null;
-  var filesAction = "";
-  var filesTrigger = null;
   function failFiles(error) {
     state.filesLoading = false;
     state.filesError = failureOf(error).message || "That folder could not be read.";
@@ -2543,25 +1996,25 @@
     if (state.filesError) notes.push(state.filesError);
     if (state.filesMessage) notes.push(state.filesMessage);
     if (state.filesTruncated) notes.push("Some files are not listed.");
-    filesStatus.textContent = notes.join(" ");
-    filesList.setAttribute("aria-busy", String(state.filesLoading));
-    filesList.replaceChildren();
+    el("files-status").textContent = notes.join(" ");
+    el("files-list").setAttribute("aria-busy", String(state.filesLoading));
+    el("files-list").replaceChildren();
     if (state.filesLoading && !state.filesEntries.length) {
       const loading = document.createElement("p");
       loading.className = "files-empty";
       loading.textContent = "Reading this folder.";
-      filesList.append(loading);
+      el("files-list").append(loading);
     } else if (!state.filesEntries.length) {
       const empty = document.createElement("p");
       empty.className = "files-empty";
       empty.textContent = state.filesError || "This folder is empty.";
-      filesList.append(empty);
+      el("files-list").append(empty);
     } else {
       const rank = { dir: 0, file: 1, link: 2 };
       const entries = [...state.filesEntries].sort((left, right) => {
         return (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3) || left.name.localeCompare(right.name);
       });
-      for (const entry of entries) filesList.append(fileRow(entry));
+      for (const entry of entries) el("files-list").append(fileRow(entry));
     }
     const selected = selectedFiles();
     const locked = !state.writable || state.filesLoading;
@@ -2620,6 +2073,394 @@
   function selectedFiles() {
     return state.filesEntries.filter((entry) => entry.kind === "file" && state.filesSelected.has(entry.path));
   }
+  function wireLibrary() {
+    el("search").addEventListener("input", () => {
+      state.query = el("search").value;
+      el("list").scrollTop = 0;
+      renderList();
+    });
+    el("crate-search").addEventListener("input", (event) => {
+      state.crateQuery = event.target.value;
+      renderCrates();
+    });
+    el("reload").addEventListener("click", () => {
+      const jobs = [loadLibrary()];
+      if (state.mode === "history") jobs.push(loadHistory());
+      if (state.mode === "duplicates") jobs.push(loadDuplicates());
+      Promise.all(jobs).catch(showFailure);
+    });
+    el("export-m3u").addEventListener("click", () => {
+      const crate = state.mode === "crates" ? state.activeCrate : "all";
+      const link = document.createElement("a");
+      link.href = `/api/export.m3u?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`;
+      link.download = "crate.m3u";
+      link.click();
+    });
+    el("import-m3u").addEventListener("click", () => {
+      if (!state.writable) {
+        setNotice(el("status").textContent);
+        return;
+      }
+      el("import-file").click();
+    });
+    el("import-file").addEventListener("change", (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (file) importPlaylist(file).catch((error) => setNotice(failureOf(error).message));
+    });
+    el("space").addEventListener("change", () => {
+      state.space = el("space").value;
+      state.activeCrate = "all";
+      state.selectedId = null;
+      state.duplicateIds = null;
+      state.duplicateGroups = [];
+      loadLibrary().then(() => {
+        if (state.mode === "duplicates") return loadDuplicates();
+        return null;
+      }).catch(showFailure);
+    });
+    el("views").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (button?.dataset.view) setMode(button.dataset.view);
+    });
+    document.querySelector(".sort-crates").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button?.dataset.crateSort) return;
+      state.crateSort = button.dataset.crateSort;
+      renderCrates();
+      renderShell();
+    });
+    el("crate-new").addEventListener("click", () => createCrate().catch((error) => setNotice(failureOf(error).message)));
+    el("crate-rename").addEventListener("click", () => renameCrate().catch((error) => setNotice(failureOf(error).message)));
+    el("crate-color").addEventListener("click", () => colorCrate().catch((error) => setNotice(failureOf(error).message)));
+    el("crate-delete").addEventListener("click", () => deleteCrate().catch((error) => setNotice(failureOf(error).message)));
+    document.querySelector(".columns").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button?.dataset.sort) return;
+      const key = button.dataset.sort;
+      if (state.sort === key) state.sortDir *= -1;
+      else {
+        state.sort = key;
+        state.sortDir = key === "bpm" || key === "length_ms" || key === "start" ? -1 : 1;
+      }
+      renderColumns();
+      renderList();
+    });
+    el("crate-list").addEventListener("keydown", (event) => {
+      const item = event.target.closest(".crate");
+      if (!item || !el("crate-list").contains(item)) return;
+      const items = [...el("crate-list").querySelectorAll(".crate")];
+      const index = items.indexOf(item);
+      const id = item.dataset.id === "all" ? "all" : Number(item.dataset.id);
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        focusCrateItem(items[Math.min(items.length - 1, index + 1)]);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        focusCrateItem(items[Math.max(0, index - 1)]);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        focusCrateItem(items[0]);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        focusCrateItem(items[items.length - 1]);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (!state.crateQuery && item.getAttribute("aria-expanded") === "false") toggleCrate(id);
+        else if (item.getAttribute("aria-expanded") === "true") focusCrateItem(items[index + 1]);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        if (!state.crateQuery && item.getAttribute("aria-expanded") === "true") toggleCrate(id);
+        else if (item.dataset.parent) {
+          focusCrateItem(items.find((button) => button.dataset.id === item.dataset.parent));
+        }
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectCrate(id);
+      }
+    });
+  }
+  bridge.selectTrack = selectTrack;
+  bridge.selectEntry = selectEntry;
+
+  // src/dialogs.ts
+  var rekordboxXml = "";
+  var mergePreview = null;
+  var mergeToken = 0;
+  var mergeLoading = false;
+  var consentSettled = false;
+  var privacySync = false;
+  var filesPreview = null;
+  var filesAction = "";
+  var filesTrigger = null;
+  function rekordboxExportUrl(report) {
+    const crate = state.mode === "crates" ? state.activeCrate : "all";
+    const memory = el("rekordbox-memory").checked ? "1" : "0";
+    const key = el("rekordbox-key").value;
+    const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&key=${encodeURIComponent(key)}`;
+    return report ? `${base}&report=1` : base;
+  }
+  function fillRekordboxReport(lines) {
+    const list = el("rekordbox-report");
+    list.replaceChildren();
+    for (const line of lines) {
+      const item = document.createElement("li");
+      item.textContent = line;
+      list.append(item);
+    }
+  }
+  function selectedMergeKeepId() {
+    const checked = el("merge-choices").querySelector("input:checked");
+    if (checked) return Number(checked.value);
+    return state.selectedId;
+  }
+  function previewFieldValue(field, value) {
+    if (value == null || value === "") return "empty";
+    if (field === "time_added") {
+      const date = new Date(Number(value) * 1e3);
+      if (!Number.isNaN(date.getTime())) {
+        return date.toLocaleString(void 0, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          second: "2-digit"
+        });
+      }
+    }
+    return String(value);
+  }
+  function renderMergePreview(preview) {
+    el("merge-preview").replaceChildren();
+    if (!preview) {
+      const pending = document.createElement("p");
+      pending.textContent = "Reading the preview…";
+      el("merge-preview").append(pending);
+      return;
+    }
+    const list = document.createElement("ul");
+    list.className = "merge-preview";
+    const added = preview.crates_added || [];
+    const item = (text) => {
+      const line = document.createElement("li");
+      line.textContent = text;
+      list.append(line);
+    };
+    if (added.length) {
+      const names = added.map((crate) => crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name);
+      item(`Add the kept copy to ${names.join(", ")}.`);
+    } else if ((preview.crates_kept || []).length) {
+      item("The kept copy is already in every crate the others use. It stays where it is.");
+    } else {
+      item("None of the copies are in a crate.");
+    }
+    for (const space of preview.spaces_added || []) item(`Add the kept copy to the ${space} space.`);
+    if ((preview.fields || []).length) {
+      for (const field of preview.fields || []) {
+        const before = previewFieldValue(field.field || "", field.before);
+        const after = previewFieldValue(field.field || "", field.after);
+        item(`${field.label} changes from ${before} to ${after}.`);
+      }
+    } else {
+      item("No empty fields or higher play count to copy.");
+    }
+    if (preview.history_repointed) {
+      const count = Number(preview.history_entries) || 0;
+      item(count ? `Point ${count} history ${count === 1 ? "entry" : "entries"} at the kept copy.` : "No history entries point at the other copies.");
+    } else {
+      item("This library has no history track id to repoint.");
+    }
+    const removed = (preview.removed || []).length;
+    item(`Remove ${removed} ${removed === 1 ? "copy" : "copies"} from the library.`);
+    for (const file of preview.files || []) {
+      if (file.reason) item(`${file.file}: ${file.reason}`);
+    }
+    el("merge-preview").append(list);
+    if (preview.cue_warning) {
+      const warning = document.createElement("p");
+      warning.className = "merge-warning";
+      warning.textContent = preview.cue_warning;
+      el("merge-preview").append(warning);
+    }
+    const files = document.createElement("p");
+    files.id = "merge-file-note";
+    files.className = "dialog-note";
+    el("merge-preview").append(files);
+  }
+  function syncTrashChoice() {
+    const files = mergePreview?.files || [];
+    const trashable = files.filter((file) => file.on_disk && !file.blocks_trash);
+    const blocked = files.some((file) => file.blocks_trash);
+    el("merge-trash").disabled = !mergePreview || mergeLoading || blocked || trashable.length === 0;
+    if (el("merge-trash").disabled) el("merge-trash").checked = false;
+    const danger = el("merge-trash").checked;
+    el("merge-confirm").classList.toggle("danger", danger);
+    el("merge-confirm").textContent = mergeLoading ? "Merging…" : danger ? "Merge and move files to Trash" : "Merge copies";
+    el("merge-confirm").disabled = mergeLoading || !mergePreview || mergePreview.writable === false;
+    const note = el("merge-file-note");
+    if (!note) return;
+    if (danger) note.textContent = `Move ${trashable.map((file) => file.file).join(", ")} to the Trash.`;
+    else note.textContent = "Audio files stay on disk.";
+  }
+  async function refreshMergePreview() {
+    const keepId = selectedMergeKeepId();
+    const token = ++mergeToken;
+    mergeLoading = false;
+    mergePreview = null;
+    el("merge-status").textContent = "";
+    renderMergePreview(null);
+    syncTrashChoice();
+    el("merge-confirm").disabled = true;
+    try {
+      const preview = await postJSON("/api/duplicates/merge", {
+        space: state.space,
+        keep_id: keepId,
+        preview: true
+      });
+      if (token !== mergeToken) return;
+      mergePreview = preview;
+      renderMergePreview(preview);
+      if (preview.writable === false) {
+        el("merge-status").textContent = "Quit Serato before merging. The preview shows the plan.";
+      }
+      syncTrashChoice();
+    } catch (error) {
+      if (token !== mergeToken) return;
+      mergePreview = null;
+      el("merge-preview").replaceChildren();
+      const failed = document.createElement("p");
+      failed.textContent = "The preview could not be read.";
+      el("merge-preview").append(failed);
+      el("merge-status").textContent = failureOf(error).message;
+      syncTrashChoice();
+    }
+  }
+  function renderMergeChoices() {
+    const group = selectedDuplicateGroup();
+    el("merge-choices").replaceChildren();
+    if (!group) return;
+    for (const id of group.ids || []) {
+      const track = state.byId.get(id) || { id, file: "", play_count: null, missing: false };
+      const label = document.createElement("label");
+      label.className = "merge-choice";
+      label.htmlFor = `merge-keep-${id}`;
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "merge-keep";
+      input.id = `merge-keep-${id}`;
+      input.value = String(id);
+      input.checked = id === state.selectedId;
+      input.addEventListener("change", () => {
+        if (input.checked) refreshMergePreview().catch((error) => setNotice(failureOf(error).message));
+      });
+      const text = document.createElement("span");
+      const name = document.createElement("span");
+      name.textContent = track.file || `Track ${id}`;
+      const meta = document.createElement("span");
+      meta.className = "merge-meta";
+      const parts = [];
+      if (track.play_count != null) parts.push(`${track.play_count} plays`);
+      const crates = crateNamesFor(id);
+      if (crates.length) parts.push(crates.join(", "));
+      if (track.missing) parts.push("missing");
+      meta.textContent = parts.join(" · ");
+      text.append(name, meta);
+      label.append(input, text);
+      el("merge-choices").append(label);
+    }
+  }
+  async function openMergeDialog() {
+    if (!selectedDuplicateGroup() || !state.writable) return;
+    if (typeof el("merge-dialog").showModal !== "function") return;
+    el("merge-trash").checked = false;
+    el("merge-status").textContent = "";
+    renderMergeChoices();
+    if (!el("merge-dialog").open) el("merge-dialog").showModal();
+    el("merge-cancel").focus();
+    await refreshMergePreview();
+  }
+  async function confirmMerge() {
+    const keepId = selectedMergeKeepId();
+    if (keepId == null || mergeLoading) return;
+    const trash = el("merge-trash").checked;
+    mergeLoading = true;
+    syncTrashChoice();
+    el("merge-status").textContent = "";
+    try {
+      const result = await postJSON("/api/duplicates/merge", {
+        space: state.space,
+        keep_id: keepId,
+        confirm: true,
+        delete_files: trash,
+        confirm_delete_files: trash
+      });
+      el("merge-dialog").close();
+      const count = (result.removed || []).length;
+      const name = result.kept?.file || "the kept copy";
+      let message = `Merged ${count} ${count === 1 ? "copy" : "copies"} into ${name}.`;
+      if (result.warning) message = `${message} ${result.warning}`;
+      if (result.cue_warning) message = `${message} ${result.cue_warning}`;
+      setNotice(message);
+      state.selectedId = keepId;
+      await loadLibrary();
+      if (state.mode === "duplicates") await loadDuplicates();
+      if (state.byId.has(keepId)) selectTrack(keepId);
+    } catch (error) {
+      el("merge-status").textContent = failureOf(error).message;
+      if (failureOf(error).status === 409) {
+        lockDown(error);
+        el("merge-dialog").close();
+      }
+    } finally {
+      mergeLoading = false;
+      syncTrashChoice();
+    }
+  }
+  function telemetryNoteText() {
+    if (!state.telemetryConfigured) {
+      return "This copy has no telemetry keys, so nothing is sent either way.";
+    }
+    if (state.telemetryConsent === true) {
+      return "Anonymous counts and crash reports can be sent.";
+    }
+    return "Nothing is sent.";
+  }
+  function applyPrivacy(payload) {
+    state.telemetryConsent = payload.telemetry_consent ?? null;
+    state.telemetryConfigured = Boolean(payload.telemetry_configured);
+    privacySync = true;
+    el("telemetry-toggle").checked = state.telemetryConsent === true;
+    privacySync = false;
+    el("telemetry-note").textContent = telemetryNoteText();
+  }
+  async function saveConsent(value, status) {
+    status.textContent = "Saving…";
+    try {
+      const payload = await postJSON("/api/settings", { telemetry_consent: value });
+      applyPrivacy(payload);
+      status.textContent = value ? "Sharing is on. Anonymous counts and crash reports can be sent." : "Sharing is off. Nothing is sent.";
+      return true;
+    } catch (error) {
+      status.textContent = "Couldn't save that choice. Try again.";
+      return false;
+    }
+  }
+  function showConsent() {
+    if (typeof el("consent-dialog").showModal !== "function") return;
+    if (el("consent-dialog").open) return;
+    consentSettled = false;
+    el("consent-status").textContent = "";
+    el("consent-dialog").showModal();
+    el("consent-decline").focus();
+  }
+  async function loadPrivacy() {
+    const response = await fetch("/api/settings");
+    const payload = await readJSONOr(response, {});
+    if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
+    applyPrivacy(payload);
+    if (payload.needs_consent_prompt) showConsent();
+  }
   function openFilesDialog(action, trigger) {
     filesAction = action;
     filesPreview = null;
@@ -2631,20 +2472,20 @@
     el("files-dialog-status").textContent = "";
     el("files-changes").replaceChildren();
     const selected = selectedFiles();
-    if (action === "rename" && selected.length === 1) filesName.value = selected[0].name;
-    if (action === "replace") filesReplacement.value = "";
+    if (action === "rename" && selected.length === 1) el("files-name").value = selected[0].name;
+    if (action === "replace") el("files-replacement").value = "";
     const confirm2 = el("files-confirm");
     confirm2.classList.toggle("danger", action === "delete");
     confirm2.textContent = action === "delete" ? "Move to Trash" : "Confirm";
     syncFilesDialog();
-    filesDialog.showModal();
+    el("files-dialog").showModal();
     if (action === "delete" || action === "move" || action === "move_folder") {
       el("files-cancel").focus();
       reviewFiles().catch((error) => {
         el("files-dialog-status").textContent = failureOf(error).message;
       });
-    } else if (action === "rename") filesName.focus();
-    else filesReplacement.focus();
+    } else if (action === "rename") el("files-name").focus();
+    else el("files-replacement").focus();
   }
   function syncFilesDialog() {
     const confirm2 = el("files-confirm");
@@ -2653,7 +2494,7 @@
     confirm2.disabled = !ready;
     review.hidden = filesAction === "delete" || filesAction === "move" || filesAction === "move_folder";
     if (!state.writable) {
-      el("files-dialog-status").textContent = statusLine.textContent;
+      el("files-dialog-status").textContent = el("status").textContent;
     }
   }
   async function reviewFiles() {
@@ -2664,19 +2505,19 @@
     el("files-summary").textContent = payload.summary || "";
     el("files-warning").textContent = payload.warning || "";
     el("files-dialog-status").textContent = payload.ok ? "" : payload.error || "That change was not saved.";
-    const list2 = el("files-changes");
-    list2.replaceChildren();
+    const list = el("files-changes");
+    list.replaceChildren();
     for (const change of payload.changes || []) {
       const item = document.createElement("li");
       const crates = Array.isArray(change.crates) && change.crates.length ? ` Crates: ${change.crates.join(", ")}.` : "";
       const effect = change.effect === "trash" ? "Trash" : change.to;
       item.textContent = `${change.from} → ${effect}${crates}`;
-      list2.append(item);
+      list.append(item);
     }
     if (payload.more) {
       const more = document.createElement("li");
       more.textContent = `And ${payload.more} more.`;
-      list2.append(more);
+      list.append(more);
     }
     if (payload.serato) applyStatus(payload.serato);
     syncFilesDialog();
@@ -2687,7 +2528,7 @@
     if (filesAction === "rename") {
       const selected = selectedFiles();
       body.path = selected[0]?.path || state.filesPickPaths[0];
-      body.name = filesName.value;
+      body.name = el("files-name").value;
     } else if (filesAction === "move") {
       body.paths = state.filesPickPaths.length ? [...state.filesPickPaths] : selectedFiles().map((entry) => entry.path);
       body.destination = state.filesPath;
@@ -2697,7 +2538,7 @@
     } else if (filesAction === "replace") {
       const selected = selectedFiles();
       body.path = selected[0]?.path || "";
-      body.replacement = filesReplacement.value.trim();
+      body.replacement = el("files-replacement").value.trim();
     } else if (filesAction === "delete") {
       body.paths = selectedFiles().map((entry) => entry.path);
     }
@@ -2706,7 +2547,7 @@
   function closeFilesDialog() {
     const trigger = filesTrigger;
     filesTrigger = null;
-    if (filesDialog.open) filesDialog.close();
+    if (el("files-dialog").open) el("files-dialog").close();
     if (trigger instanceof HTMLElement) trigger.focus();
   }
   async function confirmFiles() {
@@ -2733,89 +2574,256 @@
       confirm2.disabled = false;
     }
   }
-  el("files-up").addEventListener("click", () => {
-    if (state.filesParent) loadFolder(state.filesParent).catch((error) => failFiles(error));
-  });
-  el("files-refresh").addEventListener("click", () => {
-    loadFolder(state.filesPath || "").catch((error) => failFiles(error));
-  });
-  el("files-rename").addEventListener("click", (event) => {
-    if (selectedFiles().length !== 1) {
-      state.filesError = "Choose one file to rename.";
-      renderFiles();
-      return;
-    }
-    openFilesDialog("rename", event.currentTarget);
-  });
-  el("files-move").addEventListener("click", () => {
-    const selected = selectedFiles();
-    if (!selected.length) {
-      state.filesError = "Choose files to move.";
-      renderFiles();
-      return;
-    }
-    state.filesPick = "move";
-    state.filesPickPaths = selected.map((entry) => entry.path);
-    state.filesError = "";
-    state.filesMessage = "Choose the destination folder. Then confirm the move.";
-    renderFiles();
-  });
-  el("files-move-folder").addEventListener("click", () => {
-    state.filesPick = "move_folder";
-    state.filesPickSource = state.filesPath;
-    state.filesError = "";
-    state.filesMessage = "Choose the destination folder. Then confirm the move.";
-    renderFiles();
-  });
-  el("files-move-here").addEventListener("click", (event) => {
-    openFilesDialog(state.filesPick === "move_folder" ? "move_folder" : "move", event.currentTarget);
-  });
-  el("files-pick-cancel").addEventListener("click", () => {
-    state.filesPick = null;
-    state.filesPickPaths = [];
-    state.filesPickSource = "";
-    state.filesMessage = "";
-    renderFiles();
-  });
-  el("files-replace").addEventListener("click", (event) => {
-    if (selectedFiles().length !== 1) {
-      state.filesError = "Choose one file to replace.";
-      renderFiles();
-      return;
-    }
-    openFilesDialog("replace", event.currentTarget);
-  });
-  el("files-delete").addEventListener("click", (event) => {
-    if (!selectedFiles().length) {
-      state.filesError = "Choose files to delete.";
-      renderFiles();
-      return;
-    }
-    openFilesDialog("delete", event.currentTarget);
-  });
-  el("files-review").addEventListener("click", () => {
-    reviewFiles().catch((error) => {
-      el("files-dialog-status").textContent = failureOf(error).message;
+  function wireDialogs() {
+    el("export-rekordbox").addEventListener("click", () => {
+      rekordboxXml = "";
+      fetch(rekordboxExportUrl(true)).then((response) => response.json().then((body) => ({ ok: response.ok, body }))).then(({ ok, body }) => {
+        if (!ok || typeof body.xml !== "string" || !body.xml.startsWith("<?xml")) {
+          setNotice(body.error || "The Rekordbox export failed.");
+          return;
+        }
+        rekordboxXml = body.xml;
+        fillRekordboxReport(body.report || []);
+        el("rekordbox-status").textContent = "";
+        el("rekordbox-dialog").showModal();
+      }).catch((error) => setNotice(failureOf(error).message));
     });
-  });
-  el("files-confirm").addEventListener("click", () => {
-    confirmFiles().catch((error) => {
-      el("files-dialog-status").textContent = failureOf(error).message;
+    el("rekordbox-cancel").addEventListener("click", () => {
+      rekordboxXml = "";
+      el("rekordbox-dialog").close();
     });
-  });
-  el("files-cancel").addEventListener("click", () => closeFilesDialog());
-  filesName.addEventListener("input", () => {
-    filesPreview = null;
-    syncFilesDialog();
-  });
-  filesReplacement.addEventListener("input", () => {
-    filesPreview = null;
-    syncFilesDialog();
-  });
-  filesDialog.addEventListener("cancel", (event) => {
-    event.preventDefault();
-    closeFilesDialog();
-  });
+    el("rekordbox-download").addEventListener("click", () => {
+      if (!rekordboxXml.startsWith("<?xml")) {
+        el("rekordbox-status").textContent = "The export did not produce an XML file.";
+        return;
+      }
+      const blob = new Blob([rekordboxXml], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "rekordbox.xml";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      rekordboxXml = "";
+      el("rekordbox-dialog").close();
+    });
+    el("merge-duplicates").addEventListener("click", () => {
+      openMergeDialog().catch((error) => setNotice(failureOf(error).message));
+    });
+    el("merge-cancel").addEventListener("click", () => el("merge-dialog").close());
+    el("merge-confirm").addEventListener("click", () => {
+      confirmMerge().catch((error) => setNotice(failureOf(error).message));
+    });
+    el("merge-trash").addEventListener("change", () => syncTrashChoice());
+    el("consent-decline").addEventListener("click", () => {
+      saveConsent(false, el("consent-status")).then((ok) => {
+        if (!ok) return;
+        consentSettled = true;
+        el("consent-dialog").close();
+      });
+    });
+    el("consent-accept").addEventListener("click", () => {
+      saveConsent(true, el("consent-status")).then((ok) => {
+        if (!ok) return;
+        consentSettled = true;
+        el("consent-dialog").close();
+      });
+    });
+    el("consent-dialog").addEventListener("close", () => {
+      if (consentSettled || state.telemetryConsent !== null) return;
+      saveConsent(false, el("consent-status")).then((ok) => {
+        if (ok) {
+          consentSettled = true;
+          return;
+        }
+        el("consent-dialog").showModal();
+      });
+    });
+    el("open-settings").addEventListener("click", () => {
+      el("settings-status").textContent = "";
+      el("log-fallback").hidden = true;
+      el("telemetry-note").textContent = telemetryNoteText();
+      el("settings-dialog").showModal();
+    });
+    el("settings-close").addEventListener("click", () => {
+      el("settings-dialog").close();
+    });
+    el("telemetry-toggle").addEventListener("change", () => {
+      if (privacySync) return;
+      const want = el("telemetry-toggle").checked;
+      el("telemetry-toggle").disabled = true;
+      saveConsent(want, el("settings-status")).then((ok) => {
+        el("telemetry-toggle").disabled = false;
+        if (ok) {
+          consentSettled = true;
+          return;
+        }
+        privacySync = true;
+        el("telemetry-toggle").checked = state.telemetryConsent === true;
+        privacySync = false;
+      });
+    });
+    el("open-logs").addEventListener("click", () => {
+      const button = el("open-logs");
+      button.disabled = true;
+      el("settings-status").textContent = "Opening…";
+      postJSON("/api/logs/open", {}).then(() => {
+        el("settings-status").textContent = "Opened the logs folder.";
+      }).catch(() => {
+        el("settings-status").textContent = "Couldn't open the logs folder.";
+      }).finally(() => {
+        button.disabled = false;
+      });
+    });
+    el("copy-logs").addEventListener("click", async () => {
+      const button = el("copy-logs");
+      button.disabled = true;
+      el("settings-status").textContent = "Copying…";
+      try {
+        const response = await fetch("/api/logs");
+        const payload = await readJSONOr(response, {});
+        if (!response.ok) throw new Error(payload.error || "Couldn't copy the logs.");
+        const text = payload.text || "";
+        if (!text) {
+          el("settings-status").textContent = "No log entries yet.";
+          return;
+        }
+        let copied = false;
+        if (navigator.clipboard && window.isSecureContext) {
+          try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+          } catch (error) {
+            copied = false;
+          }
+        }
+        if (copied) {
+          el("log-fallback").hidden = true;
+          el("settings-status").textContent = payload.truncated ? "Copied the latest log entries. Older entries were left out." : "Copied the logs.";
+          return;
+        }
+        el("log-fallback").hidden = false;
+        el("log-fallback").value = text;
+        el("log-fallback").focus();
+        el("log-fallback").select();
+        el("settings-status").textContent = "Couldn't copy automatically. Select the log text and copy it.";
+      } catch (error) {
+        el("settings-status").textContent = "Couldn't copy the logs.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+    el("files-up").addEventListener("click", () => {
+      if (state.filesParent) loadFolder(state.filesParent).catch((error) => failFiles(error));
+    });
+    el("files-refresh").addEventListener("click", () => {
+      loadFolder(state.filesPath || "").catch((error) => failFiles(error));
+    });
+    el("files-rename").addEventListener("click", (event) => {
+      if (selectedFiles().length !== 1) {
+        state.filesError = "Choose one file to rename.";
+        renderFiles();
+        return;
+      }
+      openFilesDialog("rename", event.currentTarget);
+    });
+    el("files-move").addEventListener("click", () => {
+      const selected = selectedFiles();
+      if (!selected.length) {
+        state.filesError = "Choose files to move.";
+        renderFiles();
+        return;
+      }
+      state.filesPick = "move";
+      state.filesPickPaths = selected.map((entry) => entry.path);
+      state.filesError = "";
+      state.filesMessage = "Choose the destination folder. Then confirm the move.";
+      renderFiles();
+    });
+    el("files-move-folder").addEventListener("click", () => {
+      state.filesPick = "move_folder";
+      state.filesPickSource = state.filesPath;
+      state.filesError = "";
+      state.filesMessage = "Choose the destination folder. Then confirm the move.";
+      renderFiles();
+    });
+    el("files-move-here").addEventListener("click", (event) => {
+      openFilesDialog(state.filesPick === "move_folder" ? "move_folder" : "move", event.currentTarget);
+    });
+    el("files-pick-cancel").addEventListener("click", () => {
+      state.filesPick = null;
+      state.filesPickPaths = [];
+      state.filesPickSource = "";
+      state.filesMessage = "";
+      renderFiles();
+    });
+    el("files-replace").addEventListener("click", (event) => {
+      if (selectedFiles().length !== 1) {
+        state.filesError = "Choose one file to replace.";
+        renderFiles();
+        return;
+      }
+      openFilesDialog("replace", event.currentTarget);
+    });
+    el("files-delete").addEventListener("click", (event) => {
+      if (!selectedFiles().length) {
+        state.filesError = "Choose files to delete.";
+        renderFiles();
+        return;
+      }
+      openFilesDialog("delete", event.currentTarget);
+    });
+    el("files-review").addEventListener("click", () => {
+      reviewFiles().catch((error) => {
+        el("files-dialog-status").textContent = failureOf(error).message;
+      });
+    });
+    el("files-confirm").addEventListener("click", () => {
+      confirmFiles().catch((error) => {
+        el("files-dialog-status").textContent = failureOf(error).message;
+      });
+    });
+    el("files-cancel").addEventListener("click", () => closeFilesDialog());
+    el("files-name").addEventListener("input", () => {
+      filesPreview = null;
+      syncFilesDialog();
+    });
+    el("files-replacement").addEventListener("input", () => {
+      filesPreview = null;
+      syncFilesDialog();
+    });
+    el("files-dialog").addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeFilesDialog();
+    });
+  }
+  bridge.openMergeDialog = openMergeDialog;
+
+  // src/app.ts
+  function wireSnapshots() {
+    el("snapshots-refresh").addEventListener("click", () => {
+      loadSnapshots().catch((error) => failSnapshots(error));
+    });
+    el("snapshots-take").addEventListener("click", () => {
+      takeSnapshot().catch((error) => failSnapshots(error));
+    });
+    el("snapshots-undo-button").addEventListener("click", () => {
+      const pending = state.snapshotUndo;
+      if (!pending || !pending.restore_id) return;
+      openSnapshotPlan(pending.restore_id).catch((error) => failSnapshots(error));
+    });
+    el("snapshot-cancel").addEventListener("click", () => {
+      el("snapshot-dialog").close();
+    });
+    el("snapshot-confirm").addEventListener("click", () => {
+      confirmSnapshotRestore().catch((error) => setSnapshotDialogStatus(failureOf(error).message));
+    });
+  }
+  mountTrackList();
+  wireLibrary();
+  wireVirtualScroll();
+  wireDialogs();
+  wireSnapshots();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
   loadPrivacy().catch((error) => setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent."));

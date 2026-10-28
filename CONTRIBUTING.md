@@ -43,7 +43,7 @@ python3 -m venv .venv
 
 `python3 server.py` serves `http://127.0.0.1:8765`. Press F5 in VS Code to run that launch.
 
-Page color and type tokens are in `static/tokens.css`. The page script is plain JavaScript in `static/app.js`. [Issue #59](https://github.com/mookiejones/serato-library-manager/issues/59) is the move to strict TypeScript. It is not merged. Until it lands, keep browser changes in `static/app.js`.
+Page color and type tokens are in `static/tokens.css`. The page source is strict TypeScript in `src/`. Edit that, then run `npm run build` so the committed `static/app.js` stays current. Node 22 or newer matches `engines` in `package.json`. Do not hand-edit `static/app.js`.
 
 ## Checks
 
@@ -56,11 +56,21 @@ python3 -m unittest discover -s tests -t . -v
 
 The install step is required because the suite imports `sentry-sdk` and `posthog`. Sharing stays off without a key and without consent. Do not commit a DSN, a PostHog project key, or a filled-in `_build_config.py`.
 
+The page checks use Node 22 or newer:
+
+```bash
+npm ci
+npx tsc --noEmit
+npx eslint src
+npm test
+npm run build
+```
+
 GitHub Actions runs the same discovery with `python` on Ubuntu (3.12 and 3.14) and Windows (3.12). The Windows job also runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. [docs/github.md](docs/github.md) lists the workflows.
 
 A desktop build uses `requirements-build.txt` and `python -m PyInstaller serato-library.spec`. On macOS, `requirements-macos.txt` supplies the menu-bar frameworks. Release builds are unsigned. GitHub Releases is the only download. Signing runs only when the Apple or Windows secrets in `scripts/release_sign.py` are all set.
 
-There is no separate linter. The suite is `unittest`.
+Python has no separate linter. The page uses ESLint, which rejects `any`. The suites are `unittest` and Vitest.
 
 ## What to update in the same pull request
 

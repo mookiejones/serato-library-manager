@@ -1,6 +1,6 @@
 # Serato web library
 
-Local browser for the Serato DJ Pro library. `server.py` uses the Python standard library. `desktop.py` opens that page in the browser and quits from a menu-bar or tray icon. Optional sharing uses `sentry-sdk` and `posthog`, and stays off without a key and without consent. There is no linter. Tests use `unittest`.
+Local browser for the Serato DJ Pro library. `server.py` uses the Python standard library. `desktop.py` opens that page in the browser and quits from a menu-bar or tray icon. Optional sharing uses `sentry-sdk` and `posthog`, and stays off without a key and without consent. Python has no linter. The page uses ESLint. Tests use `unittest` and Vitest.
 
 ## Run
 
@@ -29,6 +29,13 @@ python3 -m unittest discover -s tests -t . -v
 
 The suite imports `sentry-sdk` and `posthog`. It builds a temporary database. It does not open the live Serato library. Settings and logs for the run stay in a temporary directory.
 
+The page tests need Node 22 or newer:
+
+```bash
+npm ci
+npm test
+```
+
 ## Layout
 
 - `server.py` is a `ThreadingHTTPServer` bound to `127.0.0.1:8765` when you run it directly. The desktop app asks for a free port instead. GET routes are `/api/health`, `/api/library`, `/api/status`, `/api/track`, `/api/history`, `/api/duplicates`, `/api/related`, `/api/files`, `/api/export.m3u`, `/api/export.rekordbox.xml`, `/api/settings`, `/api/logs`, and `/api/snapshots`. POST routes are `/api/shutdown`, `/api/track`, `/api/crate`, `/api/import.m3u`, `/api/reveal`, `/api/related`, `/api/duplicates/merge`, `/api/files`, `/api/settings`, `/api/logs/open`, and `/api/snapshots`. Any other path is a file under `static/`. A frozen build reads `static/` from the PyInstaller bundle. `/api/health` does not open the library. `/api/shutdown` answers only when the desktop process set a token. When the library is required, `serve` starts a poll of the Serato files that snapshots after an outside change.
@@ -42,7 +49,7 @@ The suite imports `sentry-sdk` and `posthog`. It builds a temporary database. It
 - `library.py` reads and writes `master.sqlite`. The live path is Application Support on macOS and `%LOCALAPPDATA%\Serato\Library` on Windows. `root.sqlite` beside the master file is updated when it is attached. Writes are refused while a live Serato process holds the lock. The first write in a process copies both databases into `Library/Backups`. `serato_web/completeness.py` is the shared check for a finished backup or snapshot directory (`is_complete`, `verify_legacy_backup`). Reveal uses Finder on macOS and File Explorer on Windows.
 - `files.py` renames, moves, replaces, and trashes audio. It updates path columns in `master.sqlite` and the mirrored location database in one transaction, after a backup, and only while Serato is quit. A journal under `Library/Backups` puts the files back if the database write fails. A successful move also updates related-track paths.
 - `tags.py` reads Serato markers from ID3 GEOB frames (`Markers2`, `BeatGrid`), from FLAC Vorbis comments (`SERATO_MARKERS_V2`, `SERATO_BEATGRID`), and from M4A/MP4 freeform atoms (`----:com.serato.dj:markersv2` and `beatgrid`). It can copy GEOB frames onto a plain ID3v2.3 file or an MP3 that has no tag yet. FLAC, M4A, and other layouts are left unchanged by that copy. `snapshot_frames.py` is what puts a snapshot's exact Markers2, BeatGrid, and Autotags bytes back. A full ID3 rewrite from another program can still drop those frames.
-- `src/` is the page in strict TypeScript (`app.ts`, `restore.ts`, `api.ts`, `api-types.ts`, `state.ts`, `dom.ts`). `npm run build` bundles it with esbuild to `static/app.js` as an IIFE. That file is committed, so the server does not need Node. `static/` is `index.html`, `tokens.css`, `app.css`, `app.js`, and `app.js.map`. Views are crates, history, missing, duplicates, stems, files, and snapshots. The Duplicates view can merge a group into the copy you keep. The Snapshots view lists hash-checked snapshots, previews a restore, and can undo an outside change. Spaces are Serato Library, Serato Video, Apple Music, and Prepare. The track detail pane lists related tracks. The first launch asks whether to share anonymous stats and crash reports. Settings can change that choice and can open or copy the local log.
+- `src/` is the page in strict TypeScript. `app.ts` wires the screen. `views.ts` paints crates, history, missing tracks, duplicates, stems, and files. `dialogs.ts` is the Rekordbox, merge, sharing, and file dialogs. `virtual-scroll.ts` paints the track rows. `restore.ts` is snapshots. `format.ts`, `api.ts`, `api-types.ts`, `state.ts`, `dom.ts`, and `bridge.ts` are the rest. `package.json` requires Node `>=22`. `npm run build` bundles `src/app.ts` with esbuild to `static/app.js` as an IIFE. That file is committed, so the server does not need Node. `static/` is `index.html`, `tokens.css`, `app.css`, `app.js`, and `app.js.map`. Views are crates, history, missing, duplicates, stems, files, and snapshots. The Duplicates view can merge a group into the copy you keep. The Snapshots view lists hash-checked snapshots, previews a restore, and can undo an outside change. Spaces are Serato Library, Serato Video, Apple Music, and Prepare. The track detail pane lists related tracks. The first launch asks whether to share anonymous stats and crash reports. Settings can change that choice and can open or copy the local log.
 - `docs/serato-library-tools.md` is research notes, not runtime config.
 - `docs/architecture.md` is the code reference. Update it in the same change as the behavior it describes.
 - `tests/` is a `unittest` suite. `tests/fixture.py` points `library.MASTER` at a temporary database.
