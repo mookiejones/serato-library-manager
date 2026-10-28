@@ -10,9 +10,9 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import tempfile
 
@@ -212,39 +212,40 @@ class UndoAndBackupTests(unittest.TestCase):
         self.assertFalse(detail["markers_unavailable"])
 
     def test_same_second_backup_collision_keeps_the_first_copy(self) -> None:
-        """Raise ``FileExistsError`` when the timestamped folder already exists.
+        """Keep the first snapshot when this second's folder name is taken.
 
-        ``ensure_backup`` names the folder with a one-second timestamp and
-        refuses to reuse it. The first copy stays readable.
+        A second backup in that second uses the ``-02`` suffix. When
+        ``-02`` through ``-99`` are taken as well, ``ensure_backup`` raises
+        ``FileExistsError`` and does not replace the first copy.
 
         Returns:
-            None. The test fails if the second call overwrites the snapshot
-            or does not raise.
+            None. The test fails if the first snapshot changes or the
+            exhausted second does not raise.
         """
-        # Occupy the folder ensure_backup is about to create. Clear the
-        # once-per-process set immediately before the call so a key from an
-        # earlier test cannot turn the call into a no-op. Retry when the
-        # clock ticks onto the next second between the two steps.
-        parent = Path(library.MASTER).resolve().parent / "Backups"
-        created = None
-        for _ in range(5):
-            stamp = time.strftime("%Y%m%d-%H%M%S")
-            folder = parent / f"serato-web-{stamp}"
-            folder.mkdir(parents=True, exist_ok=True)
-            sentinel = folder / "master.sqlite"
-            sentinel.write_bytes(b"sentinel-backup")
+        stamp = "20261028-120000"
+        parent = self.library.db.resolve().parent / "Backups"
+        first = parent / f"serato-web-{stamp}"
+        first.mkdir(parents=True)
+        sentinel = first / "master.sqlite"
+        sentinel.write_bytes(b"sentinel-backup")
+        library._backed_up.clear()
+        with mock.patch("library.time.strftime", return_value=stamp):
+            second = library.ensure_backup()
+            self.assertIsNotNone(second)
+            assert second is not None
+            self.assertEqual(second.name, f"serato-web-{stamp}-02")
+            self.assertTrue((second / "master.sqlite").is_file())
+            self.assertEqual(sentinel.read_bytes(), b"sentinel-backup")
+            for suffix in range(3, 100):
+                (parent / f"serato-web-{stamp}-{suffix:02d}").mkdir()
             library._backed_up.clear()
-            try:
-                created = library.ensure_backup()
-            except FileExistsError:
-                self.assertEqual(sentinel.read_bytes(), b"sentinel-backup")
-                self.assertFalse(library._backed_up)
-                return
-        siblings = sorted(path.name for path in parent.glob("serato-web-*")) if parent.is_dir() else []
-        self.fail(
-            f"ensure_backup returned {created!r} instead of raising. "
-            f"Occupied {folder}. Existing folders: {siblings}."
-        )
+            with self.assertRaises(FileExistsError) as caught:
+                library.ensure_backup()
+        self.assertIn("Nothing was copied", str(caught.exception))
+        self.assertEqual(sentinel.read_bytes(), b"sentinel-backup")
+        self.assertTrue((second / "master.sqlite").is_file())
+        for suffix in range(3, 100):
+            self.assertEqual(list((parent / f"serato-web-{stamp}-{suffix:02d}").iterdir()), [])
 
     def _drop_backups(self) -> None:
         """Remove snapshot folders so the next call writes a fresh one.
