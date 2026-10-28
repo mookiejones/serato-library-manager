@@ -559,22 +559,68 @@ BACKUP_FAILED_SUFFIX = "-failed"
 BACKUP_INCOMPLETE_NAME = "INCOMPLETE"
 
 
-def is_complete(backup_dir: Path) -> bool:
-    """Return whether a backup folder is safe to restore.
-
-    A folder is not safe when its name ends with :data:`BACKUP_FAILED_SUFFIX`,
-    when it contains :data:`BACKUP_INCOMPLETE_NAME`, or when ``master.sqlite``
-    is not a regular file. ``root.sqlite`` is optional: a library that had
-    no location database beside the master file is still complete without it.
-    A shortcut, a missing directory, or a folder that cannot be read is not
-    complete. Call this before offering a folder in a restore list.
+def _real_dir(path: Path) -> bool:
+    """Return whether a path is a directory and not a shortcut.
 
     Args:
-        backup_dir: Candidate backup directory, usually under ``Library/Backups``.
+        path: Path to test.
 
     Returns:
-        True when the folder has a regular ``master.sqlite`` and neither
-        the failed suffix nor the incomplete marker.
+        True for a real directory.
+    """
+    return path.is_dir() and not path.is_symlink()
+
+
+def _real_file(path: Path) -> bool:
+    """Return whether a path is a file and not a shortcut.
+
+    Args:
+        path: Path to test.
+
+    Returns:
+        True for a regular file.
+    """
+    return path.is_file() and not path.is_symlink()
+
+
+def _is_snapshot_store(backup_dir: Path) -> bool:
+    """Return whether a directory is a content-addressed snapshot store.
+
+    Args:
+        backup_dir: Directory to test.
+
+    Returns:
+        True when ``manifests`` or ``objects`` is a real directory. The
+        parent path is not consulted, so a store under ``Library/Backups``
+        and a store in an app-data folder are recognized the same way.
+    """
+    return _real_dir(backup_dir / "manifests") or _real_dir(backup_dir / "objects")
+
+
+def is_complete(backup_dir: Path) -> bool:
+    """Return whether a backup or snapshot directory is safe to restore.
+
+    This is the only completeness check a restore or a snapshot list should
+    use. It does not look at the parent path, so it works for a
+    ``serato-web-`` folder beside ``master.sqlite`` and for a snapshot store
+    anywhere else, including an app-data directory.
+
+    A folder is not safe when its name ends with :data:`BACKUP_FAILED_SUFFIX`,
+    when it contains :data:`BACKUP_INCOMPLETE_NAME`, when it is a shortcut,
+    when it is missing, or when it cannot be read. A snapshot store (a
+    directory that already has ``manifests`` or ``objects``) is safe only
+    when both of those are real directories. Any other folder is a database
+    backup and is safe only when ``master.sqlite`` is a regular file.
+    ``root.sqlite`` is optional.
+
+    Args:
+        backup_dir: Candidate directory. Pass the snapshot store root (the
+            directory that contains ``manifests`` and ``objects``), not the
+            ``manifests`` directory and not a manifest file.
+
+    Returns:
+        True when the directory has the files its layout requires and
+        neither the failed suffix nor the incomplete marker.
     """
     try:
         if backup_dir.is_symlink() or not backup_dir.is_dir():
@@ -583,8 +629,10 @@ def is_complete(backup_dir: Path) -> bool:
             return False
         if (backup_dir / BACKUP_INCOMPLETE_NAME).exists():
             return False
+        if _is_snapshot_store(backup_dir):
+            return _real_dir(backup_dir / "manifests") and _real_dir(backup_dir / "objects")
         master = backup_dir / "master.sqlite"
-        if master.is_symlink() or not master.is_file():
+        if not _real_file(master):
             return False
     except OSError:
         return False
@@ -594,10 +642,11 @@ def is_complete(backup_dir: Path) -> bool:
 def list_backups(directory: Path | None = None) -> list[Path]:
     """Return backup folders that are safe to restore.
 
-    Uses :func:`is_complete`. Folders ending in ``-failed``, folders that
-    contain ``INCOMPLETE``, and folders without ``master.sqlite`` are
-    omitted. The file browser uses the same check when it lists
-    ``Library/Backups``.
+    Uses :func:`is_complete` on each database backup folder. A snapshot
+    store is not included: its listing calls :func:`is_complete` on the
+    store root itself. Folders ending in ``-failed``, folders that contain
+    ``INCOMPLETE``, and folders without ``master.sqlite`` are omitted.
+    The file browser uses the same check when it lists ``Library/Backups``.
 
     Args:
         directory: Folder that holds the backups. When omitted, this is
@@ -614,7 +663,12 @@ def list_backups(directory: Path | None = None) -> list[Path]:
         found = [
             child
             for child in root.iterdir()
-            if not child.is_symlink() and child.is_dir() and is_complete(child)
+            if (
+                not child.is_symlink()
+                and child.is_dir()
+                and not _is_snapshot_store(child)
+                and is_complete(child)
+            )
         ]
     except OSError:
         return []

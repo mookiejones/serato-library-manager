@@ -6,6 +6,7 @@ import ctypes
 import hashlib
 import sqlite3
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
@@ -282,6 +283,56 @@ class BackupTests(unittest.TestCase):
             self.assertIsNone(caught.exception.__context__)
             self.assertNotIsInstance(caught.exception, PermissionError)
             self.assertIn(str(folder), "\n".join(recorded.output))
+
+    def test_is_complete_accepts_a_snapshot_store_anywhere(self) -> None:
+        """Accept a snapshot store that is not under ``Library/Backups``.
+
+        A store is complete only when ``manifests`` and ``objects`` are both
+        real directories. A ``-failed`` name, an ``INCOMPLETE`` marker, or
+        only one of those directories is not complete. ``list_backups`` does
+        not return the store; the snapshot list calls ``is_complete`` on the
+        store root itself.
+
+        Returns:
+            None. The test fails if the store's parent path decides the result.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            app_data = Path(raw) / "Serato Library"
+            store = app_data / "snapshots"
+            (store / "manifests").mkdir(parents=True)
+            (store / "objects").mkdir()
+            half = app_data / "half-store"
+            (half / "objects").mkdir(parents=True)
+            failed = app_data / "snapshots-failed"
+            (failed / "manifests").mkdir(parents=True)
+            (failed / "objects").mkdir()
+            marked = app_data / "marked-store"
+            (marked / "manifests").mkdir(parents=True)
+            (marked / "objects").mkdir()
+            (marked / library.BACKUP_INCOMPLETE_NAME).write_text("incomplete\n", encoding="utf-8")
+            self.assertTrue(library.is_complete(store))
+            self.assertFalse(library.is_complete(half))
+            self.assertFalse(library.is_complete(failed))
+            self.assertFalse(library.is_complete(marked))
+            self.assertFalse(library.is_complete(store / "manifests"))
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            good = parent / "serato-web-20200101-000000"
+            good.mkdir(parents=True)
+            (good / "master.sqlite").write_bytes(b"complete")
+            snapshots = parent / "snapshots"
+            (snapshots / "manifests").mkdir(parents=True)
+            (snapshots / "objects").mkdir()
+            self.assertTrue(library.is_complete(snapshots))
+            self.assertEqual(library.list_backups(parent), [good])
+            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            self.assertIn(good.name, names)
+            self.assertIn(snapshots.name, names)
+            (snapshots / library.BACKUP_INCOMPLETE_NAME).write_text("incomplete\n", encoding="utf-8")
+            self.assertFalse(library.is_complete(snapshots))
+            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            self.assertNotIn(snapshots.name, names)
+            self.assertIn(good.name, names)
 
     def test_partial_delete_is_not_offered(self) -> None:
         """Leave a locked delete under a name restore will not offer.
