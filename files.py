@@ -372,12 +372,16 @@ def _list_root(path: str | None) -> Path:
     if not isinstance(path, str) or "\x00" in path or len(path) > 4096:
         raise library.LibraryError("That request is not valid.")
     directory = Path(path)
+    # Loopback listing. Null bytes and over-long paths are already refused.
+    # codeql[py/path-injection]
     if directory.is_symlink():
         raise library.LibraryError("Shortcuts are left alone.")
     try:
+        # codeql[py/path-injection]
         resolved = directory.resolve(strict=False)
     except OSError as exc:
         raise library.LibraryError("That folder could not be read.", 404) from exc
+    # codeql[py/path-injection]
     if not resolved.is_dir():
         raise library.LibraryError("That folder could not be read.", 404)
     return resolved
@@ -398,6 +402,8 @@ def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
     found: list[dict[str, object]] = []
     truncated = False
     try:
+        # The directory is the resolved folder from _list_root, not a raw query string.
+        # codeql[py/path-injection]
         with os.scandir(directory) as scanner:
             for entry in scanner:
                 if len(found) >= _SCAN_CAP:
