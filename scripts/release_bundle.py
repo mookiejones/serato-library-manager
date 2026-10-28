@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
-"""Check a PyInstaller build and zip it for a GitHub release.
+"""Check a PyInstaller build and pack it for a GitHub release.
 
-The zip is unpacked outside the repository and the frozen app is started
-with SERATO_LIBRARY_SMOKE. That path writes a marker and exits. It does
-not open the Serato library or a window. Publishing checks the zip again
-and does not launch it: a Linux runner cannot start the macOS app.
+macOS jobs write a UDIF disk image. The Windows job writes a portable zip
+and an Inno Setup installer. Each pack command launches the frozen app
+outside the repository with SERATO_LIBRARY_SMOKE. The app binds a free
+port, the harness requests /api/health, then it shuts the app down.
+Publishing checks the files again and does not launch them: a Linux
+runner cannot start the macOS or Windows app.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import plistlib
 import re
 import stat
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,17 +32,29 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import desktop  # noqa: E402
+import server  # noqa: E402
 import static_assets  # noqa: E402
 
 APP_NAME = "Serato Library"
 MACOS_APP = "Serato Library.app"
 MACOS_EXE = Path("Contents/MacOS/Serato Library")
 WINDOWS_EXE = Path("Serato Library.exe")
-MACOS_ZIP = "Serato-Library-macos.zip"
+MACOS_ARM_DMG = "Serato-Library-macos-arm64.dmg"
+MACOS_INTEL_DMG = "Serato-Library-macos-x64.dmg"
 WINDOWS_ZIP = "Serato-Library-windows.zip"
-EXPECTED_ZIPS = (MACOS_ZIP, WINDOWS_ZIP)
-SMOKE_TEXT = "ok\n"
-TAG_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
+WINDOWS_SETUP = "Serato-Library-windows-setup.exe"
+CHECKSUMS_NAME = "SHA256SUMS"
+RELEASE_FILES = (MACOS_ARM_DMG, MACOS_INTEL_DMG, WINDOWS_SETUP, WINDOWS_ZIP)
+# Inno Setup 6.7.3, downloaded from the jrsoftware GitHub release and
+# hashed in this repository on 2026-10-28. install-inno refuses any other bytes.
+INNO_VERSION = "6.7.3"
+INNO_URL = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe"
+INNO_SHA256 = "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
+ISS_PATH = ROOT / "packaging" / "serato-library.iss"
+PE_MACHINE_AMD64 = 0x8664
+# Final tags are vMAJOR.MINOR.PATCH. A prerelease is that plus -rcN or -betaN.
+TAG_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:rc|beta)[0-9]+)?")
+PRERELEASE_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+-(?:rc|beta)[0-9]+")
 LAUNCH_TIMEOUT_SECONDS = 120
 # Page assets are compared by content. This floor only catches a bundle
 # that did not collect the Python runtime. A healthy build is several
@@ -79,13 +99,15 @@ def source_static() -> Path:
 
 
 def check_tag(tag: str) -> None:
-    """Refuse a tag that is not ``vMAJOR.MINOR.PATCH``.
+    """Refuse a tag that is not a final version or an ``-rcN`` / ``-betaN`` prerelease.
 
-    Release zips are published only for that shape, so a pre-release or
-    a tag without the leading ``v`` stops before any file is packed.
+    Accepted shapes are ``vMAJOR.MINOR.PATCH``, ``vMAJOR.MINOR.PATCH-rcN``,
+    and ``vMAJOR.MINOR.PATCH-betaN``. ``N`` is one or more digits. A dotted
+    suffix such as ``-rc.1``, a tag without the leading ``v``, and a full
+    ref such as ``refs/tags/v1.2.3`` are refused.
 
     Args:
-        tag: Git tag text, such as ``v1.2.3``.
+        tag: Git tag text, such as ``v1.2.3`` or ``v1.2.3-rc1``.
 
     Returns:
         None.
@@ -96,7 +118,43 @@ def check_tag(tag: str) -> None:
     Does not read the git repository or write a file.
     """
     if TAG_RE.fullmatch(tag) is None:
-        raise SystemExit(f"Tag must look like v1.2.3, got {tag!r}")
+        raise SystemExit(
+            f"Tag must look like v1.2.3, v1.2.3-rc1, or v1.2.3-beta1, got {tag!r}"
+        )
+
+
+def is_prerelease(tag: str) -> bool:
+    """Return whether ``tag`` is an ``-rcN`` or ``-betaN`` prerelease.
+
+    Args:
+        tag: Tag text that :func:`check_tag` accepts.
+
+    Returns:
+        True for ``v1.2.3-rc1`` and ``v1.2.3-beta2``. False for ``v1.2.3``.
+
+    Raises:
+        SystemExit: If ``tag`` is not an accepted release tag.
+    """
+    check_tag(tag)
+    return PRERELEASE_RE.fullmatch(tag) is not None
+
+
+def release_create_flags(tag: str) -> list[str]:
+    """Return the ``gh release create`` flags for ``tag``.
+
+    Args:
+        tag: Tag text that :func:`check_tag` accepts.
+
+    Returns:
+        ``--prerelease`` and ``--latest=false`` for a prerelease.
+        ``--latest`` for a final tag.
+
+    Raises:
+        SystemExit: If ``tag`` is not an accepted release tag.
+    """
+    if is_prerelease(tag):
+        return ["--prerelease", "--latest=false"]
+    return ["--latest"]
 
 
 def footer(repo: str) -> str:
@@ -589,8 +647,66 @@ def _outside_repo(path: Path) -> None:
         raise SystemExit(f"Refusing to launch inside the repository: {resolved}")
 
 
+def _http(url: str, method: str, token: str | None = None) -> tuple[int, bytes]:
+    """Request ``url`` and return the status and body.
+
+    Args:
+        url: Absolute URL. The caller has already limited it to loopback.
+        method: ``GET`` or ``POST``.
+        token: Shutdown token. None sends no shutdown header.
+
+    Returns:
+        The HTTP status and the raw body. HTTP errors are returned, not raised.
+
+    Raises:
+        OSError: If the connection fails.
+    """
+    headers = {}
+    data = None
+    if token is not None:
+        headers[server.SHUTDOWN_HEADER] = token
+        data = b"{}"
+    request = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+        exc.close()
+        return exc.code, body
+
+
+def _json_object(body: bytes) -> object:
+    """Decode a JSON object from an HTTP body.
+
+    Args:
+        body: Response bytes.
+
+    Returns:
+        The decoded value, or None when the body is not JSON.
+    """
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def _smoke_output(path: Path) -> str:
+    """Return the tail of a smoke log.
+
+    Args:
+        path: File the child process wrote.
+
+    Returns:
+        At most the last 4000 characters. An empty string when the file is missing.
+    """
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")[-4000:]
+
+
 def run_smoke(exe: Path, cwd: Path) -> None:
-    """Run ``exe`` until it writes the smoke marker.
+    """Run ``exe`` until ``/api/health`` answers, then shut it down.
 
     The process gets an empty home directory, so a missing smoke hook
     cannot see the live Serato library. ``PYTHONPATH`` is not passed
@@ -606,11 +722,11 @@ def run_smoke(exe: Path, cwd: Path) -> None:
         None.
 
     Raises:
-        SystemExit: If ``exe`` is inside the repository, the process fails,
-            it hangs past the timeout, or it does not write ``ok``.
+        SystemExit: If ``exe`` is inside the repository, health does not
+            answer, shutdown fails, or the process does not exit 0.
 
     Starts a subprocess and writes the marker path into its environment.
-    The launched program writes the marker file.
+    The launched program writes the marker, then waits for shutdown.
     """
     _outside_repo(exe)
     home = cwd / "empty-home"
@@ -622,22 +738,60 @@ def run_smoke(exe: Path, cwd: Path) -> None:
     env["LOCALAPPDATA"] = str(home)
     env["APPDATA"] = str(home)
     env[desktop.SMOKE_ENV] = str(marker)
+    stdout_path = cwd / "smoke-stdout.txt"
+    stderr_path = cwd / "smoke-stderr.txt"
+    stdout = stdout_path.open("wb")
+    stderr = stderr_path.open("wb")
+    proc = subprocess.Popen([str(exe)], cwd=cwd, env=env, stdout=stdout, stderr=stderr)
     try:
-        proc = subprocess.run(
-            [str(exe)],
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            timeout=LAUNCH_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise SystemExit(f"Bundle did not exit within {LAUNCH_TIMEOUT_SECONDS}s") from exc
-    text = marker.read_text(encoding="utf-8") if marker.is_file() else ""
-    if proc.returncode != 0 or text != SMOKE_TEXT:
-        out = (proc.stdout or b"").decode("utf-8", "replace")
-        err = (proc.stderr or b"").decode("utf-8", "replace")
-        raise SystemExit(f"Smoke check failed (exit {proc.returncode}).\n{out}\n{err}")
+        deadline = time.monotonic() + LAUNCH_TIMEOUT_SECONDS
+        parsed = None
+        while time.monotonic() < deadline:
+            if marker.is_file():
+                parsed = desktop.parse_smoke_marker(marker.read_text(encoding="utf-8"))
+                if parsed:
+                    break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.05)
+        if not parsed:
+            raise SystemExit(
+                "Smoke marker was not written.\n"
+                + _smoke_output(stdout_path)
+                + "\n"
+                + _smoke_output(stderr_path)
+            )
+        url, token = parsed
+        try:
+            status, body = _http(url + "/api/health", "GET")
+        except OSError as exc:
+            raise SystemExit(f"Health request failed: {exc}") from exc
+        if status != 200 or _json_object(body) != {"ok": True}:
+            raise SystemExit(f"Health check returned {status} {body!r}")
+        try:
+            status, body = _http(url + "/api/shutdown", "POST", token)
+        except OSError as exc:
+            raise SystemExit(f"Shutdown request failed: {exc}") from exc
+        if status != 200 or _json_object(body) != {"ok": True}:
+            raise SystemExit(f"Shutdown returned {status} {body!r}")
+        remaining = deadline - time.monotonic()
+        try:
+            code = proc.wait(timeout=max(1.0, remaining))
+        except subprocess.TimeoutExpired as exc:
+            raise SystemExit(f"Bundle did not exit within {LAUNCH_TIMEOUT_SECONDS}s") from exc
+        if code != 0:
+            raise SystemExit(
+                f"Smoke check failed (exit {code}).\n"
+                + _smoke_output(stdout_path)
+                + "\n"
+                + _smoke_output(stderr_path)
+            )
+    finally:
+        stdout.close()
+        stderr.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
 
 
 def launch_unzipped(archive: Path) -> None:
@@ -715,38 +869,490 @@ def pack(dist: Path, dest: Path) -> None:
         raise
 
 
-def check_zips(directory: Path) -> None:
-    """Check the two release zips without launching them.
-
-    The publish job runs on Linux and can only inspect the archives.
-    The directory must contain exactly the macOS zip and the Windows zip.
+def sha256_file(path: Path) -> str:
+    """Return the hex SHA-256 of ``path``.
 
     Args:
-        directory: Folder that holds the downloaded release artifacts.
+        path: File to hash.
 
     Returns:
-        None.
+        64 lowercase hex characters.
+
+    Reads the file in 1 MiB chunks.
+    """
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def app_version() -> str:
+    """Return the version declared in ``app_config.APP_VERSION``.
+
+    Returns:
+        ``MAJOR.MINOR.PATCH``.
 
     Raises:
-        SystemExit: If the directory does not hold exactly those two zips,
-            or either zip fails its content check.
+        SystemExit: If the constant is any other shape.
 
-    Reads the zips. Does not extract them or start an executable.
+    Imports ``app_config``. Does not parse the file as text.
     """
-    found = sorted(path.name for path in directory.iterdir() if path.is_file() and path.suffix == ".zip")
-    if tuple(found) != tuple(sorted(EXPECTED_ZIPS)):
-        raise SystemExit(f"Expected {', '.join(EXPECTED_ZIPS)}; found {', '.join(found) or 'nothing'}")
-    source = source_static()
-    for name in EXPECTED_ZIPS:
-        assert_zip(directory / name, source)
+    import app_config
+
+    version = app_config.APP_VERSION
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
+        raise SystemExit(f"APP_VERSION must look like 1.2.3, got {version!r}")
+    return version
+
+
+def pe_machine(path: Path) -> int:
+    """Return the PE machine field of a Windows executable.
+
+    Args:
+        path: ``.exe`` file.
+
+    Returns:
+        The 16-bit machine id. ``0x8664`` is 64-bit x86.
+
+    Raises:
+        SystemExit: If the file is not a PE executable.
+    """
+    data = path.read_bytes()
+    if len(data) < 64 or data[:2] != b"MZ":
+        raise SystemExit(f"{path.name} is not a Windows executable")
+    offset = int.from_bytes(data[0x3C:0x40], "little")
+    if offset < 0 or offset + 6 > len(data) or data[offset : offset + 4] != b"PE\0\0":
+        raise SystemExit(f"{path.name} has no PE header")
+    return int.from_bytes(data[offset + 4 : offset + 6], "little")
+
+
+def assert_frozen_arch(exe: Path, arch: str) -> None:
+    """Require the frozen executable to be exactly one architecture.
+
+    Args:
+        exe: Mach-O or PE executable.
+        arch: ``arm64`` or ``x64``.
+
+    Raises:
+        SystemExit: If the binary is universal, the other architecture,
+            or this operating system cannot inspect it.
+
+    A universal build is refused. Each release file is built on the
+    runner that matches its name.
+    """
+    if arch not in ("arm64", "x64"):
+        raise SystemExit(f"Unknown arch {arch!r}")
+    if sys.platform == "darwin":
+        output = subprocess.check_output(["lipo", "-archs", str(exe)], text=True).split()
+        expected = "arm64" if arch == "arm64" else "x86_64"
+        if output != [expected]:
+            raise SystemExit(f"{exe} is {output}, expected [{expected}]")
+        return
+    if sys.platform == "win32":
+        machine = pe_machine(exe)
+        if arch != "x64" or machine != PE_MACHINE_AMD64:
+            raise SystemExit(f"{exe} machine {machine:#x} is not x64")
+        return
+    raise SystemExit(f"Cannot check a {arch} binary on {sys.platform}")
+
+
+def assert_dmg(
+    archive: Path,
+    *,
+    min_bytes: int = MIN_ZIP_BYTES,
+    max_bytes: int = MAX_ZIP_BYTES,
+) -> None:
+    """Require a disk image to be a sized UDIF file.
+
+    Args:
+        archive: ``.dmg`` path.
+        min_bytes: Smallest accepted size, inclusive.
+        max_bytes: Largest accepted size, inclusive.
+
+    Raises:
+        SystemExit: If the size is outside the bounds or the UDIF trailer
+            is missing.
+
+    Reads the size and the last 512-byte trailer. Does not mount the image.
+    """
+    assert_size(archive.name, archive.stat().st_size, min_bytes, max_bytes)
+    with archive.open("rb") as handle:
+        handle.seek(-512, os.SEEK_END)
+        magic = handle.read(4)
+    if magic != b"koly":
+        raise SystemExit(f"{archive.name} is not a UDIF disk image")
+
+
+def assert_setup(archive: Path) -> None:
+    """Require the installer to be a 64-bit PE file of a plausible size.
+
+    Args:
+        archive: ``Serato-Library-windows-setup.exe``.
+
+    Raises:
+        SystemExit: If the size or the machine type is wrong.
+    """
+    assert_size(archive.name, archive.stat().st_size, MIN_ZIP_BYTES, MAX_ZIP_BYTES)
+    machine = pe_machine(archive)
+    if machine != PE_MACHINE_AMD64:
+        raise SystemExit(f"{archive.name} machine {machine:#x} is not x64")
+
+
+def _file_names(directory: Path) -> list[str]:
+    """Return the sorted file names directly inside ``directory``.
+
+    Args:
+        directory: Folder to list.
+
+    Returns:
+        File names. Directories are ignored.
+    """
+    return sorted(path.name for path in directory.iterdir() if path.is_file())
+
+
+def check_binaries(directory: Path) -> None:
+    """Check the four release files without launching them.
+
+    The publish job runs on Linux. It can read the Windows zip and the
+    PE header, and it can read the UDIF trailer. It cannot mount a disk
+    image or start either app. The build jobs already did that.
+
+    Args:
+        directory: Folder that holds the downloaded artifacts and no checksum
+            file yet.
+
+    Raises:
+        SystemExit: If a file is missing, extra, or fails its check.
+    """
+    found = _file_names(directory)
+    expected = sorted(RELEASE_FILES)
+    if found != expected:
+        raise SystemExit(f"Expected {', '.join(expected)}; found {', '.join(found) or 'nothing'}")
+    assert_zip(directory / WINDOWS_ZIP, source_static())
+    assert_dmg(directory / MACOS_ARM_DMG)
+    assert_dmg(directory / MACOS_INTEL_DMG)
+    assert_setup(directory / WINDOWS_SETUP)
+
+
+def write_checksums(directory: Path) -> None:
+    """Write ``SHA256SUMS`` for the four release files.
+
+    Args:
+        directory: Folder that already passed :func:`check_binaries`.
+
+    Raises:
+        SystemExit: If a release file is missing.
+
+    Overwrites ``SHA256SUMS`` in that folder. The line format is the
+    ``sha256sum`` format: hash, two spaces, file name.
+    """
+    lines = []
+    for name in RELEASE_FILES:
+        path = directory / name
+        if not path.is_file():
+            raise SystemExit(f"Missing {name}")
+        lines.append(f"{sha256_file(path)}  {name}\n")
+    (directory / CHECKSUMS_NAME).write_text("".join(lines), encoding="utf-8")
+
+
+def check_checksums(directory: Path) -> None:
+    """Require ``SHA256SUMS`` to match the four release files.
+
+    Args:
+        directory: Folder that contains the files and the checksum list.
+
+    Raises:
+        SystemExit: If a line is malformed, a hash differs, or an extra
+            file is present.
+    """
+    path = directory / CHECKSUMS_NAME
+    if not path.is_file():
+        raise SystemExit(f"Missing {CHECKSUMS_NAME}")
+    seen: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        if "  " not in line:
+            raise SystemExit(f"Bad checksum line: {line!r}")
+        digest, name = line.split("  ", 1)
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise SystemExit(f"Bad checksum for {name}")
+        if name in seen:
+            raise SystemExit(f"Duplicate checksum for {name}")
+        seen[name] = digest
+    if set(seen) != set(RELEASE_FILES):
+        raise SystemExit(
+            f"Checksum names {', '.join(sorted(seen)) or 'nothing'} "
+            f"!= {', '.join(RELEASE_FILES)}"
+        )
+    for name, digest in seen.items():
+        if sha256_file(directory / name) != digest:
+            raise SystemExit(f"Checksum mismatch for {name}")
+    extras = [
+        item.name
+        for item in directory.iterdir()
+        if item.is_file() and item.name not in seen and item.name != CHECKSUMS_NAME
+    ]
+    if extras:
+        raise SystemExit("Unexpected release files: " + ", ".join(sorted(extras)))
+
+
+def make_dmg(app: Path, dest: Path) -> None:
+    """Write a compressed disk image that contains ``app`` and an Applications link.
+
+    Args:
+        app: ``Serato Library.app``.
+        dest: ``.dmg`` path to create.
+
+    Raises:
+        SystemExit: If this is not macOS, or ``dest`` already exists.
+        subprocess.CalledProcessError: If ``hdiutil`` fails.
+
+    Uses ``ditto`` so a signed bundle is copied without breaking its seal.
+    """
+    if sys.platform != "darwin":
+        raise SystemExit("Disk images are built on macOS.")
+    if dest.exists():
+        raise SystemExit(f"Refusing to overwrite {dest}")
+    with tempfile.TemporaryDirectory(prefix="serato-library-dmg-") as tmp:
+        staging = Path(tmp) / "stage"
+        staging.mkdir()
+        subprocess.run(["ditto", str(app), str(staging / MACOS_APP)], check=True)
+        (staging / "Applications").symlink_to("/Applications")
+        subprocess.run(
+            [
+                "hdiutil",
+                "create",
+                "-volname",
+                APP_NAME,
+                "-srcfolder",
+                str(staging),
+                "-format",
+                "UDZO",
+                str(dest),
+            ],
+            check=True,
+        )
+
+
+def _mount_dmg(archive: Path) -> Path:
+    """Attach ``archive`` read-only and return the mount point.
+
+    Args:
+        archive: Disk image.
+
+    Returns:
+        The volume path reported by ``hdiutil``.
+
+    Raises:
+        SystemExit: If no mount point is listed.
+    """
+    raw = subprocess.check_output(
+        ["hdiutil", "attach", "-nobrowse", "-readonly", "-plist", str(archive)]
+    )
+    listing = plistlib.loads(raw)
+    for entity in listing.get("system-entities", []):
+        point = entity.get("mount-point")
+        if point:
+            return Path(point)
+    raise SystemExit("hdiutil did not report a mount point")
+
+
+def smoke_dmg(archive: Path, arch: str) -> None:
+    """Mount ``archive``, copy the app out, and run the health smoke check.
+
+    Args:
+        archive: Disk image that already passed :func:`assert_dmg`.
+        arch: ``arm64`` or ``x64``, checked on the copied executable.
+
+    Raises:
+        SystemExit: If the image has no app, the page differs, or smoke fails.
+
+    The mounted volume is detached even when the check fails. The process
+    that is launched is the copy, not the app inside the image.
+    """
+    mount = _mount_dmg(archive)
+    try:
+        app = mount / MACOS_APP
+        if not app.is_dir():
+            raise SystemExit(f"{archive.name} has no {MACOS_APP}")
+        assert_static_matches(app, source_static())
+        assert_frozen_arch(app / MACOS_EXE, arch)
+        with tempfile.TemporaryDirectory(prefix="serato-library-artifact-") as tmp:
+            copied = Path(tmp) / MACOS_APP
+            subprocess.run(["ditto", str(app), str(copied)], check=True)
+            run_smoke(copied / MACOS_EXE, Path(tmp))
+    finally:
+        subprocess.run(["hdiutil", "detach", str(mount)], check=False)
+
+
+def pack_dmg(dist: Path, dest: Path, arch: str) -> None:
+    """Check a macOS build, write a disk image, and smoke the copy inside it.
+
+    Args:
+        dist: PyInstaller ``dist`` directory.
+        dest: Disk image to create.
+        arch: ``arm64`` or ``x64``.
+
+    Raises:
+        SystemExit: If any check fails. A failed check deletes ``dest``.
+    """
+    verify_tree(dist)
+    bundle = find_bundle(dist)
+    if bundle.kind != "macos":
+        raise SystemExit("pack-dmg needs a macOS app")
+    assert_frozen_arch(bundle.exe, arch)
+    if dest.exists():
+        raise SystemExit(f"Refusing to overwrite {dest}")
+    try:
+        make_dmg(bundle.root, dest)
+        assert_dmg(dest)
+        smoke_dmg(dest, arch)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+
+
+def iscc_path() -> Path:
+    """Return ``ISCC.exe`` from the pinned Inno Setup install.
+
+    Returns:
+        Absolute path of the compiler.
+
+    Raises:
+        SystemExit: If ``install-inno`` has not been run.
+    """
+    candidates = [
+        Path(tempfile.gettempdir()) / f"innosetup-{INNO_VERSION}" / "ISCC.exe",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Inno Setup 6" / "ISCC.exe",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise SystemExit("ISCC.exe not found. Run install-inno on Windows first.")
+
+
+def install_inno() -> None:
+    """Install the pinned Inno Setup compiler after checking its SHA-256.
+
+    Raises:
+        SystemExit: If this is not Windows, the download hash differs, or
+            ``ISCC.exe`` is missing after the installer exits.
+
+    A copy that is already present is left in place. The installer is the
+    official 6.7.3 executable, not a package-manager latest.
+    """
+    if sys.platform != "win32":
+        raise SystemExit("Inno Setup installs on Windows only.")
+    directory = Path(tempfile.gettempdir()) / f"innosetup-{INNO_VERSION}"
+    compiler = directory / "ISCC.exe"
+    if compiler.is_file():
+        return
+    downloaded = Path(tempfile.gettempdir()) / f"innosetup-{INNO_VERSION}.exe"
+    urllib.request.urlretrieve(INNO_URL, downloaded)
+    digest = sha256_file(downloaded)
+    if digest != INNO_SHA256:
+        downloaded.unlink(missing_ok=True)
+        raise SystemExit(f"Inno Setup hash {digest} != {INNO_SHA256}")
+    subprocess.run(
+        [
+            str(downloaded),
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            f"/DIR={directory}",
+        ],
+        check=True,
+        timeout=180,
+    )
+    if not compiler.is_file():
+        raise SystemExit(f"ISCC missing after install: {compiler}")
+
+
+def build_setup(dist: Path, dest: Path) -> None:
+    """Compile the Inno Setup installer from the PyInstaller folder.
+
+    Args:
+        dist: Directory that contains ``Serato Library``.
+        dest: Installer path to create. Its file name must be
+            ``Serato-Library-windows-setup.exe``.
+
+    Raises:
+        SystemExit: If this is not Windows, the script or the build is
+            missing, or the compiler does not write ``dest``.
+
+    The version passed to the script is :func:`app_version`.
+    """
+    if sys.platform != "win32":
+        raise SystemExit("The Windows installer is built on Windows.")
+    if dest.name != WINDOWS_SETUP:
+        raise SystemExit(f"Installer must be named {WINDOWS_SETUP}")
+    if not ISS_PATH.is_file():
+        raise SystemExit(f"Missing installer script: {ISS_PATH}")
+    source = (dist / APP_NAME).resolve()
+    dest = dest.resolve()
+    if not (source / WINDOWS_EXE).is_file():
+        raise SystemExit(f"Missing {source / WINDOWS_EXE}")
+    if dest.exists():
+        raise SystemExit(f"Refusing to overwrite {dest}")
+    subprocess.run(
+        [
+            str(iscc_path()),
+            f"/DAppVersion={app_version()}",
+            f"/DSourceDir={source}",
+            f"/O{dest.parent}",
+            str(ISS_PATH),
+        ],
+        check=True,
+    )
+    if not dest.is_file():
+        raise SystemExit(f"Installer was not written to {dest}")
+
+
+def smoke_setup(setup: Path) -> None:
+    """Install ``setup`` into a temporary directory and smoke that copy.
+
+    Args:
+        setup: Inno Setup installer.
+
+    Raises:
+        SystemExit: If this is not Windows, the install does not write the
+            executable, or the health check fails.
+
+    ``/VERYSILENT`` skips the post-install launch. The harness starts the
+    installed executable itself, outside the repository.
+    """
+    if sys.platform != "win32":
+        raise SystemExit("The installer smoke test runs on Windows.")
+    with tempfile.TemporaryDirectory(prefix="serato-library-install-") as tmp:
+        folder = Path(tmp)
+        installed = folder / "app"
+        subprocess.run(
+            [
+                str(setup),
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                f"/DIR={installed}",
+            ],
+            check=True,
+            timeout=LAUNCH_TIMEOUT_SECONDS,
+        )
+        exe = installed / "Serato Library.exe"
+        if not exe.is_file():
+            raise SystemExit(f"Installer did not write {exe}")
+        run_smoke(exe, folder)
 
 
 def main(argv: list[str] | None = None) -> None:
     """Run a release-bundle subcommand.
 
-    ``verify`` checks a dist tree. ``pack`` zips it and launches the
-    unpacked app. ``check-zips`` inspects the two release archives.
-    ``check-tag`` and ``footer`` serve the GitHub release workflow.
+    ``verify`` checks a dist tree. ``pack`` zips a Windows build and
+    launches it. ``pack-dmg`` writes and smokes a disk image.
+    ``check-binaries`` and ``check-checksums`` inspect a release folder
+    without launching it. ``check-tag`` reads its argument, or
+    ``RELEASE_TAG`` when the argument is omitted.
 
     Args:
         argv: Arguments after the program name. None reads the process arguments.
@@ -757,36 +1363,80 @@ def main(argv: list[str] | None = None) -> None:
     Raises:
         SystemExit: If the arguments are incomplete or a check fails.
     """
-    parser = argparse.ArgumentParser(description="Check and zip a Serato Library build.")
+    parser = argparse.ArgumentParser(description="Check and pack a Serato Library build.")
     sub = parser.add_subparsers(dest="command", required=True)
 
     verify = sub.add_parser("verify", help="check a dist directory")
     verify.add_argument("dist", type=Path)
 
-    packed = sub.add_parser("pack", help="check, zip, and launch a build")
+    packed = sub.add_parser("pack", help="check, zip, and launch a Windows build")
     packed.add_argument("dist", type=Path)
     packed.add_argument("zip", type=Path)
 
-    zips = sub.add_parser("check-zips", help="check release zips without launching them")
-    zips.add_argument("directory", type=Path)
+    image = sub.add_parser("pack-dmg", help="check, write, and launch a macOS disk image")
+    image.add_argument("dist", type=Path)
+    image.add_argument("dmg", type=Path)
+    image.add_argument("arch", choices=("arm64", "x64"))
 
-    tag = sub.add_parser("check-tag", help="require a vMAJOR.MINOR.PATCH tag")
-    tag.add_argument("tag")
+    arch = sub.add_parser("assert-arch", help="require the frozen executable architecture")
+    arch.add_argument("dist", type=Path)
+    arch.add_argument("arch", choices=("arm64", "x64"))
+
+    binaries = sub.add_parser("check-binaries", help="check release files without launching them")
+    binaries.add_argument("directory", type=Path)
+
+    sums = sub.add_parser("write-checksums", help="write SHA256SUMS for the release files")
+    sums.add_argument("directory", type=Path)
+
+    checked = sub.add_parser("check-checksums", help="require SHA256SUMS to match the files")
+    checked.add_argument("directory", type=Path)
+
+    tag = sub.add_parser("check-tag", help="require a final or rc/beta tag")
+    tag.add_argument("tag", nargs="?")
+
+    flags = sub.add_parser("release-flags", help="print gh release create flags for the tag")
+    flags.add_argument("tag", nargs="?")
 
     notes = sub.add_parser("footer", help="print the release-notes footer")
     notes.add_argument("repo")
+
+    inno = sub.add_parser("install-inno", help="install the pinned Inno Setup compiler")
+
+    setup = sub.add_parser("build-setup", help="compile the Windows installer")
+    setup.add_argument("dist", type=Path)
+    setup.add_argument("exe", type=Path)
+
+    installed = sub.add_parser("smoke-setup", help="install the Windows installer and smoke it")
+    installed.add_argument("exe", type=Path)
 
     args = parser.parse_args(argv)
     if args.command == "verify":
         verify_tree(args.dist)
     elif args.command == "pack":
         pack(args.dist, args.zip)
-    elif args.command == "check-zips":
-        check_zips(args.directory)
+    elif args.command == "pack-dmg":
+        pack_dmg(args.dist, args.dmg, args.arch)
+    elif args.command == "assert-arch":
+        assert_frozen_arch(find_bundle(args.dist).exe, args.arch)
+    elif args.command == "check-binaries":
+        check_binaries(args.directory)
+    elif args.command == "write-checksums":
+        write_checksums(args.directory)
+    elif args.command == "check-checksums":
+        check_checksums(args.directory)
     elif args.command == "check-tag":
-        check_tag(args.tag)
+        check_tag(args.tag if args.tag is not None else os.environ.get("RELEASE_TAG", ""))
+    elif args.command == "release-flags":
+        chosen = args.tag if args.tag is not None else os.environ.get("RELEASE_TAG", "")
+        print("\n".join(release_create_flags(chosen)))
     elif args.command == "footer":
         print(footer(args.repo), end="")
+    elif args.command == "install-inno":
+        install_inno()
+    elif args.command == "build-setup":
+        build_setup(args.dist, args.exe)
+    elif args.command == "smoke-setup":
+        smoke_setup(args.exe)
 
 
 if __name__ == "__main__":

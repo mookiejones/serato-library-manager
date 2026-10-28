@@ -455,6 +455,80 @@ class ApiTests(unittest.TestCase):
         ):
             self.assertEqual(server.app_root(), Path("/bundle"))
 
+    def test_health_does_not_read_the_library(self) -> None:
+        """Answer ``/api/health`` when the master database is missing.
+
+        ``serve`` is called with ``require_library`` false and a free port.
+        The body is ``{"ok": true}``. Shutdown without a token is 404.
+
+        Returns:
+            None. The test fails if health touches the database or stays bound.
+        """
+        missing = Path("/tmp/serato-library-missing-master.sqlite")
+        with unittest.mock.patch.object(server, "db_path", return_value=missing):
+            httpd = server.serve(port=0, require_library=False)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read().decode("utf-8")), {"ok": True})
+            request = urllib.request.Request(
+                f"http://{host}:{port}/api/shutdown",
+                data=b"{}",
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=5)
+            self.assertEqual(caught.exception.code, 404)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(3)
+
+    def test_shutdown_requires_the_token(self) -> None:
+        """Accept shutdown only with the token stored on the server.
+
+        A wrong token returns 403 and leaves the server running. The
+        matching token returns 200 and stops ``serve_forever``.
+
+        Returns:
+            None. The test fails if a wrong token stops the server.
+        """
+        httpd = server.serve(port=0, require_library=False)
+        httpd.shutdown_token = "token-value"
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        base = f"http://{host}:{port}/api/shutdown"
+        try:
+            wrong = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.SHUTDOWN_HEADER: "nope"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(wrong, timeout=5)
+            self.assertEqual(caught.exception.code, 403)
+            self.assertTrue(thread.is_alive())
+            right = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.SHUTDOWN_HEADER: "token-value"},
+                method="POST",
+            )
+            with urllib.request.urlopen(right, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+        finally:
+            if thread.is_alive():
+                httpd.shutdown()
+                thread.join(3)
+            httpd.server_close()
+
     def test_taken_port_names_the_other_server(self) -> None:
         """Name the other server when port 8765 is already bound.
 

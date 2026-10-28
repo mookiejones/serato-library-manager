@@ -8,6 +8,7 @@ and the first write in a process is backed up first.
 from __future__ import annotations
 
 import errno
+import hmac
 import json
 import math
 import os
@@ -47,6 +48,9 @@ ROOT = app_root()
 STATIC = ROOT / "static"
 HOST = "127.0.0.1"
 PORT = 8765
+# Required on POST /api/shutdown. A browser page on another origin cannot
+# set this header without a preflight, and this server does not allow one.
+SHUTDOWN_HEADER = "X-Serato-Library-Shutdown"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
@@ -1483,6 +1487,9 @@ class Handler(BaseHTTPRequestHandler):
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        if parsed.path == "/api/health":
+            self.send_json({"ok": True})
+            return
         try:
             if parsed.path == "/api/settings":
                 self.send_json(telemetry.public_settings())
@@ -1607,6 +1614,11 @@ class Handler(BaseHTTPRequestHandler):
         if length > BODY_LIMIT:
             self.send_json({"error": "That upload is too large."}, status=413)
             return
+        if parsed.path == "/api/shutdown":
+            if length:
+                self.rfile.read(length)
+            self._post_shutdown()
+            return
         try:
             parsed_body: object = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
@@ -1693,6 +1705,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "The library could not be saved."}, status=500)
         except (TypeError, ValueError, KeyError):
             self.send_json({"error": "That request is not valid."}, status=400)
+
+    def _post_shutdown(self) -> None:
+        """Stop the server when the caller presents the desktop token.
+
+        The token is set only by the desktop app and the release smoke
+        check. ``server.py`` leaves it unset, and this route then answers
+        404. A wrong token answers 403. The comparison does not branch on
+        the character that differed.
+
+        The listening thread is shut down from another thread so this
+        response can finish first.
+        """
+        expected = getattr(self.server, "shutdown_token", None)
+        if not isinstance(expected, str) or not expected:
+            self.send_json({"error": "That action is not available."}, status=404)
+            return
+        provided = self.headers.get(SHUTDOWN_HEADER, "")
+        if not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
+            self.send_json({"error": "That action is not available."}, status=403)
+            return
+        self.send_json({"ok": True})
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def _post_settings(self, payload: dict[str, object]) -> None:
         """Save the sharing choice.
@@ -1895,35 +1929,50 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
 
-def serve() -> ThreadingHTTPServer:
-    """Bind the library server on 127.0.0.1 port 8765.
+def serve(port: int | None = None, *, require_library: bool = True) -> ThreadingHTTPServer:
+    """Bind the library server on 127.0.0.1.
+
+    Args:
+        port: TCP port. None uses 8765. ``0`` asks the operating system
+            for a free port. The desktop app uses ``0``.
+        require_library: When true, a missing master database stops the
+            process before the socket is opened, and telemetry starts
+            after the bind. The release smoke check passes false so a
+            runner without Serato can still answer ``/api/health``.
 
     Returns:
-        A server that is listening and not yet serving.
+        A server that is listening and not yet serving. ``shutdown_token``
+        is None until the desktop app sets it.
 
     Raises:
-        SystemExit: If the master database is missing or the port is already taken.
+        SystemExit: If the master database is required and missing, or the
+            port is already taken.
     """
-    if not db_path().exists():
+    if require_library and not db_path().exists():
         raise SystemExit(f"Serato library not found at {db_path()}")
     app_log.configure()
-    app_log.logger.info("Library file: %s", db_path())
+    if require_library:
+        app_log.logger.info("Library file: %s", db_path())
+        try:
+            files.recover_interrupted()
+        except Exception:
+            app_log.logger.exception("An interrupted file change could not be finished.")
+    bind_port = PORT if port is None else port
     try:
-        files.recover_interrupted()
-    except Exception:
-        app_log.logger.exception("An interrupted file change could not be finished.")
-    try:
-        httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+        httpd = ThreadingHTTPServer((HOST, bind_port), Handler)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
+        shown = PORT if port is None else bind_port
         raise SystemExit(
-            f"http://{HOST}:{PORT} is already in use. "
-            "Quit the other Serato library server (server.py or the desktop window) and try again."
+            f"http://{HOST}:{shown} is already in use. "
+            "Quit the other Serato library server (server.py or the desktop app) and try again."
         ) from exc
-    app_log.logger.info("Server listening on %s:%s", HOST, PORT)
-    telemetry.activate()
-    telemetry.note_app_opened()
+    httpd.shutdown_token = None
+    app_log.logger.info("Server listening on %s:%s", HOST, httpd.server_address[1])
+    if require_library:
+        telemetry.activate()
+        telemetry.note_app_opened()
     return httpd
 
 

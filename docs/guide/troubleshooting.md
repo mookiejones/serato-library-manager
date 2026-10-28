@@ -25,32 +25,39 @@ A save that hits a lock shows the error in the bar above the list. The merge dia
 
 ## macOS says the app is damaged or cannot be opened
 
-The download is unsigned. Gatekeeper shows a warning.
+The download is unsigned. Gatekeeper shows a warning. macOS 15 and later uses **System Settings › Privacy & Security › Open Anyway**. Earlier macOS uses a right-click **Open**. The steps are in [First install](../first-install.md#why-youll-see-a-warning).
 
-1. Open the folder that contains `Serato Library.app`.
-2. Right-click the app.
-3. Choose Open.
-4. Choose Open in the next dialog.
+On a Mac, drag **Serato Library** from the disk image into Applications before you open it.
 
-Do not move only the app out of a half-unpacked download. Unpack the zip first.
+## macOS cannot see an external drive
+
+Reading music on an external drive needs **Removable Volumes**. That is not Full Disk Access.
+
+1. Open **System Settings**.
+2. Go to **Privacy & Security**.
+3. Go to **Files and Folders**.
+4. Select **Serato Library**.
+5. Turn on **Removable Volumes**.
+
+These builds are unsigned, so macOS may ask again after an update, or the switch may be off. Turn it back on for the new copy. The same steps are next to Open Anyway in [First install](../first-install.md#mac-external-drives).
 
 ## Windows SmartScreen stops the app
 
-1. Open the extracted `Serato Library` folder.
-2. Double-click `Serato Library.exe`.
-3. Choose More info.
-4. Choose Run anyway.
+1. Double-click `Serato-Library-windows-setup.exe`, or `Serato Library.exe` from the unzipped portable folder.
+2. Choose More info.
+3. Choose Run anyway.
 
-Run the exe from the extracted folder. Do not run it from inside the zip.
+If you used the portable zip, run the exe from the extracted folder. Do not run it from inside the zip.
 
-## The window never appears, and no error is obvious
+## The page never appears, and no error is obvious
 
-Another copy may already be listening.
+Another copy may already be running.
 
-1. Quit every Serato Library window.
-2. Open the app again.
+1. On a Mac, use the **Serato Library** menu-bar item and choose **Quit**.
+2. On Windows, use the **Serato Library** icon in the notification area and choose **Quit**.
+3. Open the app again.
 
-If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy.
+If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy. The desktop app uses a free port and does not show that message. A second double-click opens the page that is already running.
 
 ## Serato put my edit back
 

@@ -2,6 +2,12 @@
 
 A local window for the Serato DJ Pro library on macOS and Windows. The user guide is [on GitHub Pages](https://mookiejones.github.io/serato-library-manager/) and [in the repository](docs/index.md).
 
+## Install
+
+Download one file from [GitHub Releases](https://github.com/mookiejones/serato-library-manager/releases). You do not need Python. The Mac and Windows steps, including the unsigned-app warnings, are in [First install](docs/first-install.md). The published copy is [First install](https://mookiejones.github.io/serato-library-manager/first-install.html).
+
+GitHub Releases is the only download. There is no Homebrew formula, winget package, or separate website.
+
 [![Merge copies dialog. One file is selected to keep, and the plan lists crates and fields.](docs/media/duplicate-merge-poster.jpg)](docs/media/duplicate-merge.mp4)
 
 Select the picture to play the duplicate-merge recording. The steps are in the guide under Duplicates. On the published site the same recording plays in the page.
@@ -26,7 +32,7 @@ Open a track to save related tracks, with a note and a rating, or to keep a one-
 
 In VS Code, press F5. That launch runs `server.py`.
 
-## Desktop window
+## Desktop app
 
 ```bash
 python3 -m venv .venv
@@ -34,7 +40,7 @@ python3 -m venv .venv
 .venv/bin/python desktop.py
 ```
 
-The window loads the same page. Closing it stops the server. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`.
+The app binds `127.0.0.1` on a free port and opens the browser. Quit from the menu bar on macOS or the notification area on Windows. Closing the browser leaves the app running. A second launch opens the same page. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`. On macOS, also install `requirements-macos.txt` in that environment so the menu bar can load.
 
 To build an unsigned app on the current operating system:
 
@@ -43,11 +49,11 @@ To build an unsigned app on the current operating system:
 .venv/bin/python -m PyInstaller serato-library.spec
 ```
 
-On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Library/`. On Windows, use `.venv\Scripts\python` for both commands. Build on each system you want to ship.
+On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Library/`. On Windows, use `.venv\Scripts\python` for both commands. Release disk images and the Windows installer are built by GitHub Actions, not by this command. Build on each system you want to ship.
 
 ## GitHub
 
-GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The library server stays on `127.0.0.1`. GitHub Pages publishes the user guide only, as a static site. The developer guide is [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3) project board. Feature ideas live in [issues labelled feature-gap](https://github.com/mookiejones/serato-library-manager/issues?q=label%3Afeature-gap). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
+GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned macOS disk images, a Windows installer, a portable zip, and `SHA256SUMS` on GitHub Releases. The library server stays on `127.0.0.1`. GitHub Pages publishes the user guide only, as a static site. The developer guide is [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3) project board. Feature ideas live in [issues labelled feature-gap](https://github.com/mookiejones/serato-library-manager/issues?q=label%3Afeature-gap). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
 
 ## Sharing
 

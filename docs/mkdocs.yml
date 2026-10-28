@@ -53,6 +53,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Start:
+      - First install: first-install.md
       - Install: guide/install.md
       - Safety and backups: guide/safety.md
   - Your library:
