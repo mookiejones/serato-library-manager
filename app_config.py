@@ -1,9 +1,10 @@
-"""Settings for sharing anonymous telemetry.
+"""Settings for sharing and for the Rekordbox export bar.
 
-The choice and the anonymous install id live in a JSON file under the
-per-system config directory. A missing file means the choice has not been
-made, and sharing stays off. ``False`` is a real choice and must not be
-treated as missing.
+The sharing choice, the anonymous install id, and the export bar live in
+one JSON file under the per-system config directory. A missing file means
+the sharing choice has not been made, and sharing stays off. ``False`` is
+a real choice and must not be treated as missing. The export bar has its
+own defaults and can be saved before that choice.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import logging
 import os
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Single source for the app version. Sentry's release, PostHog's
@@ -24,39 +25,85 @@ CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "telemetry_consent")
+SETTINGS_KEYS = ("install_id", "telemetry_consent", "rekordbox")
+REKORDBOX_KEYS = ("hot_loops", "memory_cues", "key_notation")
+# The same three words rekordbox.py accepts for --key.
+REKORDBOX_KEY_NOTATIONS = ("asis", "camelot", "classical")
 _UUID = uuid.UUID
 logger = logging.getLogger("serato.library.config")
 
 
 @dataclass(frozen=True)
+class RekordboxSettings:
+    """The Rekordbox export bar.
+
+    Attributes:
+        hot_loops: True puts a saved loop on its own free hot-cue pad.
+        memory_cues: True also writes each hot cue as a memory cue.
+        key_notation: ``asis``, ``camelot``, or ``classical``.
+    """
+
+    hot_loops: bool
+    memory_cues: bool
+    key_notation: str
+
+    def as_json(self) -> dict[str, object]:
+        """Return the three export fields.
+
+        Returns:
+            ``hot_loops``, ``memory_cues``, and ``key_notation``. ``False``
+            is written as false.
+        """
+        return {
+            "hot_loops": self.hot_loops,
+            "memory_cues": self.memory_cues,
+            "key_notation": self.key_notation,
+        }
+
+
+def default_rekordbox() -> RekordboxSettings:
+    """Return the export bar the page shows before a choice is saved.
+
+    Returns:
+        Hot loops off, memory cues on, and the key left as stored.
+    """
+    return RekordboxSettings(hot_loops=False, memory_cues=True, key_notation="asis")
+
+
+@dataclass(frozen=True)
 class Settings:
-    """The sharing choice and the anonymous install id.
+    """The sharing choice, the install id, and the export bar.
 
     Attributes:
         install_id: Random UUID for this install, or None until one is saved.
         telemetry_consent: True, False, or None when the person has not chosen.
+        rekordbox: Export bar. Defaults apply when the file has no section.
     """
 
     install_id: str | None
     telemetry_consent: bool | None
+    rekordbox: RekordboxSettings = field(default_factory=default_rekordbox)
 
     def as_json(self) -> dict[str, object]:
-        """Return the full settings object for the file.
+        """Return the settings object for the file.
 
         Returns:
-            Both stored keys. Consent is a boolean and the id is present.
+            The export bar, plus the install id and consent when a sharing
+            choice has been saved. A missing choice is omitted, so the next
+            load still shows the prompt.
 
         Raises:
-            ValueError: If either field is still unset. A partial file would
-                stick on the next load and hide the prompt.
+            ValueError: If a boolean consent is missing its install id.
         """
-        if self.install_id is None or not isinstance(self.telemetry_consent, bool):
-            raise ValueError("Refusing to write a partial settings file.")
-        return {
-            "install_id": self.install_id,
-            "telemetry_consent": self.telemetry_consent,
-        }
+        body: dict[str, object] = {"rekordbox": self.rekordbox.as_json()}
+        if isinstance(self.telemetry_consent, bool):
+            if self.install_id is None:
+                raise ValueError("Refusing to write a consent without an install id.")
+            body["install_id"] = self.install_id
+            body["telemetry_consent"] = self.telemetry_consent
+        elif self.install_id is not None:
+            body["install_id"] = self.install_id
+        return body
 
 
 def _env_path(name: str) -> Path | None:
@@ -196,7 +243,105 @@ def _parse(payload: object) -> Settings:
         else:
             logger.warning("Config key 'telemetry_consent' has wrong type — ignored")
             consent = None
-    return Settings(install_id=install_id, telemetry_consent=consent)
+    if "rekordbox" not in payload:
+        rekordbox = default_rekordbox()
+    else:
+        rekordbox = _parse_rekordbox(payload.get("rekordbox"))
+    return Settings(install_id=install_id, telemetry_consent=consent, rekordbox=rekordbox)
+
+
+def _parse_bool(value: object, dotted: str, default: bool) -> bool:
+    """Return a stored boolean, or the default when the type is wrong.
+
+    Args:
+        value: Candidate from the settings file.
+        dotted: Full key, such as ``rekordbox.hot_loops``.
+        default: Value used when ``value`` is not a boolean. ``False`` is
+            a stored choice and is not replaced by the default.
+
+    Returns:
+        The boolean, or ``default`` after a warning.
+    """
+    if isinstance(value, bool):
+        return value
+    logger.warning("Config key %r has wrong type — ignored", dotted)
+    return default
+
+
+def _parse_rekordbox(value: object) -> RekordboxSettings:
+    """Validate the export section.
+
+    Args:
+        value: The ``rekordbox`` member of the settings file.
+
+    Returns:
+        The saved fields. A missing field keeps its default. An unknown
+        field and a wrong type are dropped. ``False`` is kept.
+    """
+    defaults = default_rekordbox()
+    if not isinstance(value, dict):
+        logger.warning("Config key 'rekordbox' must be a mapping — ignored")
+        return defaults
+    for key in value:
+        if key not in REKORDBOX_KEYS:
+            logger.warning("Unknown config key %r — ignored", f"rekordbox.{key}")
+    hot_loops = defaults.hot_loops
+    memory_cues = defaults.memory_cues
+    key_notation = defaults.key_notation
+    if "hot_loops" in value:
+        hot_loops = _parse_bool(value.get("hot_loops"), "rekordbox.hot_loops", defaults.hot_loops)
+    if "memory_cues" in value:
+        memory_cues = _parse_bool(value.get("memory_cues"), "rekordbox.memory_cues", defaults.memory_cues)
+    if "key_notation" in value:
+        raw_key = value.get("key_notation")
+        if isinstance(raw_key, str) and raw_key in REKORDBOX_KEY_NOTATIONS:
+            key_notation = raw_key
+        else:
+            logger.warning("Config key 'rekordbox.key_notation' has wrong type — ignored")
+    return RekordboxSettings(
+        hot_loops=hot_loops,
+        memory_cues=memory_cues,
+        key_notation=key_notation,
+    )
+
+
+def rekordbox_changes(section: object) -> dict[str, bool | str]:
+    """Validate one POST body for the export bar.
+
+    Args:
+        section: The ``rekordbox`` object from the request. It must be a
+            mapping with at least one known field.
+
+    Returns:
+        The fields to merge. Only keys present in ``section`` are included.
+
+    Raises:
+        ValueError: If the section is not a mapping, is empty, names an
+            unknown field, or gives a field the wrong type. An integer is
+            not a boolean.
+    """
+    if not isinstance(section, dict) or not section:
+        raise ValueError("rekordbox must be an object with at least one field.")
+    unknown = [key for key in section if key not in REKORDBOX_KEYS]
+    if unknown:
+        raise ValueError(f"Unknown config key 'rekordbox.{unknown[0]}'.")
+    changes: dict[str, bool | str] = {}
+    if "hot_loops" in section:
+        raw_loops = section.get("hot_loops")
+        if not isinstance(raw_loops, bool):
+            raise ValueError("rekordbox.hot_loops must be a boolean.")
+        changes["hot_loops"] = raw_loops
+    if "memory_cues" in section:
+        raw_memory = section.get("memory_cues")
+        if not isinstance(raw_memory, bool):
+            raise ValueError("rekordbox.memory_cues must be a boolean.")
+        changes["memory_cues"] = raw_memory
+    if "key_notation" in section:
+        raw_key = section.get("key_notation")
+        if not isinstance(raw_key, str) or raw_key not in REKORDBOX_KEY_NOTATIONS:
+            raise ValueError("rekordbox.key_notation must be asis, camelot, or classical.")
+        changes["key_notation"] = raw_key
+    return changes
 
 
 def load_settings() -> Settings:
@@ -245,13 +390,15 @@ def _retire_unreadable(path: Path) -> None:
 
 
 def save_settings(settings: Settings) -> None:
-    """Atomically replace the settings file with a complete object.
+    """Atomically replace the settings file.
 
     Args:
-        settings: Choice and install id. Both fields must be set.
+        settings: Sharing choice, install id, and export bar. A missing
+            sharing choice is omitted. The export bar is always written
+            in full.
 
     Raises:
-        ValueError: If the object is missing the id or the boolean choice.
+        ValueError: If a boolean consent has no install id.
         OSError: If the directory or the file cannot be written.
 
     The write is a temp file in the same directory followed by replace, so
@@ -284,6 +431,58 @@ def set_telemetry_consent(value: bool) -> Settings:
         raise ValueError("telemetry_consent must be a boolean.")
     current = load_settings()
     install_id = current.install_id or str(uuid.uuid4())
-    updated = Settings(install_id=install_id, telemetry_consent=value)
+    updated = Settings(
+        install_id=install_id,
+        telemetry_consent=value,
+        rekordbox=current.rekordbox,
+    )
+    save_settings(updated)
+    return updated
+
+
+def update_rekordbox(
+    *,
+    hot_loops: bool | None = None,
+    memory_cues: bool | None = None,
+    key_notation: str | None = None,
+) -> Settings:
+    """Merge export-bar fields into the settings file.
+
+    Args:
+        hot_loops: New hot-loops choice. None leaves the saved value.
+        memory_cues: New memory-cues choice. None leaves the saved value.
+            ``False`` is stored.
+        key_notation: ``asis``, ``camelot``, or ``classical``. None leaves
+            the saved value.
+
+    Returns:
+        The settings that were written. A sharing choice that was already
+        saved is kept. Saving the export bar does not invent one.
+
+    Raises:
+        ValueError: If a field has the wrong type, or no field was given.
+        OSError: If the settings file cannot be written.
+    """
+    if hot_loops is not None and not isinstance(hot_loops, bool):
+        raise ValueError("rekordbox.hot_loops must be a boolean.")
+    if memory_cues is not None and not isinstance(memory_cues, bool):
+        raise ValueError("rekordbox.memory_cues must be a boolean.")
+    if key_notation is not None and (
+        not isinstance(key_notation, str) or key_notation not in REKORDBOX_KEY_NOTATIONS
+    ):
+        raise ValueError("rekordbox.key_notation must be asis, camelot, or classical.")
+    if hot_loops is None and memory_cues is None and key_notation is None:
+        raise ValueError("rekordbox has no fields to save.")
+    current = load_settings()
+    box = current.rekordbox
+    updated = Settings(
+        install_id=current.install_id,
+        telemetry_consent=current.telemetry_consent,
+        rekordbox=RekordboxSettings(
+            hot_loops=box.hot_loops if hot_loops is None else hot_loops,
+            memory_cues=box.memory_cues if memory_cues is None else memory_cues,
+            key_notation=box.key_notation if key_notation is None else key_notation,
+        ),
+    )
     save_settings(updated)
     return updated

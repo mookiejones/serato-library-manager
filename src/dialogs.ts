@@ -49,7 +49,7 @@ let filesTrigger: HTMLElement | null = null;
  * XML download, which starts only after the dialog is confirmed.
  * Hot loops sends ``hot_loops=1`` while the box is checked and
  * ``hot_loops=0`` while it is clear. The box starts clear.
- * wireDialogs restores a stored choice before the person exports.
+ * wireDialogs loads the saved export bar before the person exports.
  *
  * @param {boolean} report True asks for the loss report instead of the file.
  * @returns {string} The request path and query.
@@ -63,65 +63,59 @@ export function rekordboxExportUrl(report: boolean) {
   return report ? `${base}&report=1` : base;
 }
 
-/** localStorage key for the Hot loops checkbox. `1` is on and `0` is off. */
-export const HOT_LOOPS_STORAGE_KEY = "serato-library.rekordbox-hot-loops";
+/** Bumps when the export bar changes, so a late settings response is ignored. */
+let rekordboxToken = 0;
 
 /**
- * Read localStorage, or null when the browser blocks it.
+ * Apply a saved export bar to the three controls.
  *
- * A private window can throw on the property itself. That matches a
- * missing store: the checkbox stays off.
+ * Only boolean cues and a known key notation are copied. A missing
+ * section leaves the controls as they are. Does not fetch.
  *
- * @returns {Storage|null} The store, or null when it cannot be opened.
+ * @param {object} payload Settings object from the server.
+ * @returns {void}
  */
-function hotLoopsStorage(): Storage | null {
-  try {
-    const storage = window.localStorage;
-    if (storage == null) return null;
-    return storage;
-  } catch {
-    return null;
+export function applyRekordboxExport(payload: SettingsPayload): void {
+  const section = payload.rekordbox;
+  if (section == null) return;
+  if (typeof section.hot_loops === "boolean") {
+    el("rekordbox-hot-loops").checked = section.hot_loops;
+  }
+  if (typeof section.memory_cues === "boolean") {
+    el("rekordbox-memory").checked = section.memory_cues;
+  }
+  if (
+    section.key_notation === "asis"
+    || section.key_notation === "camelot"
+    || section.key_notation === "classical"
+  ) {
+    el("rekordbox-key").value = section.key_notation;
   }
 }
 
 /**
- * Restore the Hot loops checkbox from localStorage.
+ * POST the export bar.
  *
- * The page default is off. Only a stored `1` checks the box. A missing
- * key, any other value, or a blocked store leaves it off. This does not
- * write the store.
+ * The body is the three controls as they are now. A failed request leaves
+ * those controls in place, and the export reads them directly.
  *
- * @returns {void}
+ * @returns {Promise<void>}
  */
-export function restoreHotLoops(): void {
-  const box = el("rekordbox-hot-loops");
-  const storage = hotLoopsStorage();
-  if (storage == null) {
-    box.checked = false;
-    return;
-  }
+export async function saveRekordboxExport(): Promise<void> {
+  const key = el("rekordbox-key").value;
+  const notation = key === "camelot" || key === "classical" ? key : "asis";
+  const token = ++rekordboxToken;
   try {
-    box.checked = storage.getItem(HOT_LOOPS_STORAGE_KEY) === "1";
+    const payload = await postJSON<SettingsPayload>("/api/settings", {
+      rekordbox: {
+        hot_loops: el("rekordbox-hot-loops").checked,
+        memory_cues: el("rekordbox-memory").checked,
+        key_notation: notation,
+      },
+    });
+    if (token === rekordboxToken) applyRekordboxExport(payload);
   } catch {
-    box.checked = false;
-  }
-}
-
-/**
- * Save the Hot loops checkbox in localStorage.
- *
- * A blocked or full store is ignored. The checkbox still applies to this
- * visit, and the export reads the box directly.
- *
- * @returns {void}
- */
-export function rememberHotLoops(): void {
-  const storage = hotLoopsStorage();
-  if (storage == null) return;
-  try {
-    storage.setItem(HOT_LOOPS_STORAGE_KEY, el("rekordbox-hot-loops").checked ? "1" : "0");
-  } catch {
-    // QuotaExceededError or SecurityError. The export still uses the box.
+    // The boxes stay as set. The export still uses them.
   }
 }
 
@@ -520,10 +514,12 @@ function showConsent() {
  * @returns {Promise<void>}
  */
 export async function loadPrivacy() {
+  const token = rekordboxToken;
   const response = await fetch("/api/settings");
   const payload = await readJSONOr<SettingsPayload>(response, {});
   if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
   applyPrivacy(payload);
+  if (token === rekordboxToken) applyRekordboxExport(payload);
   if (payload.needs_consent_prompt) showConsent();
 }
 
@@ -695,9 +691,16 @@ async function confirmFiles() {
  * @returns {void}
  */
 export function wireDialogs(): void {
-  restoreHotLoops();
-  el("rekordbox-hot-loops").addEventListener("change", () => {
-    rememberHotLoops();
+  const saveExportBar = () => {
+    saveRekordboxExport().catch(() => {
+      // saveRekordboxExport already keeps the boxes. This catch is the listener boundary.
+    });
+  };
+  el("rekordbox-hot-loops").addEventListener("change", saveExportBar);
+  el("rekordbox-memory").addEventListener("change", saveExportBar);
+  el("rekordbox-key").addEventListener("change", saveExportBar);
+  loadPrivacy().catch((error: unknown) => {
+    setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent.");
   });
   el("export-rekordbox").addEventListener("click", () => {
     rekordboxXml = "";

@@ -2201,34 +2201,33 @@
     const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
     return report ? `${base}&report=1` : base;
   }
-  var HOT_LOOPS_STORAGE_KEY = "serato-library.rekordbox-hot-loops";
-  function hotLoopsStorage() {
-    try {
-      const storage = window.localStorage;
-      if (storage == null) return null;
-      return storage;
-    } catch {
-      return null;
+  var rekordboxToken = 0;
+  function applyRekordboxExport(payload) {
+    const section = payload.rekordbox;
+    if (section == null) return;
+    if (typeof section.hot_loops === "boolean") {
+      el("rekordbox-hot-loops").checked = section.hot_loops;
+    }
+    if (typeof section.memory_cues === "boolean") {
+      el("rekordbox-memory").checked = section.memory_cues;
+    }
+    if (section.key_notation === "asis" || section.key_notation === "camelot" || section.key_notation === "classical") {
+      el("rekordbox-key").value = section.key_notation;
     }
   }
-  function restoreHotLoops() {
-    const box = el("rekordbox-hot-loops");
-    const storage = hotLoopsStorage();
-    if (storage == null) {
-      box.checked = false;
-      return;
-    }
+  async function saveRekordboxExport() {
+    const key = el("rekordbox-key").value;
+    const notation = key === "camelot" || key === "classical" ? key : "asis";
+    const token = ++rekordboxToken;
     try {
-      box.checked = storage.getItem(HOT_LOOPS_STORAGE_KEY) === "1";
-    } catch {
-      box.checked = false;
-    }
-  }
-  function rememberHotLoops() {
-    const storage = hotLoopsStorage();
-    if (storage == null) return;
-    try {
-      storage.setItem(HOT_LOOPS_STORAGE_KEY, el("rekordbox-hot-loops").checked ? "1" : "0");
+      const payload = await postJSON("/api/settings", {
+        rekordbox: {
+          hot_loops: el("rekordbox-hot-loops").checked,
+          memory_cues: el("rekordbox-memory").checked,
+          key_notation: notation
+        }
+      });
+      if (token === rekordboxToken) applyRekordboxExport(payload);
     } catch {
     }
   }
@@ -2487,10 +2486,12 @@
     el("consent-decline").focus();
   }
   async function loadPrivacy() {
+    const token = rekordboxToken;
     const response = await fetch("/api/settings");
     const payload = await readJSONOr(response, {});
     if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
     applyPrivacy(payload);
+    if (token === rekordboxToken) applyRekordboxExport(payload);
     if (payload.needs_consent_prompt) showConsent();
   }
   function openFilesDialog(action, trigger) {
@@ -2607,9 +2608,15 @@
     }
   }
   function wireDialogs() {
-    restoreHotLoops();
-    el("rekordbox-hot-loops").addEventListener("change", () => {
-      rememberHotLoops();
+    const saveExportBar = () => {
+      saveRekordboxExport().catch(() => {
+      });
+    };
+    el("rekordbox-hot-loops").addEventListener("change", saveExportBar);
+    el("rekordbox-memory").addEventListener("change", saveExportBar);
+    el("rekordbox-key").addEventListener("change", saveExportBar);
+    loadPrivacy().catch((error) => {
+      setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent.");
     });
     el("export-rekordbox").addEventListener("click", () => {
       rekordboxXml = "";
@@ -2862,6 +2869,5 @@
   wireSnapshots();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
-  loadPrivacy().catch((error) => setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent."));
 })();
 //# sourceMappingURL=app.js.map

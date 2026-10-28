@@ -58,6 +58,9 @@ class SettingsTests(unittest.TestCase):
         settings = app_config.load_settings()
         self.assertIsNone(settings.telemetry_consent)
         self.assertIsNone(settings.install_id)
+        self.assertFalse(settings.rekordbox.hot_loops)
+        self.assertTrue(settings.rekordbox.memory_cues)
+        self.assertEqual(settings.rekordbox.key_notation, "asis")
         self.assertFalse(self.config.joinpath(app_config.SETTINGS_NAME).exists())
 
     def test_false_is_kept(self) -> None:
@@ -76,7 +79,11 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(loaded.install_id, saved.install_id)
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertIs(payload["telemetry_consent"], False)
-        self.assertEqual(set(payload), {"install_id", "telemetry_consent"})
+        self.assertEqual(set(payload), {"install_id", "telemetry_consent", "rekordbox"})
+        self.assertEqual(
+            payload["rekordbox"],
+            {"hot_loops": False, "memory_cues": True, "key_notation": "asis"},
+        )
 
     def test_true_is_kept(self) -> None:
         """Keep a saved True and reuse the install id.
@@ -139,19 +146,104 @@ class SettingsTests(unittest.TestCase):
         app_config.set_telemetry_consent(False)
         saved = json.loads(path.read_text(encoding="utf-8"))
         self.assertNotIn("library_path", saved)
+        self.assertIn("rekordbox", saved)
 
-    def test_partial_object_is_not_written(self) -> None:
-        """Refuse to persist a settings object that omits the choice.
+    def test_missing_consent_is_not_written_as_a_choice(self) -> None:
+        """Omit a sharing choice that has not been made.
 
-        ``as_json`` is the write boundary. A missing consent must raise
-        rather than create a file the loader would treat as final.
+        The export bar can be stored on its own. The next load still has
+        no consent, so the prompt is still due.
 
         Returns:
-            None. The test fails if a partial object serializes.
+            None. The test fails if consent is written as false or null.
         """
-        partial = app_config.Settings(install_id="11111111-1111-4111-8111-111111111111", telemetry_consent=None)
+        partial = app_config.Settings(
+            install_id="11111111-1111-4111-8111-111111111111",
+            telemetry_consent=None,
+        )
+        body = partial.as_json()
+        self.assertNotIn("telemetry_consent", body)
+        self.assertIn("rekordbox", body)
+        saved = app_config.update_rekordbox(hot_loops=True)
+        self.assertIsNone(saved.telemetry_consent)
+        self.assertIsNone(saved.install_id)
+        loaded = app_config.load_settings()
+        self.assertIsNone(loaded.telemetry_consent)
+        self.assertTrue(loaded.rekordbox.hot_loops)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertNotIn("telemetry_consent", payload)
+
+    def test_rekordbox_defaults_round_trip_and_reject_bad_types(self) -> None:
+        """Keep false, merge one field, and refuse integers and bad keys.
+
+        A saved memory-cues false stays false when only hot loops is
+        updated. A sharing choice saved afterwards keeps the export bar.
+        An integer, an unknown field, and a notation outside the three
+        words raise before the file changes.
+
+        Returns:
+            None. The test fails if false becomes the default or a bad
+            value is stored.
+        """
+        import rekordbox
+
+        self.assertEqual(app_config.REKORDBOX_KEY_NOTATIONS, rekordbox._KEY_NOTATIONS)
+        saved = app_config.update_rekordbox(
+            hot_loops=True,
+            memory_cues=False,
+            key_notation="camelot",
+        )
+        self.assertTrue(saved.rekordbox.hot_loops)
+        self.assertFalse(saved.rekordbox.memory_cues)
+        self.assertEqual(saved.rekordbox.key_notation, "camelot")
+        app_config.update_rekordbox(hot_loops=False)
+        loaded = app_config.load_settings()
+        self.assertFalse(loaded.rekordbox.hot_loops)
+        self.assertFalse(loaded.rekordbox.memory_cues)
+        self.assertEqual(loaded.rekordbox.key_notation, "camelot")
+        path = self.config / "settings.json"
+        before = path.read_text(encoding="utf-8")
         with self.assertRaises(ValueError):
-            partial.as_json()
+            app_config.update_rekordbox(hot_loops=1)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            app_config.update_rekordbox(memory_cues=0)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            app_config.update_rekordbox(key_notation="open")
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes({"nope": True})
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes({})
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes("yes")
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+        path.write_text(
+            json.dumps(
+                {
+                    "rekordbox": {
+                        "hot_loops": 1,
+                        "memory_cues": False,
+                        "key_notation": "classical",
+                        "library_path": "/tmp",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            repaired = app_config.load_settings()
+        self.assertFalse(repaired.rekordbox.hot_loops)
+        self.assertFalse(repaired.rekordbox.memory_cues)
+        self.assertEqual(repaired.rekordbox.key_notation, "classical")
+        text = " ".join(caught.output)
+        self.assertIn("rekordbox.hot_loops", text)
+        self.assertIn("rekordbox.library_path", text)
+        app_config.set_telemetry_consent(False)
+        kept = app_config.load_settings()
+        self.assertIs(kept.telemetry_consent, False)
+        self.assertFalse(kept.rekordbox.memory_cues)
+        self.assertEqual(kept.rekordbox.key_notation, "classical")
+        written = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("library_path", written["rekordbox"])
 
     def test_unreadable_file_is_kept_aside(self) -> None:
         """Rename a corrupt file when a new choice is saved.

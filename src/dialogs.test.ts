@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { HOT_LOOPS_STORAGE_KEY, rekordboxExportUrl, restoreHotLoops, wireDialogs } from "./dialogs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadPrivacy, rekordboxExportUrl, saveRekordboxExport, wireDialogs } from "./dialogs";
 import { el } from "./dom";
 import { state } from "./state";
 import { installPage } from "./test-page";
@@ -37,112 +37,122 @@ describe("rekordboxExportUrl", () => {
   });
 });
 
-describe("Hot loops checkbox storage", () => {
-  const originalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
+function settingsResponse(body: unknown, ok = true): Response {
+  return {
+    ok,
+    json: async () => body,
+  } as Response;
+}
 
+describe("Rekordbox export settings", () => {
   beforeEach(() => {
     installPage();
-    localStorage.clear();
     state.mode = "crates";
     state.space = "Serato Library";
     state.activeCrate = "all";
+    vi.stubGlobal("fetch", vi.fn());
   });
 
   afterEach(() => {
-    if (originalStorage) Object.defineProperty(window, "localStorage", originalStorage);
-    localStorage.clear();
+    vi.unstubAllGlobals();
   });
 
   function hotLoops(): HTMLInputElement {
     return el("rekordbox-hot-loops");
   }
 
-  it("stays off when nothing is stored", () => {
-    wireDialogs();
+  function memoryCues(): HTMLInputElement {
+    return el("rekordbox-memory");
+  }
+
+  function keyNotation(): HTMLSelectElement {
+    return el("rekordbox-key");
+  }
+
+  it("loads the saved bar and leaves the HTML defaults when nothing is stored", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(settingsResponse({
+      telemetry_consent: null,
+      needs_consent_prompt: false,
+      rekordbox: { hot_loops: false, memory_cues: true, key_notation: "asis" },
+    }));
+    await loadPrivacy();
     expect(hotLoops().checked).toBe(false);
-    expect(localStorage.getItem(HOT_LOOPS_STORAGE_KEY)).toBeNull();
+    expect(memoryCues().checked).toBe(true);
+    expect(keyNotation().value).toBe("asis");
     expect(rekordboxExportUrl(false)).toContain("hot_loops=0");
+    expect(rekordboxExportUrl(false)).toContain("memory=1");
+    expect(rekordboxExportUrl(false)).toContain("key=asis");
   });
 
-  it("saves a check and restores it on the next visit", () => {
-    wireDialogs();
-    const box = hotLoops();
-    box.checked = true;
-    box.dispatchEvent(new Event("change"));
-    expect(localStorage.getItem(HOT_LOOPS_STORAGE_KEY)).toBe("1");
+  it("restores hot loops, memory cues, and the key notation", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(settingsResponse({
+      telemetry_consent: false,
+      needs_consent_prompt: false,
+      rekordbox: { hot_loops: true, memory_cues: false, key_notation: "classical" },
+    }));
+    await loadPrivacy();
+    expect(hotLoops().checked).toBe(true);
+    expect(memoryCues().checked).toBe(false);
+    expect(keyNotation().value).toBe("classical");
+    expect(rekordboxExportUrl(false)).toContain("hot_loops=1");
+    expect(rekordboxExportUrl(false)).toContain("memory=0");
+    expect(rekordboxExportUrl(false)).toContain("key=classical");
+  });
 
-    installPage();
-    expect(hotLoops().checked).toBe(false);
+  it("posts the three controls when one of them changes", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(settingsResponse({
+      needs_consent_prompt: false,
+      rekordbox: { hot_loops: false, memory_cues: true, key_notation: "asis" },
+    }));
     wireDialogs();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValue(settingsResponse({
+      rekordbox: { hot_loops: true, memory_cues: false, key_notation: "camelot" },
+    }));
+    hotLoops().checked = true;
+    memoryCues().checked = false;
+    keyNotation().value = "camelot";
+    hotLoops().dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const call = fetchMock.mock.calls[0];
+    expect(call?.[0]).toBe("/api/settings");
+    const init = call?.[1];
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      rekordbox: { hot_loops: true, memory_cues: false, key_notation: "camelot" },
+    });
+  });
+
+  it("keeps the export working when settings cannot be loaded", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockRejectedValue(new Error("offline"));
+    await expect(loadPrivacy()).rejects.toThrow(/offline|fetch/i);
+    expect(hotLoops().checked).toBe(false);
+    expect(memoryCues().checked).toBe(true);
+    expect(keyNotation().value).toBe("asis");
+    expect(rekordboxExportUrl(false)).toContain("hot_loops=0");
+    expect(rekordboxExportUrl(false)).toContain("memory=1");
+    expect(rekordboxExportUrl(false)).toContain("key=asis");
+    fetchMock.mockResolvedValue(settingsResponse({ error: "nope" }, false));
+    await expect(loadPrivacy()).rejects.toThrow(/nope/);
+    expect(rekordboxExportUrl(true)).toContain("report=1");
+  });
+
+  it("keeps a changed box when the save fails", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(settingsResponse({ error: "nope" }, false));
+    hotLoops().checked = true;
+    await saveRekordboxExport();
     expect(hotLoops().checked).toBe(true);
     expect(rekordboxExportUrl(false)).toContain("hot_loops=1");
-
-    const again = hotLoops();
-    again.checked = false;
-    again.dispatchEvent(new Event("change"));
-    expect(localStorage.getItem(HOT_LOOPS_STORAGE_KEY)).toBe("0");
-    installPage();
-    wireDialogs();
-    expect(hotLoops().checked).toBe(false);
-    expect(rekordboxExportUrl(false)).toContain("hot_loops=0");
-  });
-
-  it("treats any stored value other than 1 as off", () => {
-    localStorage.setItem(HOT_LOOPS_STORAGE_KEY, "true");
-    restoreHotLoops();
-    expect(hotLoops().checked).toBe(false);
-    localStorage.setItem(HOT_LOOPS_STORAGE_KEY, "0");
-    restoreHotLoops();
-    expect(hotLoops().checked).toBe(false);
-  });
-
-  it("leaves the box off when localStorage cannot be opened", () => {
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      get() {
-        throw new DOMException("blocked", "SecurityError");
-      },
-    });
-    expect(() => wireDialogs()).not.toThrow();
-    expect(hotLoops().checked).toBe(false);
-    const box = hotLoops();
-    box.checked = true;
-    expect(() => box.dispatchEvent(new Event("change"))).not.toThrow();
-    expect(box.checked).toBe(true);
-    expect(rekordboxExportUrl(false)).toContain("hot_loops=1");
-  });
-
-  it("leaves the box usable when getItem and setItem throw", () => {
-    const blocked: Storage = {
-      get length() {
-        return 0;
-      },
-      clear() {
-        throw new DOMException("blocked", "SecurityError");
-      },
-      getItem() {
-        throw new DOMException("blocked", "SecurityError");
-      },
-      key() {
-        throw new DOMException("blocked", "SecurityError");
-      },
-      removeItem() {
-        throw new DOMException("blocked", "SecurityError");
-      },
-      setItem() {
-        throw new DOMException("blocked", "SecurityError");
-      },
-    };
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      value: blocked,
-    });
-    expect(() => restoreHotLoops()).not.toThrow();
-    expect(hotLoops().checked).toBe(false);
-    wireDialogs();
-    const box = hotLoops();
-    box.checked = true;
-    expect(() => box.dispatchEvent(new Event("change"))).not.toThrow();
-    expect(box.checked).toBe(true);
+    fetchMock.mockRejectedValue(new Error("offline"));
+    memoryCues().checked = false;
+    await saveRekordboxExport();
+    expect(memoryCues().checked).toBe(false);
+    expect(rekordboxExportUrl(false)).toContain("memory=0");
   });
 });

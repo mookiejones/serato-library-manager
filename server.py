@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 from urllib.parse import parse_qs, urlparse
 
+import app_config
 import app_log
 import files
 import library
@@ -1746,30 +1747,58 @@ class Handler(BaseHTTPRequestHandler):
         threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def _post_settings(self, payload: dict[str, object]) -> None:
-        """Save the sharing choice.
+        """Save the sharing choice, the export bar, or both.
 
         Args:
-            payload: JSON object. The only accepted field is
-                ``telemetry_consent``, and it must be a boolean. ``False``
-                is a real choice. Any other shape is a 400 so a misspelled
-                field is not stored as the default.
+            payload: JSON object. ``telemetry_consent`` must be a boolean
+                when it is present. ``rekordbox`` must be an object whose
+                fields are ``hot_loops``, ``memory_cues``, and
+                ``key_notation``. Booleans reject integers. ``key_notation``
+                must be ``asis``, ``camelot``, or ``classical``. Any other
+                shape is a 400, and the file is left unchanged.
         """
-        if set(payload) != {"telemetry_consent"} or not isinstance(
-            payload.get("telemetry_consent"), bool
-        ):
+        allowed = {"telemetry_consent", "rekordbox"}
+        if not payload or not set(payload) <= allowed:
             self.send_json({"error": "That request is not valid."}, status=400)
             return
-        choice = payload["telemetry_consent"]
-        if not isinstance(choice, bool):
+        consent: bool | None = None
+        if "telemetry_consent" in payload:
+            raw_consent = payload.get("telemetry_consent")
+            if not isinstance(raw_consent, bool):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            consent = raw_consent
+        changes: dict[str, bool | str] | None = None
+        if "rekordbox" in payload:
+            try:
+                changes = app_config.rekordbox_changes(payload.get("rekordbox"))
+            except ValueError:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+        if consent is None and changes is None:
             self.send_json({"error": "That request is not valid."}, status=400)
             return
         try:
-            self.send_json(telemetry.set_consent(choice))
+            if changes is not None:
+                hot_loops = changes["hot_loops"] if "hot_loops" in changes else None
+                memory_cues = changes["memory_cues"] if "memory_cues" in changes else None
+                key_notation = changes["key_notation"] if "key_notation" in changes else None
+                app_config.update_rekordbox(
+                    hot_loops=hot_loops if isinstance(hot_loops, bool) else None,
+                    memory_cues=memory_cues if isinstance(memory_cues, bool) else None,
+                    key_notation=key_notation if isinstance(key_notation, str) else None,
+                )
+            if isinstance(consent, bool):
+                self.send_json(telemetry.set_consent(consent))
+                return
+            self.send_json(telemetry.public_settings())
         except OSError:
             self.send_json(
                 {"error": "The sharing choice could not be saved."},
                 status=500,
             )
+        except ValueError:
+            self.send_json({"error": "That request is not valid."}, status=400)
 
     def _get_related(self, query: dict[str, list[str]]) -> None:
         """Return saved links and suggestions for one track path.
