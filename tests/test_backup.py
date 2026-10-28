@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import sqlite3
+import sys
 import unittest
 from pathlib import Path
 from typing import cast
 from unittest import mock
 
 import app_log
+import files
 import library
 from tests.fixture import TempLibrary, open_database
 
@@ -279,6 +282,181 @@ class BackupTests(unittest.TestCase):
             self.assertIsNone(caught.exception.__context__)
             self.assertNotIsInstance(caught.exception, PermissionError)
             self.assertIn(str(folder), "\n".join(recorded.output))
+
+    def test_partial_delete_is_not_offered(self) -> None:
+        """Leave a locked delete under a name restore will not offer.
+
+        The master database is copied, so the folder would look finished.
+        Deleting it raises ``PermissionError`` after the rename. The
+        leftover name ends with ``-failed``. ``list_backups`` and the file
+        browser omit it, and a finished folder beside it is still listed.
+
+        Returns:
+            None. The test fails if the copy error changes or the leftover
+            is offered as a restore.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            good = parent / "serato-web-20200101-000000"
+            good.mkdir(parents=True)
+            (good / "master.sqlite").write_bytes(b"complete")
+            root = temp.db.resolve().parent / "root.sqlite"
+            root.write_bytes(b"location")
+            digest = _sha256(temp.db)
+            real = library._backup_database
+
+            def copy_master_only(source: Path, dest: Path) -> None:
+                if Path(source).name == "root.sqlite":
+                    raise OSError(28, "No space left on device")
+                real(source, dest)
+
+            journal = parent / "file-ops-journal.json"
+            journal.write_text("{}", encoding="utf-8")
+            with mock.patch.object(library, "_backup_database", side_effect=copy_master_only):
+                with mock.patch(
+                    "library.shutil.rmtree",
+                    side_effect=PermissionError(13, "Access is denied"),
+                ):
+                    with self.assertLogs(app_log.LOGGER_NAME, level="WARNING") as recorded:
+                        with self.assertRaises(OSError) as caught:
+                            library.ensure_backup()
+            self.assertEqual(caught.exception.errno, 28)
+            self.assertNotIsInstance(caught.exception, PermissionError)
+            renamed = [
+                path for path in parent.iterdir() if path.name.endswith(library.BACKUP_FAILED_SUFFIX)
+            ]
+            self.assertEqual(len(renamed), 1)
+            leftover = renamed[0]
+            self.assertTrue((leftover / "master.sqlite").is_file())
+            self.assertFalse(library.is_complete(leftover))
+            self.assertTrue(library.is_complete(good))
+            self.assertEqual(library.list_backups(parent), [good])
+            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            self.assertIn(good.name, names)
+            self.assertNotIn(leftover.name, names)
+            self.assertIn(journal.name, names)
+            self.assertIn(str(leftover), "\n".join(recorded.output))
+            self.assertEqual(_sha256(temp.db), digest)
+            self.assertEqual(root.read_bytes(), b"location")
+
+    def test_rename_failure_writes_incomplete_marker(self) -> None:
+        """Write ``INCOMPLETE`` when the failed folder cannot be renamed.
+
+        The copied ``master.sqlite`` would otherwise look safe to restore.
+        The marker makes :func:`library.is_complete` false, and listings
+        omit the folder. The copy error is still ``OSError`` 28.
+
+        Returns:
+            None. The test fails if the marker is missing or the folder is offered.
+        """
+        with TempLibrary() as temp:
+            parent = temp.db.resolve().parent / "Backups"
+            good = parent / "serato-web-20200101-000000"
+            good.mkdir(parents=True)
+            (good / "master.sqlite").write_bytes(b"complete")
+            root = temp.db.resolve().parent / "root.sqlite"
+            root.write_bytes(b"location")
+            real = library._backup_database
+            real_rename = Path.rename
+
+            def copy_master_only(source: Path, dest: Path) -> None:
+                if Path(source).name == "root.sqlite":
+                    raise OSError(28, "No space left on device")
+                real(source, dest)
+
+            def refuse_failed_rename(self: Path, target: Path) -> Path:
+                if self.name.startswith("serato-web-") and str(target).endswith(
+                    library.BACKUP_FAILED_SUFFIX
+                ):
+                    raise OSError(13, "Access is denied")
+                return real_rename(self, target)
+
+            with mock.patch.object(library, "_backup_database", side_effect=copy_master_only):
+                with mock.patch.object(Path, "rename", refuse_failed_rename):
+                    with self.assertLogs(app_log.LOGGER_NAME, level="WARNING") as recorded:
+                        with self.assertRaises(OSError) as caught:
+                            library.ensure_backup()
+            self.assertEqual(caught.exception.errno, 28)
+            self.assertNotIsInstance(caught.exception, PermissionError)
+            folders = [path for path in parent.iterdir() if path.is_dir() and path != good]
+            self.assertEqual(len(folders), 1)
+            leftover = folders[0]
+            self.assertFalse(leftover.name.endswith(library.BACKUP_FAILED_SUFFIX))
+            self.assertTrue((leftover / library.BACKUP_INCOMPLETE_NAME).is_file())
+            self.assertTrue((leftover / "master.sqlite").is_file())
+            self.assertFalse(library.is_complete(leftover))
+            self.assertEqual(library.list_backups(parent), [good])
+            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            self.assertIn(good.name, names)
+            self.assertNotIn(leftover.name, names)
+            self.assertIn(str(leftover), "\n".join(recorded.output))
+
+    @unittest.skipUnless(sys.platform == "win32", "needs a Windows file lock")
+    def test_windows_lock_is_not_a_complete_backup(self) -> None:
+        """Hold the copied database open so Windows refuses the cleanup.
+
+        The leftover must not be offered. It is either renamed to end with
+        ``-failed`` or marked ``INCOMPLETE``. The copy error stays
+        ``OSError`` 28.
+
+        Returns:
+            None. The test fails if a locked folder is listed as complete.
+        """
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.restype = ctypes.c_void_p
+        kernel32.CreateFileW.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        invalid = ctypes.c_void_p(-1).value
+        handle: int | None = None
+        with TempLibrary() as temp:
+            root = temp.db.resolve().parent / "root.sqlite"
+            root.write_bytes(b"location")
+            real = library._backup_database
+
+            def lock_master(source: Path, dest: Path) -> None:
+                nonlocal handle
+                if Path(source).name == "root.sqlite":
+                    master = Path(dest).parent / "master.sqlite"
+                    handle = kernel32.CreateFileW(
+                        str(master),
+                        0x80000000,
+                        0,
+                        None,
+                        3,
+                        0x80,
+                        None,
+                    )
+                    if handle in (None, 0, invalid):
+                        raise OSError(ctypes.get_last_error(), "CreateFileW")
+                    raise OSError(28, "No space left on device")
+                real(source, dest)
+
+            try:
+                with mock.patch.object(library, "_backup_database", side_effect=lock_master):
+                    with self.assertRaises(OSError) as caught:
+                        library.ensure_backup()
+                self.assertEqual(caught.exception.errno, 28)
+                parent = temp.db.resolve().parent / "Backups"
+                leftovers = [path for path in parent.iterdir() if path.is_dir()]
+                self.assertTrue(leftovers)
+                for item in leftovers:
+                    marked = item.name.endswith(library.BACKUP_FAILED_SUFFIX) or (
+                        item / library.BACKUP_INCOMPLETE_NAME
+                    ).exists()
+                    self.assertTrue(marked)
+                    self.assertFalse(library.is_complete(item))
+                self.assertEqual(library.list_backups(parent), [])
+            finally:
+                if handle not in (None, 0, invalid):
+                    kernel32.CloseHandle(handle)
 
     def test_failed_backup_cleanup_leaves_a_symlink(self) -> None:
         """Do not follow a backup-shaped symlink out of ``Backups``.

@@ -390,6 +390,44 @@ def _list_root(path: str | None) -> Path:
     return resolved
 
 
+def _is_backup_root(directory: Path) -> bool:
+    """Return whether a listing is the library backup folder.
+
+    Args:
+        directory: Folder being scanned.
+
+    Returns:
+        True when ``directory`` is ``Library/Backups`` beside the master
+        database. An unreadable path is not that folder.
+    """
+    try:
+        return directory.resolve() == _backups().resolve()
+    except OSError:
+        return False
+
+
+def _hide_incomplete_backup(name: str, path: Path, kind: str) -> bool:
+    """Return whether a backup listing must omit this entry.
+
+    Args:
+        name: Directory entry name.
+        path: Path of that entry.
+        kind: ``dir``, ``file``, or ``link`` from the scan.
+
+    Returns:
+        True for a directory under ``Library/Backups`` that
+        :func:`library.is_complete` rejects, when the name is a backup
+        folder or the entry contains the incomplete marker. Other files,
+        including the file-ops journal, stay visible.
+    """
+    if kind != "dir":
+        return False
+    shaped = name.startswith("serato-web-") or name.endswith(library.BACKUP_FAILED_SUFFIX)
+    if not shaped and not (path / library.BACKUP_INCOMPLETE_NAME).exists():
+        return False
+    return not library.is_complete(path)
+
+
 def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
     """Read one folder without following shortcuts.
 
@@ -404,6 +442,7 @@ def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
     """
     found: list[dict[str, object]] = []
     truncated = False
+    backup_root = _is_backup_root(directory)
     try:
         with os.scandir(directory) as scanner:
             for entry in scanner:
@@ -411,6 +450,9 @@ def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
                     truncated = True
                     break
                 kind = "link" if entry.is_symlink() else "dir" if entry.is_dir(follow_symlinks=False) else "file"
+                path = Path(entry.path)
+                if backup_root and _hide_incomplete_backup(entry.name, path, kind):
+                    continue
                 audio = kind == "file" and Path(entry.name).suffix.lower() in _AUDIO
                 found.append(
                     {

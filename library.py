@@ -551,8 +551,78 @@ def _match_quiescent_header(source: Path, dest: Path) -> None:
         handle.write(updated)
 
 
+# A folder whose name ends with this suffix is a backup that did not finish.
+# ``list_backups`` and :func:`is_complete` both treat it as unusable.
+BACKUP_FAILED_SUFFIX = "-failed"
+# Written inside a failed backup when renaming it to the suffix above fails.
+# A restore must not offer a folder that contains this file.
+BACKUP_INCOMPLETE_NAME = "INCOMPLETE"
+
+
+def is_complete(backup_dir: Path) -> bool:
+    """Return whether a backup folder is safe to restore.
+
+    A folder is not safe when its name ends with :data:`BACKUP_FAILED_SUFFIX`,
+    when it contains :data:`BACKUP_INCOMPLETE_NAME`, or when ``master.sqlite``
+    is not a regular file. ``root.sqlite`` is optional: a library that had
+    no location database beside the master file is still complete without it.
+    A shortcut, a missing directory, or a folder that cannot be read is not
+    complete. Call this before offering a folder in a restore list.
+
+    Args:
+        backup_dir: Candidate backup directory, usually under ``Library/Backups``.
+
+    Returns:
+        True when the folder has a regular ``master.sqlite`` and neither
+        the failed suffix nor the incomplete marker.
+    """
+    try:
+        if backup_dir.is_symlink() or not backup_dir.is_dir():
+            return False
+        if backup_dir.name.endswith(BACKUP_FAILED_SUFFIX):
+            return False
+        if (backup_dir / BACKUP_INCOMPLETE_NAME).exists():
+            return False
+        master = backup_dir / "master.sqlite"
+        if master.is_symlink() or not master.is_file():
+            return False
+    except OSError:
+        return False
+    return True
+
+
+def list_backups(directory: Path | None = None) -> list[Path]:
+    """Return backup folders that are safe to restore.
+
+    Uses :func:`is_complete`. Folders ending in ``-failed``, folders that
+    contain ``INCOMPLETE``, and folders without ``master.sqlite`` are
+    omitted. The file browser uses the same check when it lists
+    ``Library/Backups``.
+
+    Args:
+        directory: Folder that holds the backups. When omitted, this is
+            ``Backups`` beside the current master database.
+
+    Returns:
+        Complete backup directories, sorted by name. A missing directory
+        yields an empty list.
+    """
+    root = Path(MASTER).resolve().parent / "Backups" if directory is None else directory
+    try:
+        if root.is_symlink() or not root.is_dir():
+            return []
+        found = [
+            child
+            for child in root.iterdir()
+            if not child.is_symlink() and child.is_dir() and is_complete(child)
+        ]
+    except OSError:
+        return []
+    return sorted(found, key=lambda path: path.name)
+
+
 def _discard_failed_backup(folder: Path, backups: Path) -> None:
-    """Remove a backup folder this call created.
+    """Quarantine a backup folder this call created, then try to remove it.
 
     Args:
         folder: Directory claimed for this backup.
@@ -560,8 +630,11 @@ def _discard_failed_backup(folder: Path, backups: Path) -> None:
 
     The folder must be a real directory strictly inside ``backups``. A
     symlink is left in place so the removal cannot follow a link out of
-    that directory. ``backups`` itself is not removed. An ``OSError``
-    while removing the folder, such as a file lock, is logged and not
+    that directory. ``backups`` itself is not removed. The folder is
+    renamed to end with :data:`BACKUP_FAILED_SUFFIX` before it is deleted,
+    because a rename can succeed when a delete is blocked by a file lock.
+    If the rename fails, :data:`BACKUP_INCOMPLETE_NAME` is written inside
+    the folder. An ``OSError`` during this cleanup is logged and not
     raised. The caller still re-raises the copy error.
     """
     try:
@@ -571,13 +644,63 @@ def _discard_failed_backup(folder: Path, backups: Path) -> None:
         root = backups.resolve()
         if root not in resolved.parents:
             return
-        shutil.rmtree(folder)
+        _quarantine_failed_backup(folder)
     except OSError as exc:
         app_log.logger.warning(
             "Could not remove the failed backup folder %s: %s",
             folder,
             exc,
         )
+
+
+def _quarantine_failed_backup(folder: Path) -> None:
+    """Rename a failed backup, then delete that renamed folder.
+
+    Args:
+        folder: Real directory this call created inside ``Backups``.
+
+    A delete error leaves the renamed folder. A rename error leaves the
+    original folder with an ``INCOMPLETE`` marker. Either result makes
+    :func:`is_complete` return false.
+    """
+    destination = folder.with_name(folder.name + BACKUP_FAILED_SUFFIX)
+    try:
+        folder.rename(destination)
+    except OSError as exc:
+        _write_incomplete_marker(folder, exc)
+        return
+    try:
+        shutil.rmtree(destination)
+    except OSError as exc:
+        app_log.logger.warning(
+            "Could not remove the failed backup folder %s: %s",
+            destination,
+            exc,
+        )
+
+
+def _write_incomplete_marker(folder: Path, rename_error: OSError) -> None:
+    """Mark a failed backup that could not be renamed.
+
+    Args:
+        folder: Directory that is still at its original name.
+        rename_error: Error from the rename attempt.
+    """
+    marker = folder / BACKUP_INCOMPLETE_NAME
+    try:
+        marker.write_text("This backup did not finish.\n", encoding="utf-8")
+    except OSError as exc:
+        app_log.logger.warning(
+            "Could not mark the failed backup folder %s: %s",
+            folder,
+            exc,
+        )
+        return
+    app_log.logger.warning(
+        "Could not rename the failed backup folder %s: %s",
+        folder,
+        rename_error,
+    )
 
 
 def ensure_backup() -> Path | None:
@@ -588,8 +711,10 @@ def ensure_backup() -> Path | None:
     ``-99``. Each name is claimed with ``mkdir(parents=True, exist_ok=False)``,
     which fails atomically when another process already took it. Nothing is
     copied until a folder is claimed. If the copy fails, that new folder is
-    removed and the error is re-raised. A failure to remove the folder is
-    logged and does not replace that error.
+    renamed so its name ends with ``-failed`` and then removed. If the
+    rename fails, an ``INCOMPLETE`` file is written in the folder. A failure
+    to rename or remove the folder is logged and does not replace the copy
+    error. :func:`is_complete` is false for either leftover.
 
     Returns:
         The new backup directory, or None when this process already backed

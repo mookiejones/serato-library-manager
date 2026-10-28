@@ -38,6 +38,8 @@ The copy is a folder next to `master.sqlite`:
 
 `YYYYMMDD` is the date. `HHMMSS` is the time on this computer. When a folder for that same second already exists, the name ends with `-02`, then `-03`, up through `-99`. A later number is a later copy from that second. Sorting the folder names keeps them in the order they were made. The folder contains `master.sqlite`. It also contains `root.sqlite` when that file was beside the library.
 
+Do not restore a folder whose name ends with `-failed`. Do not restore a folder that contains a file named `INCOMPLETE`. Those copies did not finish. A finished copy has `master.sqlite` and neither that ending nor that file. Leave the unfinished folders where they are.
+
 A file change in the Files view copies the database first as well. During the change, the app also writes `Library/Backups/file-ops-journal.json`. That file is removed when the change finishes. Leave it alone.
 
 The backup is the database, not your audio. A backup does not contain your music files.
@@ -50,7 +52,7 @@ Restoring replaces the live library with an older copy. Tracks you added after t
 2. Quit Serato Library. Close the window.
 3. Open the [library folder](install.md#where-serato-keeps-the-library).
 4. Open `Backups`.
-5. Open the `serato-web-` folder from the time you want. A suffix `-02` through `-99` is a later copy from that same second.
+5. Open the `serato-web-` folder from the time you want. A suffix `-02` through `-99` is a later copy from that same second. Skip a name that ends with `-failed`, and skip a folder that contains a file named `INCOMPLETE`.
 6. Copy the current `master.sqlite` to a different folder, so you still have it.
 7. If `root.sqlite` is in the library folder, copy that file aside too.
 8. Copy `master.sqlite` from the backup folder into the library folder. Replace the current file.
