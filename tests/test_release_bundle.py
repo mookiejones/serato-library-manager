@@ -128,15 +128,20 @@ class TagAndFooterTests(unittest.TestCase):
     The cases call ``release_bundle`` helpers. They do not publish a release.
     """
     def test_tag_shape(self) -> None:
-        """Accept ``vMAJOR.MINOR.PATCH`` and reject shorter or pre-release tags.
+        """Accept a final tag and an ``-rcN`` or ``-betaN`` prerelease.
 
-        A tag without the leading ``v``, a missing component, or a suffix such
-        as ``-rc.1`` raises ``SystemExit``. No git command is run.
+        A tag without the leading ``v``, a missing component, a dotted
+        suffix such as ``-rc.1``, or a full ref raises ``SystemExit``.
+        No git command is run.
 
         Returns:
             None. The test fails if a rejected shape is accepted.
         """
         release_bundle.check_tag("v1.2.3")
+        release_bundle.check_tag("v1.2.3-rc1")
+        release_bundle.check_tag("v1.2.3-rc12")
+        release_bundle.check_tag("v1.2.3-beta1")
+        release_bundle.check_tag("v0.0.0-beta10")
         with self.assertRaises(SystemExit):
             release_bundle.check_tag("v1.2")
         with self.assertRaises(SystemExit):
@@ -144,7 +149,36 @@ class TagAndFooterTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             release_bundle.check_tag("v1.2.3-rc.1")
         with self.assertRaises(SystemExit):
+            release_bundle.check_tag("v1.2.3-rc")
+        with self.assertRaises(SystemExit):
+            release_bundle.check_tag("v1.2.3-beta")
+        with self.assertRaises(SystemExit):
+            release_bundle.check_tag("v1.2.3-alpha1")
+        with self.assertRaises(SystemExit):
             release_bundle.main(["check-tag", "refs/tags/v1.2.3"])
+
+    def test_prerelease_flags_are_not_latest(self) -> None:
+        """Publish prereleases without marking them latest.
+
+        ``-rcN`` and ``-betaN`` take ``--prerelease`` and ``--latest=false``.
+        A final tag takes ``--latest``. The command prints one flag per line.
+
+        Returns:
+            None. The test fails if a final tag is marked as a prerelease.
+        """
+        self.assertEqual(release_bundle.release_create_flags("v1.2.3"), ["--latest"])
+        self.assertFalse(release_bundle.is_prerelease("v1.2.3"))
+        for tag in ("v1.2.3-rc1", "v1.2.3-rc12", "v1.2.3-beta1", "v0.0.0-beta10"):
+            self.assertTrue(release_bundle.is_prerelease(tag))
+            self.assertEqual(
+                release_bundle.release_create_flags(tag),
+                ["--prerelease", "--latest=false"],
+            )
+        with mock.patch.dict(os.environ, {"RELEASE_TAG": "v1.2.3-rc2"}, clear=False):
+            with mock.patch("sys.stdout") as stdout:
+                release_bundle.main(["release-flags"])
+        printed = "".join(call.args[0] for call in stdout.write.call_args_list)
+        self.assertEqual(printed, "--prerelease\n--latest=false\n")
 
     def test_footer_fills_in_the_repository(self) -> None:
         """Substitute the repository name into the release-notes footer.
@@ -407,7 +441,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("python -m pip install -r requirements.txt", text)
         self.assertIn("python -m unittest discover -s tests -t . -v", text)
         self.assertIn("matrix.os == 'windows-latest'", text)
-        self.assertIn("python scripts/release_bundle.py check-tag v0.0.0", text)
+        self.assertIn("RELEASE_TAG: v0.0.0", text)
+        self.assertIn("run: python scripts/release_bundle.py check-tag\n", text)
+        self.assertNotIn("check-tag v0.0.0", text)
         self.assertIn("branches: [main]", text)
         self.assertIn("pull_request:", text)
         self.assertIn("pip-audit==2.10.1", text)
@@ -445,7 +481,18 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("gh attestation verify", text)
         self.assertIn("contents: write", text)
         self.assertIn("RELEASE_TAG:", text)
+        self.assertIn("release-flags", text)
         self.assertNotIn("pull_request:", text)
+        publish = text.split("name: publish GitHub release", 1)[1].split("steps:", 1)[0]
+        self.assertIn("github.event_name == 'push'", publish)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", publish)
+        self.assertIn("&&", publish)
+        installer = text.split("Sign the installer when secrets are present", 1)[1].split(
+            "\n      - ", 1
+        )[0]
+        self.assertNotIn("APPLE_", installer)
+        self.assertIn("WINDOWS_CERTIFICATE_PFX_BASE64", installer)
+        self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", installer)
         self.assertNotIn("pull_request_target:", text)
         self.assertNotIn("${GITHUB_REF_NAME}", text)
         self.assertIn("shell: bash", text)

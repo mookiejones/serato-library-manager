@@ -52,7 +52,9 @@ INNO_URL = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innos
 INNO_SHA256 = "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
 ISS_PATH = ROOT / "packaging" / "serato-library.iss"
 PE_MACHINE_AMD64 = 0x8664
-TAG_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
+# Final tags are vMAJOR.MINOR.PATCH. A prerelease is that plus -rcN or -betaN.
+TAG_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:rc|beta)[0-9]+)?")
+PRERELEASE_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+-(?:rc|beta)[0-9]+")
 LAUNCH_TIMEOUT_SECONDS = 120
 # Page assets are compared by content. This floor only catches a bundle
 # that did not collect the Python runtime. A healthy build is several
@@ -97,13 +99,15 @@ def source_static() -> Path:
 
 
 def check_tag(tag: str) -> None:
-    """Refuse a tag that is not ``vMAJOR.MINOR.PATCH``.
+    """Refuse a tag that is not a final version or an ``-rcN`` / ``-betaN`` prerelease.
 
-    Release zips are published only for that shape, so a pre-release or
-    a tag without the leading ``v`` stops before any file is packed.
+    Accepted shapes are ``vMAJOR.MINOR.PATCH``, ``vMAJOR.MINOR.PATCH-rcN``,
+    and ``vMAJOR.MINOR.PATCH-betaN``. ``N`` is one or more digits. A dotted
+    suffix such as ``-rc.1``, a tag without the leading ``v``, and a full
+    ref such as ``refs/tags/v1.2.3`` are refused.
 
     Args:
-        tag: Git tag text, such as ``v1.2.3``.
+        tag: Git tag text, such as ``v1.2.3`` or ``v1.2.3-rc1``.
 
     Returns:
         None.
@@ -114,7 +118,43 @@ def check_tag(tag: str) -> None:
     Does not read the git repository or write a file.
     """
     if TAG_RE.fullmatch(tag) is None:
-        raise SystemExit(f"Tag must look like v1.2.3, got {tag!r}")
+        raise SystemExit(
+            f"Tag must look like v1.2.3, v1.2.3-rc1, or v1.2.3-beta1, got {tag!r}"
+        )
+
+
+def is_prerelease(tag: str) -> bool:
+    """Return whether ``tag`` is an ``-rcN`` or ``-betaN`` prerelease.
+
+    Args:
+        tag: Tag text that :func:`check_tag` accepts.
+
+    Returns:
+        True for ``v1.2.3-rc1`` and ``v1.2.3-beta2``. False for ``v1.2.3``.
+
+    Raises:
+        SystemExit: If ``tag`` is not an accepted release tag.
+    """
+    check_tag(tag)
+    return PRERELEASE_RE.fullmatch(tag) is not None
+
+
+def release_create_flags(tag: str) -> list[str]:
+    """Return the ``gh release create`` flags for ``tag``.
+
+    Args:
+        tag: Tag text that :func:`check_tag` accepts.
+
+    Returns:
+        ``--prerelease`` and ``--latest=false`` for a prerelease.
+        ``--latest`` for a final tag.
+
+    Raises:
+        SystemExit: If ``tag`` is not an accepted release tag.
+    """
+    if is_prerelease(tag):
+        return ["--prerelease", "--latest=false"]
+    return ["--latest"]
 
 
 def footer(repo: str) -> str:
@@ -1351,8 +1391,11 @@ def main(argv: list[str] | None = None) -> None:
     checked = sub.add_parser("check-checksums", help="require SHA256SUMS to match the files")
     checked.add_argument("directory", type=Path)
 
-    tag = sub.add_parser("check-tag", help="require a vMAJOR.MINOR.PATCH tag")
+    tag = sub.add_parser("check-tag", help="require a final or rc/beta tag")
     tag.add_argument("tag", nargs="?")
+
+    flags = sub.add_parser("release-flags", help="print gh release create flags for the tag")
+    flags.add_argument("tag", nargs="?")
 
     notes = sub.add_parser("footer", help="print the release-notes footer")
     notes.add_argument("repo")
@@ -1383,6 +1426,9 @@ def main(argv: list[str] | None = None) -> None:
         check_checksums(args.directory)
     elif args.command == "check-tag":
         check_tag(args.tag if args.tag is not None else os.environ.get("RELEASE_TAG", ""))
+    elif args.command == "release-flags":
+        chosen = args.tag if args.tag is not None else os.environ.get("RELEASE_TAG", "")
+        print("\n".join(release_create_flags(chosen)))
     elif args.command == "footer":
         print(footer(args.repo), end="")
     elif args.command == "install-inno":

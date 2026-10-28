@@ -125,12 +125,6 @@ jobs:
         if: matrix.kind == 'windows'
         shell: bash
         env:
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
-          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: python scripts/release_sign.py Serato-Library-windows-setup.exe
@@ -185,7 +179,7 @@ jobs:
   publish:
     name: publish GitHub release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -263,12 +257,14 @@ jobs:
             echo "Release $RELEASE_TAG already exists. Refusing to replace it."
             exit 1
           fi
+          mapfile -t flags < <(python scripts/release_bundle.py release-flags)
           gh release create "$RELEASE_TAG" \
             dist-zips/Serato-Library-macos-arm64.dmg \
             dist-zips/Serato-Library-macos-x64.dmg \
             dist-zips/Serato-Library-windows-setup.exe \
             dist-zips/Serato-Library-windows.zip \
             dist-zips/SHA256SUMS \
+            "${flags[@]}" \
             --title "$RELEASE_TAG" --generate-notes --verify-tag
           python scripts/release_bundle.py footer "$RELEASE_REPO" > notes-footer.md
           gh release view "$RELEASE_TAG" --json body --jq .body > notes-body.md
