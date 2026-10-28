@@ -1673,6 +1673,72 @@ class RoundTripChecklistTests(unittest.TestCase):
             self.assertEqual(entries[0]["Bpm"], full)
             self.assertNotEqual(entries[0]["Bpm"], rounded)
 
+    def test_nonfinite_last_bpm_is_counted(self) -> None:
+        """Count a last marker whose BPM is NaN or infinite.
+
+        The position is a real time, so the position check keeps the marker.
+        The TEMPO entry is still omitted, and ``grid_nonfinite`` counts it.
+        An earlier marker with a usable span is written. A grid that is only
+        the bad last marker writes nothing and still counts one.
+
+        Returns:
+            None. The test fails if the bad BPM is silent or the earlier marker is dropped.
+        """
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            stats: dict[str, int] = {}
+            entries = rekordbox.tempo_entries(
+                [
+                    {"position": 0.0, "beats": 4},
+                    {"position": 2.0, "bpm": bad},
+                ],
+                stats=stats,
+            )
+            self.assertEqual(stats.get("grid_nonfinite"), 1, bad)
+            self.assertEqual(len(entries), 1, bad)
+            self.assertEqual(entries[0]["Bpm"], "120.00", bad)
+        alone: dict[str, int] = {}
+        self.assertEqual(
+            rekordbox.tempo_entries([{"position": 1.0, "bpm": float("nan")}], stats=alone),
+            [],
+        )
+        self.assertEqual(alone["grid_nonfinite"], 1)
+        text = " ".join(rekordbox._loss_report({"grid_nonfinite": 1}, True, False, "asis"))
+        self.assertIn("BPM", text)
+        self.assertIn("not a real number", text)
+
+    def test_a_null_in_a_crate_name_is_stripped_from_the_xml(self) -> None:
+        """Write a crate whose name contains NUL without putting that character in the XML.
+
+        The name is stored with the NUL. Serialising the playlist tree removes
+        it, and the visible name is the text on either side. The rest of the
+        export still parses.
+
+        Returns:
+            None. The test fails if the export raises or the XML still contains NUL.
+        """
+        with TempLibrary() as temp:
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO container
+                        (id, parent_id, name, type, list_order, space_id, time_added, expanded, portable_id)
+                    VALUES (9, 1, ?, 1, 1, 1, 1, 0, '')
+                    """,
+                    ("House\x00Party",),
+                )
+                stored = conn.execute("SELECT name FROM container WHERE id = 9").fetchone()
+                assert stored is not None
+                self.assertIn("\x00", stored[0])
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            self.assertNotIn("\x00", xml)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            self.assertEqual(document.tag, "DJ_PLAYLISTS")
+            parsed = rekordbox.parse_rekordbox(xml)
+            playlists = parsed["playlists"]
+            assert isinstance(playlists, dict)
+            found = _node(playlists, "HouseParty")
+            self.assertIsNotNone(found)
+
 
 class ParseTests(unittest.TestCase):
     """Reject text that is not a rekordbox playlist document."""
