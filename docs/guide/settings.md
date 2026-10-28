@@ -4,17 +4,17 @@ Sharing is off until you turn it on. Track titles, crate names, file paths, and 
 
 ## The first question
 
-The first launch asks **Share anonymous usage stats and crash reports?**
+Setup asks **Share anonymous usage stats and crash reports?** on its own step, after the safety snapshot. The step is skipped when a choice is already saved.
 
 The text under the heading says counts and actions only, plus the app name, the app version, and the operating system. Track titles, crate names, file paths, and library contents stay on this computer. Sharing stays off unless you turn it on.
 
 | Choice | What is saved |
 | --- | --- |
-| **Don't share** | Sharing stays off. This button is selected when the dialog opens. |
-| **Share** | Anonymous counts and crash reports can be sent, and only when this copy of the app has a key for that service. |
-| Esc, or closing the dialog | The same as **Don't share**. |
+| **No, don't share** | Sharing stays off. This button is first. |
+| **Yes, share** | Anonymous counts and crash reports can be sent, and only when this copy of the app has a key for that service. |
+| Esc, or **Cancel** | Setup closes. The sharing choice is not saved. Setup shows again next time. |
 
-The line **Saving…** means the choice is being written. **Couldn't save that choice. Try again.** means it was not written. The dialog opens again so you can choose.
+The two buttons have the same weight. The line **Saving…** means the choice is being written. **Couldn't save that choice. Try again.** means it was not written. You stay on the step so you can choose again.
 
 ## Settings later
 
@@ -23,7 +23,8 @@ The line **Saving…** means the choice is being written. **Couldn't save that c
 1. Click **Settings** at the bottom of the left rail.
 2. Tick **Share anonymous usage stats and crash reports** to turn sharing on. Clear the tick to turn it off.
 3. Read the line under the tick.
-4. Click **Close**.
+4. Choose **Run setup again** to see the first-run steps another time. **Cancel** on that run leaves the library as it is and does not forget that you already finished setup.
+5. Click **Close**.
 
 | Line under the tick | Meaning |
 | --- | --- |
@@ -74,4 +75,4 @@ If the copy fails, a box of log text appears. The line says **Couldn't copy auto
 | macOS | `~/Library/Application Support/Serato Library/settings.json` |
 | Windows | `%APPDATA%\Serato Library\settings.json` |
 
-This folder is **Serato Library**, with a space. It is separate from `Serato/Library`, which holds `master.sqlite`.
+This folder is **Serato Library**, with a space. It is separate from `Serato/Library`, which holds `master.sqlite`. The same file records whether setup has finished. A new install runs setup until you choose **Open my library**.

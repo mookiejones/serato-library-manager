@@ -1182,8 +1182,8 @@ def launch() -> None:
     """Start the window, or focus the one that is already open.
 
     Raises:
-        SystemExit: If the Serato library is missing, the running copy
-            does not answer, or its window cannot be focused.
+        SystemExit: If the running copy does not answer, or its window
+            cannot be focused. A missing library still opens the page.
 
     Binds 127.0.0.1 on a free port. Closing the window shuts the server
     down. ``--no-window`` and ``SERATO_LIBRARY_NO_WINDOW=1`` keep the
@@ -1194,8 +1194,6 @@ def launch() -> None:
         if holder.existing_url:
             focus_existing(holder.existing_url, holder.directory)
             return
-        if not server.db_path().exists():
-            raise SystemExit(f"Serato library not found at {server.db_path()}")
         httpd = server.serve(port=0, require_library=True)
         host, port = httpd.server_address
         url = f"http://{host}:{port}"
@@ -1237,8 +1235,8 @@ def main() -> None:
     ``--no-window`` is honored only by :func:`launch`.
 
     Raises:
-        SystemExit: If the smoke marker is unusable, a page asset is
-            missing, or the library is missing.
+        SystemExit: If the smoke marker is unusable, or a page asset is
+            missing. A missing library still opens the page.
     """
     marker = os.environ.get(SMOKE_ENV)
     if marker:

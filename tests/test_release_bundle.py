@@ -91,7 +91,7 @@ class AssetTests(unittest.TestCase):
             None. The test fails if the page names a different local file.
         """
         names = static_assets.local_asset_names(ROOT / "static" / "index.html")
-        self.assertEqual(names, ["tokens.css", "app.css", "app.js"])
+        self.assertEqual(names, ["tokens.css", "app.css", "wizard.js", "app.js"])
         self.assertEqual(static_assets.missing_static_files(ROOT / "static"), [])
 
     def test_remote_links_are_not_assets(self) -> None:

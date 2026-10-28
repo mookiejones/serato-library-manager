@@ -278,7 +278,8 @@ class WindowSettingsTests(unittest.TestCase):
         self.assertEqual(moved.window.x, 8)
         self.assertEqual(moved.window.y, 0)
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(payload), {"install_id", "telemetry_consent", "window"})
+        self.assertEqual(set(payload), {"install_id", "telemetry_consent", "window", "wizard_complete"})
+        self.assertIs(payload["wizard_complete"], False)
         self.assertEqual(set(payload["window"]), set(app_config.WINDOW_FIELDS))
 
     def test_bool_coordinate_is_rejected(self) -> None:

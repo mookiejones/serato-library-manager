@@ -8,7 +8,7 @@ The HTTP banner in `server.py` is `SeratoLibrary/1.0`. A release tag does not ch
 
 | Workflow | When it runs | What it does |
 |----------|----------------|--------------|
-| CI | Push to `main`, and every pull request | Tests, typechecks and rebuilds the page bundle, then audits the requirements files |
+| CI | Push to `main`, and every pull request | Tests, typechecks and rebuilds the page and setup bundles, then audits the requirements files |
 | CodeQL | Push to `main`, and every pull request | Analyzes the Python source. There is no autobuild |
 | Dependency review | Pull requests only | Reviews dependency changes. It does not comment on the pull request |
 | Release | Tag `v*.*.*`, or a manual run | Builds the macOS disk images, the Windows installer, and the portable zip. A tag also publishes a GitHub Release |
@@ -29,6 +29,8 @@ The test job is a matrix:
 - `tests (windows-latest, Python 3.12)`
 
 There is no macOS test job. The suite mocks platform paths, and a macOS runner costs ten times a Linux minute. Windows stays in the matrix because the app ships a Windows build.
+
+The frontend job is `frontend (ubuntu-latest)` and `frontend (windows-latest)`. It uses Node 22, runs `npm ci`, `npm run typecheck`, `npm test`, and `npm run build`, then `git diff --exit-code -- static/wizard.js`. A stale wizard bundle fails the job. The job does not start a browser.
 
 The Windows test job runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. No tag is passed on the command line. That is the same environment path the release job uses, and it runs on `windows-latest` for every pull request. `v0.0.0` is not a published release.
 
@@ -65,7 +67,7 @@ The job name is `analyze Python`. It runs on Ubuntu. The job permission is `cont
 
 ### Dependency review
 
-The job name is `review dependency changes`. It needs only `contents: read`. A pull request from a fork can run this job, the test matrix, the dependency audit, and CodeQL. Fork pull requests do not run the release workflow, so they do not mint attestations or publish a release.
+The job name is `review dependency changes`. It needs only `contents: read`. A pull request from a fork can run this job, the test matrix, the frontend job, the dependency audit, and CodeQL. Fork pull requests do not run the release workflow, so they do not mint attestations or publish a release.
 
 ### Release
 
@@ -73,7 +75,7 @@ GitHub Releases is the only download. The workflow does not publish a Homebrew f
 
 `macos-latest` builds `Serato-Library-macos-arm64.dmg`. That runner is Apple silicon. `macos-15-intel` builds `Serato-Library-macos-x64.dmg`. PyInstaller does not produce a reliable universal binary from one Python install, so the two architectures are separate disk images. `macos-15-intel` is the GitHub-hosted Intel image and is scheduled to remain available through August 2027. `windows-latest` builds `Serato-Library-windows-setup.exe` with Inno Setup 6.7.3 and `Serato-Library-windows.zip`, the portable folder. The builds use Python 3.12, `requirements-build.txt` (`pywebview==6.2.1`, `pythonnet==3.2.1` and `clr-loader==0.3.1` on Windows, `sentry-sdk==2.73.0`, `posthog==7.75.11`, and `pyinstaller==6.22.3`), and, on macOS, `requirements-macos.txt` (`pyobjc-core==12.2.2`, `pyobjc-framework-Cocoa==12.2.2`, `pyobjc-framework-Quartz==12.2.2`, `pyobjc-framework-WebKit==12.2.2`, `pyobjc-framework-Security==12.2.2`, and `pyobjc-framework-UniformTypeIdentifiers==12.2.2`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only. The window uses the system web view. The spec excludes CEF and Qt WebEngine, so the installer does not bundle Chromium.
 
-Sharing stays off until the person opts in. The first page opens with **Don't share** selected. Closing that dialog, or pressing Esc, saves that decline. A missing key keeps that service off even after opt-in.
+Sharing stays off until the person opts in. Setup asks with **No, don't share** and **Yes, share**. Esc cancels setup and does not save a choice. A missing key keeps that service off even after opt-in. If `static/wizard.js` did not load, the older dialog still saves a decline when it closes.
 
 On a tag push, and only then, `python scripts/write_build_config.py` writes `_build_config.py` from the `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` Actions secrets before PyInstaller runs. The step's condition is `github.event_name == 'push'` and a `refs/tags/v` ref. A `workflow_dispatch` run skips the step, so a manual build keeps the empty file that is committed and embeds no keys. The step prints whether each value was set. It does not print the value. A missing or empty secret writes an empty string, and that service stays off in the build. Forks do not receive these secrets. When a tag build does have keys, they are client keys inside the unsigned build. The copy of `_build_config.py` in git stays empty. A build from source uses that empty file. An environment variable of the same name overrides the baked file when someone runs from source. [PRIVACY.md](../PRIVACY.md) describes what a build with keys can send, and that sending stays off until the person opts in.
 

@@ -13,15 +13,15 @@ The line you want is **Serato is quit. Edits save to the library.**
 
 A save that hits a lock shows the error in the bar above the list. The merge dialog says **Quit Serato before merging. The preview shows the plan.** The file dialog shows the same status line and leaves **Confirm** off.
 
-## The app closes as soon as it opens
+## No Serato library was found
 
-`master.sqlite` is not where the app looks. The message is **Serato library not found at** and then a path.
+Setup says **No Serato library was found on this computer.** The app stays open.
 
 1. Install Serato DJ Pro if it is not installed.
 2. Open Serato DJ Pro once, then quit it.
-3. Open the folder in [Install](install.md#where-serato-keeps-the-library).
-4. Confirm `master.sqlite` is there.
-5. Open Serato Library again.
+3. Return to Serato Library and choose **Check again**.
+
+The usual folder is in [Install](install.md#where-serato-keeps-the-library). **Choose a folder** confirms that folder. It does not switch the app to a different library.
 
 ## macOS says the app is damaged or cannot be opened
 
