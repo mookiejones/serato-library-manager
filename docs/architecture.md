@@ -77,7 +77,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, `files.py`, `related.py`, `rekordbox.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html` and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `files.py`, `related.py`, `rekordbox.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. `static/app.js` documents each function. `static/index.html`, `static/tokens.css`, and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -209,7 +209,7 @@ Merge copies opens a dialog. The radios choose the file to keep. The dialog then
 
 The rail ends with Settings. The first launch opens a dialog whose heading is "Share anonymous usage stats and crash reports?" **Don't share** is focused. Esc or closing the dialog saves a decline. Settings holds the same choice as a checkbox, plus **Open logs folder** and **Copy logs**. The page does not load a third-party analytics script, and it does not insert log text with `innerHTML`.
 
-`app.css` is the layout and color for that screen.
+`tokens.css` is the palette, type, spacing, and radius. The page loads it before `app.css`. The values are the walnut and manila colors the screen already used. Safe and warn text on manila uses `--color-safe-text` and `--color-warn-text`. `--color-safe` and `--color-warn` are borders, fills, and icons on manila. A warn border or icon on the warn tint uses `--color-warn-border`. `design/tokens.css` is the designer's dark reference and is not linked. `app.css` aliases the old names (`--walnut`, `--manila`, `--ink`, and the rest) to those tokens and is the layout for that screen. `--row` stays 36px and matches `ROW` in `app.js`.
 
 ## Sharing and logs
 
