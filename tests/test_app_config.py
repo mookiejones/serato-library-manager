@@ -244,7 +244,7 @@ class VersionTests(unittest.TestCase):
             None. The test fails when the alias is a second literal.
         """
         self.assertEqual(app_config.__version__, app_config.APP_VERSION)
-        self.assertEqual(app_config.APP_VERSION, "0.1.1")
+        self.assertEqual(app_config.APP_VERSION, "1.1.0")
 
     def test_docs_quote_the_same_version(self) -> None:
         """Keep the privacy and architecture notes on ``APP_VERSION``.
