@@ -501,26 +501,96 @@ def _backup_database(source: Path, dest: Path) -> None:
             src.backup(dst)
 
 
+# File change counter, schema cookie, and version-valid-for. The backup API
+# resets these three big-endian fields in the 100-byte SQLite header.
+_SQLITE_HEADER_COUNTERS = (24, 40, 92)
+
+
+def _match_quiescent_header(source: Path, dest: Path) -> None:
+    """Copy SQLite header counters so a quiescent backup matches the source.
+
+    The backup API resets the file change counter, the schema cookie, and
+    the version-valid-for number. When the source has no WAL or rollback
+    journal, those twelve bytes are the only difference, so copying them
+    back makes the backup file identical to the source. A sidecar means
+    the snapshot includes pages that are not in the main file, and the
+    counters the backup API wrote stay in place.
+
+    Args:
+        source: Database that was read.
+        dest: Backup file just written by the backup API.
+
+    Raises:
+        OSError: If a header field cannot be read or written.
+    """
+    for suffix in ("-wal", "-shm", "-journal"):
+        if Path(str(source) + suffix).is_file():
+            return
+    if source.stat().st_size != dest.stat().st_size:
+        return
+    with source.open("rb") as handle:
+        header = handle.read(100)
+    if len(header) < 100 or not header.startswith(b"SQLite format 3\x00"):
+        return
+    with dest.open("r+b") as handle:
+        current = handle.read(100)
+        if len(current) < 100:
+            return
+        updated = bytearray(current)
+        for offset in _SQLITE_HEADER_COUNTERS:
+            updated[offset : offset + 4] = header[offset : offset + 4]
+        if updated == current:
+            return
+        handle.seek(0)
+        handle.write(updated)
+
+
 def ensure_backup() -> Path | None:
     """Copy the master database once per process before the first write.
 
+    The folder is ``Backups/serato-web-%Y%m%d-%H%M%S``. When that folder
+    already exists, the next free name is ``-02``, then ``-03``, through
+    ``-99``. Each name is claimed with ``mkdir(parents=True, exist_ok=False)``,
+    which fails atomically when another process already took it. Nothing is
+    copied until a folder is claimed.
+
     Returns:
-        The new backup directory, or None when this process already backed up that path.
+        The new backup directory, or None when this process already backed
+        up that path.
 
     Raises:
-        FileExistsError: If the timestamped backup directory already exists.
+        FileExistsError: If ``serato-web-<stamp>`` and every suffix from
+            ``-02`` through ``-99`` already exist. Nothing was copied.
+        OSError: If a claimed backup file cannot be written.
     """
     master = Path(MASTER)
     key = str(master.resolve())
     if key in _backed_up:
         return None
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    folder = master.resolve().parent / "Backups" / f"serato-web-{stamp}"
-    folder.mkdir(parents=True, exist_ok=False)
+    parent = master.resolve().parent / "Backups"
+    base = f"serato-web-{stamp}"
+    names = [base, *[f"{base}-{suffix:02d}" for suffix in range(2, 100)]]
+    folder: Path | None = None
+    for name in names:
+        candidate = parent / name
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            continue
+        folder = candidate
+        break
+    if folder is None:
+        raise FileExistsError(
+            f"Every backup folder for this second already exists: "
+            f"{base} through {base}-99. Nothing was copied."
+        )
     _backup_database(master, folder / "master.sqlite")
+    _match_quiescent_header(master, folder / "master.sqlite")
     root = master.resolve().parent / "root.sqlite"
     if root.is_file() and _mirror_allowed(root):
         _backup_database(root, folder / "root.sqlite")
+        _match_quiescent_header(root, folder / "root.sqlite")
     _backed_up.add(key)
     telemetry.capture(telemetry.EVENT_BACKUP_MADE)
     return folder
