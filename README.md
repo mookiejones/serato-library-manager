@@ -6,6 +6,8 @@
 
 A local window for the Serato DJ Pro library on macOS and Windows. Source on `main` is app version **1.1.0**. The page stays on this computer.
 
+**[Quick Start](docs/wiki/Quick-Start.md).** Five steps: Download, Open, point it at your Serato library, make a Backup, start crate digging.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/hero-dark.svg">
   <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/hero-dark.png">
@@ -23,7 +25,7 @@ The builds are unsigned. The Mac and Windows warnings, including Removable Volum
 
 The release on that page today is **v0.1.1**. It attaches `Serato-Library-macos.zip` and `Serato-Library-windows.zip`.
 
-App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed:
+App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed. The pre-release [v1.1.0-rc2](https://github.com/mookiejones/serato-library-manager/releases/tag/v1.1.0-rc2) already attaches them, and it is not marked Latest.
 
 | Computer | File |
 | --- | --- |
@@ -43,7 +45,7 @@ These are on `main` (1.1.0).
 - Import and export M3U. Export `rekordbox.xml`. **Hot loops** starts off, and the app remembers that checkbox in its settings. Uses a free hot-cue pad. What that file keeps is in [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md).
 - Save related tracks in `related.sqlite` next to the app settings, not in Serato's library.
 - Rename, move, replace, and trash audio, and update the library path.
-- Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied.
+- Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied into the snapshot. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 - The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
 - Ask before sharing anonymous counts and crash reports. Setup asks on the first launch. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
 

@@ -16,10 +16,11 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
-from collections.abc import Callable, Mapping
-from contextlib import closing
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote, unquote, urlparse
@@ -280,6 +281,151 @@ def read_conn(path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def is_serato_database(path: Path) -> bool:
+    """Return whether a file is a Serato master database.
+
+    Args:
+        path: Candidate file. A missing file, a shortcut, or any other
+            SQLite file is not a Serato library.
+
+    Returns:
+        True when a temporary copy has the ``asset``, ``container``, and
+        ``space`` tables. The library folder is not opened as a database,
+        so the check creates no ``-wal``, ``-shm``, or journal file there.
+    """
+    candidate = Path(path)
+    try:
+        if candidate.is_symlink() or not candidate.is_file():
+            return False
+        names = _serato_table_names(candidate)
+    except (OSError, sqlite3.Error):
+        return False
+    return names == {"asset", "container", "space"}
+
+
+def _serato_table_names(path: Path) -> set[str]:
+    """Read Serato table names from a temporary copy.
+
+    Args:
+        path: ``master.sqlite`` to copy. It is not opened.
+
+    Returns:
+        Table names from the copy. The set is empty when the file has
+        none of the three Serato tables.
+
+    Raises:
+        OSError: If the copy cannot be made.
+        sqlite3.Error: If the copy cannot be read.
+        LibraryError: If ``path`` is missing or a shortcut.
+
+    The original folder is not opened as a database.
+    """
+    with copied_read_conn(path) as conn:
+        rows = conn.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name IN ('asset', 'container', 'space')
+            """
+        ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+@contextmanager
+def copied_read_conn(path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a read-only connection to a temporary copy of a library file.
+
+    Args:
+        path: ``master.sqlite`` to copy. A shortcut is refused.
+
+    Yields:
+        A connection to the copy, with row access and ``query_only`` on.
+
+    Raises:
+        LibraryError: If ``path`` is missing or a shortcut.
+        OSError: If the copy cannot be made.
+        sqlite3.Error: If the copy cannot be opened.
+
+    ``master.sqlite`` and a real ``-wal`` file are copied into a temporary
+    directory. The original folder is not opened. When no ``-wal`` file is
+    copied, the copy is opened with ``immutable=1`` so a WAL-mode header
+    cannot create ``-wal`` or ``-shm`` beside it. A ``-wal`` shortcut is
+    not followed. Any sidecar SQLite creates stays in the temporary
+    directory and is removed with it.
+    """
+    source = Path(path)
+    if source.is_symlink() or not source.is_file():
+        raise LibraryError("That folder is not the Serato library on this computer.")
+    wal = Path(str(source) + "-wal")
+    copy_wal = wal.is_file() and not wal.is_symlink()
+    with tempfile.TemporaryDirectory(prefix="serato-library-check-") as raw:
+        root = Path(raw)
+        copied = root / "master.sqlite"
+        shutil.copyfile(source, copied)
+        if copy_wal:
+            shutil.copyfile(wal, root / "master.sqlite-wal")
+        query = "mode=ro" if copy_wal else "mode=ro&immutable=1"
+        conn = sqlite3.connect(_read_only_uri(copied, query), uri=True)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA query_only=ON")
+            yield conn
+        finally:
+            conn.close()
+
+
+def _read_only_uri(path: Path, query: str) -> str:
+    """Return a ``file:`` URI for a database path.
+
+    Args:
+        path: Database file. It is resolved before the URI is built.
+        query: URI query, such as ``mode=ro`` or ``mode=ro&immutable=1``.
+
+    Returns:
+        An absolute ``file://`` URI. The path is escaped so a space cannot
+        end the URI early.
+    """
+    posix = path.resolve().as_posix()
+    if sys.platform == "win32" and len(posix) >= 2 and posix[1] == ":":
+        posix = "/" + posix
+    return "file://" + quote(posix, safe="/:") + "?" + query
+
+
+def use_library_file(path: Path) -> None:
+    """Point this process at an existing Serato database.
+
+    Args:
+        path: ``master.sqlite`` to read. It must already be a Serato
+            library file, and it must not be a shortcut.
+
+    Returns:
+        None.
+
+    Raises:
+        LibraryError: If the path is not an absolute ``master.sqlite``
+            file, is a shortcut, or is not a Serato library.
+
+    The tables are read from a temporary copy. The library folder gains
+    no ``-wal``, ``-shm``, or journal file, and no backup is taken,
+    because the file is not changed.
+    """
+    global MASTER
+    candidate = Path(path)
+    if (
+        not candidate.is_absolute()
+        or candidate.name != "master.sqlite"
+        or "\x00" in str(candidate)
+    ):
+        raise LibraryError("That folder is not the Serato library on this computer.")
+    try:
+        if candidate.is_symlink() or not candidate.is_file():
+            raise LibraryError("That folder is not the Serato library on this computer.")
+        if not is_serato_database(candidate):
+            raise LibraryError("That folder is not the Serato library on this computer.")
+        MASTER = candidate.resolve()
+    except OSError as exc:
+        raise LibraryError("That folder is not the Serato library on this computer.") from exc
+
+
 def _process_is_serato(pid: int) -> bool:
     """Return whether a process id is a live Serato process.
 
@@ -393,11 +539,14 @@ def _status_rows(conn: sqlite3.Connection) -> dict[str, object]:
     }
 
 
-def status(path: Path | None = None) -> dict[str, object]:
+def status(path: Path | None = None, *, from_copy: bool = False) -> dict[str, object]:
     """Report whether Serato has the library open.
 
     Args:
         path: Database path. None selects MASTER.
+        from_copy: When true, read the lock table from a temporary copy
+            so the library folder gains no ``-wal``, ``-shm``, or journal
+            file. Setup uses this. The sidebar reads the live file.
 
     Returns:
         A status dict. A locked database is reported as open. file_manager names Finder or File Explorer.
@@ -407,8 +556,13 @@ def status(path: Path | None = None) -> dict[str, object]:
         LibraryError: If the database file does not exist.
     """
     info: dict[str, object]
+    database = Path(path or MASTER)
     try:
-        with closing(read_conn(path)) as conn:
+        if from_copy:
+            opener = copied_read_conn(database)
+        else:
+            opener = closing(read_conn(database))
+        with opener as conn:
             info = _status_rows(conn)
     except sqlite3.OperationalError as exc:
         if "locked" not in str(exc).lower():

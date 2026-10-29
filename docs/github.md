@@ -128,7 +128,7 @@ To build without publishing, open Actions, choose Release, and run the workflow.
 
 ## User guide
 
-The guide source is `docs/index.md`, `docs/first-install.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, `docs/panic.md`, `docs/is-my-library-safe.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. A local check is `mkdocs build --strict -f docs/mkdocs.yml`. That command writes `site/` next to `docs/`. The Pages job passes `-d` and does not publish that folder. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) stay in `docs/` and are excluded from the site build. The site nav links to them on GitHub under **For developers**.
+The guide source is `docs/index.md`, `docs/quick-start.md`, `docs/first-install.md`, `docs/guide/`, `docs/coming-from-rekordbox.md`, `docs/panic.md`, `docs/is-my-library-safe.md`, and `docs/media/`. `docs/mkdocs.yml` is the site config. `docs/requirements-docs.txt` pins MkDocs. A local check is `mkdocs build --strict -f docs/mkdocs.yml`. The command writes `site/` next to `docs/`. The Pages job passes `-d` and does not publish that folder. Developer pages (`architecture.md`, `github.md`, `related-tracks.md`, `serato-library-tools.md`) and the wiki drafts (`wiki/*.md`) stay in `docs/` and are excluded from the site build. The pictures for the Quick Start stay under `docs/wiki/images/` and the guide page uses them. The site nav links to the developer pages on GitHub under **For developers**.
 
 The published URL is `https://mookiejones.github.io/serato-library-manager/`.
 
@@ -140,7 +140,7 @@ The library server is still not on Pages. The site is the static guide.
 
 Secret scanning and push protection are on. Vulnerability alerts, Dependabot security updates, and private vulnerability reporting are on. Dependabot version updates are in `.github/dependabot.yml`. Private reports go to [the advisory form](https://github.com/mookiejones/serato-library-manager/security/advisories/new). Do not attach `master.sqlite`, `root.sqlite`, or audio.
 
-The wiki stays as it is. Discussions stay off. Issues use the templates in `.github/ISSUE_TEMPLATE/`. Blank issues are closed off. `.github/CODEOWNERS` names `@mookiejones` for the whole tree.
+The wiki stays enabled. Draft pages live in `docs/wiki/` and are excluded from the Pages build. Copy them into the wiki by hand. This repository does not push to the wiki. Discussions stay off. Issues use the templates in `.github/ISSUE_TEMPLATE/`. Blank issues are closed off. `.github/CODEOWNERS` names `@mookiejones` for the whole tree.
 
 ## Branch protection
 
@@ -160,4 +160,4 @@ A green check is not the whole merge. Gatekeeper QA reviews the pull request nex
 
 ## Where a change has to land
 
-A workflow, release, or GitHub setting change updates this file in the same commit. A change a DJ can see also updates the user guide under `docs/index.md` and `docs/guide/` in the same commit. Behavior, the API, the layout, or the run path also updates [architecture.md](architecture.md). The run command or the layout summary also updates `CLAUDE.md`. The README keeps the local test command and points here for Actions. `SECURITY.md` keeps the attestation commands and the rule that the server stays on `127.0.0.1`. `PRIVACY.md` keeps what sharing can send. The release footer in `scripts/release-notes-footer.md` is what GitHub appends to the generated notes.
+A workflow, release, or GitHub setting change updates this file in the same commit. A change a DJ can see also updates the user guide under `docs/index.md` and `docs/guide/` in the same commit. Behavior, the API, the layout, or the run path also updates [architecture.md](architecture.md). The run command or the layout summary also updates `CLAUDE.md` and `AGENTS.md`. They are copies of the same text. The README keeps the local test command and points here for Actions. Wiki drafts under `docs/wiki/` are copied into the GitHub wiki by hand. `SECURITY.md` keeps the attestation commands and the rule that the server stays on `127.0.0.1`. `PRIVACY.md` keeps what sharing can send. The release footer in `scripts/release-notes-footer.md` is what GitHub appends to the generated notes.

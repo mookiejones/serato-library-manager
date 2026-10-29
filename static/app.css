@@ -1115,18 +1115,25 @@ dialog .check input {
 }
 
 .wizard-art:not([hidden]) {
-  display: block;
+  display: flex;
+  justify-content: center;
   box-sizing: border-box;
   height: 160px;
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   overflow: hidden;
 }
 
 .wizard-art svg,
 .wizard-art img {
   display: block;
-  width: 100%;
+  width: 160px;
   height: 160px;
+}
+
+@media (max-height: 599px) {
+  .wizard-art:not([hidden]) {
+    display: none;
+  }
 }
 
 #wizard-title:focus {
