@@ -908,7 +908,7 @@ export function wireDialogs(): void {
 
   el("files-refresh").addEventListener("click", () => {
     const path = state.filesAtRoots ? "" : state.filesPath;
-    loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error) => failFiles(error));
+    loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots, refresh: true }).catch((error) => failFiles(error));
   });
 
   el("files-elsewhere").addEventListener("click", () => {

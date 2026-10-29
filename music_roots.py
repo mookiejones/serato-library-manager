@@ -12,11 +12,14 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from contextlib import closing
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 _LETTERS = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+_cache_lock = threading.Lock()
+_cache: tuple[tuple[object, ...], list[dict[str, object]]] | None = None
 
 
 class _Node:
@@ -28,20 +31,29 @@ class _Node:
         self.terminal = False
 
 
-def collapse_track_folders(directories: Sequence[PurePath]) -> list[PurePath]:
+def collapse_track_folders(
+    directories: Sequence[PurePath],
+    *,
+    home: PurePath | None = None,
+) -> list[PurePath]:
     """Collapse album folders to the shared music folder on each volume.
 
     Paths on different drives, and macOS paths under different
-    ``/Volumes`` names, stay separate. A branch at the volume root becomes
-    one folder per child, so the result is not the computer root.
+    ``/Volumes`` names, stay separate. A branch is not widened to the
+    home directory, ``/``, ``/Volumes``, or a drive root. ``~/Music`` and
+    ``~/Downloads`` stay two roots.
 
     Args:
         directories: Parent folders of tracks. Missing folders are kept
-            here; the caller drops a folder that is not on disk.
+            here; the caller marks a folder that is not on disk.
+        home: Home directory that must not become a root by widening.
+            Defaults to the current home directory.
 
     Returns:
         One path per collapsed music folder, sorted by the path text.
     """
+    if home is None:
+        home = Path.home()
     groups: dict[str, list[PurePath]] = {}
     for directory in directories:
         prefix = _volume_prefix(directory)
@@ -54,7 +66,7 @@ def collapse_track_folders(directories: Sequence[PurePath]) -> list[PurePath]:
         root = _Node()
         for directory in members:
             _insert(root, _relative_parts(directory, prefix))
-        found.extend(_emit(root, prefix, at_anchor=True))
+        found.extend(_emit(root, prefix, at_anchor=True, home=home))
     return sorted(found, key=lambda item: str(item).casefold())
 
 
@@ -98,53 +110,126 @@ def name_roots(
     drives: Sequence[tuple[Path, str]],
     *,
     exists: Callable[[Path], bool] | None = None,
-) -> list[dict[str, str]]:
-    """Name music folders and USB drives for the Files page.
+) -> list[dict[str, object]]:
+    """Name each music folder with its volume and the path on that volume.
 
-    A folder whose name is ``Music`` in any case is labeled ``Music``.
-    A drive is labeled ``USB:`` plus its volume label. The same path is
-    listed once, and the drive name wins.
+    The label looks like ``GIGDRIVE · /Music``. A drive is not added again
+    when a music folder on that drive is already a root. A folder that is
+    not on disk is kept and marked missing.
 
     Args:
-        folders: Collapsed track folders.
+        folders: Collapsed track folders, including ones on an unmounted drive.
         drives: Mounts from :func:`serato_volumes`.
-        exists: Keeps a path when this returns true. Defaults to a real
+        exists: True when the path can be opened. Defaults to a real
             directory that is not a shortcut.
 
     Returns:
-        ``name``, ``path``, and ``kind`` (``folder`` or ``drive``),
-        folders first.
+        ``name``, ``path``, ``kind`` (``folder`` or ``drive``), and
+        ``missing``. Folders come first.
     """
     present = exists or _real_dir
-    found: dict[str, dict[str, str]] = {}
+    found: dict[str, dict[str, object]] = {}
+    kept: list[Path] = []
     for folder in folders:
-        if not present(folder):
-            continue
         key = _path_key(folder)
+        if key in found:
+            continue
+        on_disk = bool(present(folder))
         found[key] = {
-            "name": _folder_label(folder),
-            "path": _path_text(folder),
+            "name": _display_name(folder, drives),
+            "path": _path_text(folder) if on_disk else str(folder),
             "kind": "folder",
+            "missing": not on_disk,
         }
+        kept.append(folder)
     for mount, label in drives:
         if not present(mount):
             continue
+        if _drive_already_listed(mount, kept):
+            continue
         key = _path_key(mount)
+        if key in found:
+            continue
         found[key] = {
-            "name": f"USB: {_clean_label(label)}",
+            "name": _display_name(mount, [(mount, label)]),
             "path": _path_text(mount),
             "kind": "drive",
+            "missing": False,
         }
-    return sorted(found.values(), key=lambda item: (item["kind"] != "folder", item["name"].casefold()))
+    return sorted(
+        found.values(),
+        key=lambda item: (item["kind"] != "folder", str(item["missing"]), str(item["name"]).casefold()),
+    )
 
 
-def music_roots() -> list[dict[str, str]]:
+def invalidate() -> None:
+    """Drop the cached music roots.
+
+    The next :func:`music_roots` call reads the library again. Settings
+    and library writes call this, and so does an explicit refresh.
+    """
+    global _cache
+    with _cache_lock:
+        _cache = None
+
+
+def cache_stamp() -> tuple[object, ...]:
+    """Return the stamp that invalidates the music-root cache.
+
+    Returns:
+        The master database path and modification times, plus the
+        settings file time. A missing file contributes 0.
+    """
+    import app_config
+    import library
+
+    master = Path(library.MASTER)
+    stamps: list[int] = []
+    for candidate in (master, Path(str(master) + "-wal"), Path(str(master) + "-shm")):
+        try:
+            stamps.append(candidate.stat().st_mtime_ns if candidate.exists() else 0)
+        except OSError:
+            stamps.append(0)
+    settings = app_config.settings_path()
+    try:
+        settings_stamp = settings.stat().st_mtime_ns if settings.exists() else 0
+    except OSError:
+        settings_stamp = 0
+    return (str(master), tuple(stamps), settings_stamp)
+
+
+def music_roots(*, refresh: bool = False) -> list[dict[str, object]]:
     """Discover the roots for the open library and the mounted drives.
+
+    The result is cached until the library or settings change, or until
+    ``refresh`` is true.
+
+    Args:
+        refresh: When true, ignore the cache and read the library again.
 
     Returns:
         The named roots. An unreadable library contributes no track
         folders. A platform other than macOS or Windows contributes no
-        drives.
+        drives. An unmounted track folder is included with ``missing`` true.
+    """
+    global _cache
+    if refresh:
+        invalidate()
+    stamp = cache_stamp()
+    with _cache_lock:
+        if _cache is not None and _cache[0] == stamp:
+            return [dict(item) for item in _cache[1]]
+    found = _discover()
+    with _cache_lock:
+        _cache = (stamp, found)
+        return [dict(item) for item in found]
+
+
+def _discover() -> list[dict[str, object]]:
+    """Read track folders and mounted drives.
+
+    Returns:
+        The named roots, uncached.
     """
     folders = [Path(item) for item in collapse_track_folders(track_directories())]
     drives = serato_volumes(
@@ -236,16 +321,20 @@ def volume_label(path: Path) -> str:
 def _volume_prefix(directory: PurePath) -> PurePath:
     """Return the volume that owns ``directory``.
 
+    A ``Volumes/<name>`` path is its own volume even when it is not at
+    the filesystem root. Other paths use the drive anchor.
+
     Args:
         directory: A track folder.
 
     Returns:
-        ``/Volumes/<name>`` for a macOS external volume, otherwise the
-        drive anchor.
+        The volume directory, or the drive anchor when the path is not
+        on a named volume.
     """
     parts = directory.parts
-    if directory.anchor == "/" and len(parts) >= 3 and parts[1] == "Volumes":
-        return PurePosixPath("/Volumes") / parts[2]
+    for index, part in enumerate(parts):
+        if part == "Volumes" and index + 1 < len(parts):
+            return directory.__class__(*parts[: index + 2])
     if directory.anchor:
         if isinstance(directory, PureWindowsPath):
             return PureWindowsPath(directory.anchor)
@@ -286,27 +375,153 @@ def _insert(node: _Node, parts: tuple[str, ...]) -> None:
     current.terminal = True
 
 
-def _emit(node: _Node, prefix: PurePath, *, at_anchor: bool) -> list[PurePath]:
+def _emit(node: _Node, prefix: PurePath, *, at_anchor: bool, home: PurePath) -> list[PurePath]:
     """Return collapsed folders under ``prefix``.
 
     Args:
         node: Trie node for ``prefix``.
         prefix: Directory this node represents.
         at_anchor: True when ``prefix`` is the volume root.
+        home: Home directory that must not be used as a widened root.
 
     Returns:
-        Collapsed folders. A branch at the volume root is split so the
-        computer root itself is not a result.
+        Collapsed folders. A branch at the volume root, at home, at
+        ``/``, or at ``/Volumes`` is split so that ancestor is not a root
+        unless tracks live in it and it has no child folders.
     """
     if len(node.children) == 1 and not node.terminal:
         name, child = next(iter(node.children.items()))
-        return _emit(child, prefix / name, at_anchor=False)
-    if at_anchor and node.children and not node.terminal:
+        return _emit(child, prefix / name, at_anchor=False, home=home)
+    widen = bool(node.children) and (at_anchor or _forbidden(prefix, home)) and not node.terminal
+    if widen:
         found: list[PurePath] = []
         for name, child in sorted(node.children.items(), key=lambda item: item[0].casefold()):
-            found.extend(_emit(child, prefix / name, at_anchor=False))
+            found.extend(_emit(child, prefix / name, at_anchor=False, home=home))
+        return found
+    if node.children and _forbidden(prefix, home):
+        found = [prefix] if node.terminal else []
+        for name, child in sorted(node.children.items(), key=lambda item: item[0].casefold()):
+            found.extend(_emit(child, prefix / name, at_anchor=False, home=home))
         return found
     return [prefix]
+
+
+def _forbidden(path: PurePath, home: PurePath) -> bool:
+    """Return whether ``path`` must not be a widened root.
+
+    Args:
+        path: Candidate common ancestor.
+        home: Home directory.
+
+    Returns:
+        True for home, ``/``, ``/Volumes``, and a drive root.
+    """
+    text = _norm(path)
+    blocked = {
+        _norm(PurePosixPath("/")),
+        _norm(PurePosixPath("/Volumes")),
+        _norm(home),
+    }
+    anchor = path.anchor
+    if anchor:
+        blocked.add(_norm(type(path)(anchor)))
+    return text in blocked
+
+
+def _norm(path: PurePath) -> str:
+    """Return a comparison key for a pure path.
+
+    Args:
+        path: Path to normalize.
+
+    Returns:
+        The normcase, normpath text.
+    """
+    return os.path.normcase(os.path.normpath(str(path)))
+
+
+def _display_name(path: Path, drives: Sequence[tuple[Path, str]]) -> str:
+    """Return ``volume · /path`` for one root.
+
+    Args:
+        path: Music folder or drive root.
+        drives: Mounted drives and their labels.
+
+    Returns:
+        A label that stays distinct when several folders are named Music.
+    """
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if part != "Volumes" or index + 1 >= len(parts):
+            continue
+        volume = parts[index + 1]
+        rest = parts[index + 2 :]
+        shown = "/" + "/".join(rest) if rest else "/"
+        return f"{volume} · {shown}"
+    for mount, label in drives:
+        if _path_contains(path, mount):
+            return f"{_clean_label(label)} · {_relative_display(path, mount)}"
+    home = Path.home()
+    if _path_contains(path, home):
+        return f"Home · {_relative_display(path, home)}"
+    parent = path.parent.name or (path.drive[:1] if path.drive else "Folder")
+    return f"{parent} · /{path.name}" if path.name else f"{parent} · /"
+
+
+def _relative_display(path: Path, root: Path) -> str:
+    """Return ``path`` below ``root`` with a leading slash.
+
+    Args:
+        path: Folder to label.
+        root: Volume or home directory that contains it.
+
+    Returns:
+        ``/`` when the folder is the root, otherwise ``/Music`` style text.
+    """
+    try:
+        if path.exists() and root.exists() and not path.is_symlink() and not root.is_symlink():
+            relative = path.resolve().relative_to(root.resolve())
+        else:
+            relative = path.relative_to(root)
+    except (OSError, ValueError):
+        return "/" + path.name if path.name else "/"
+    if not relative.parts:
+        return "/"
+    return "/" + relative.as_posix()
+
+
+def _path_contains(path: Path, root: Path) -> bool:
+    """Return whether ``path`` is ``root`` or a folder inside it.
+
+    Args:
+        path: Candidate folder.
+        root: Possible ancestor. A missing path is compared as text.
+
+    Returns:
+        True when the text of ``path`` stays inside ``root``.
+    """
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _drive_already_listed(mount: Path, folders: Sequence[Path]) -> bool:
+    """Return whether a music folder already represents this drive.
+
+    Args:
+        mount: Drive root from :func:`serato_volumes`.
+        folders: Collapsed track folders.
+
+    Returns:
+        True when one of those folders is on the drive, so a second USB
+        row would be a duplicate.
+    """
+    for folder in folders:
+        if _path_contains(folder, mount) or _path_contains(mount, folder):
+            return True
+    return False
 
 
 def _mac_volumes(
@@ -396,25 +611,6 @@ def _windows_label(path: Path) -> str:
     if not ok:
         return ""
     return buffer.value
-
-
-def _folder_label(path: Path) -> str:
-    """Return the name a DJ would use for a music folder.
-
-    Args:
-        path: Folder on disk.
-
-    Returns:
-        ``Music`` when the folder has that name, otherwise the folder name.
-    """
-    raw = path.name
-    if raw.casefold() == "music":
-        return "Music"
-    cleaned = "".join(ch for ch in raw if ch.isprintable()).strip()
-    if cleaned:
-        return cleaned[:64]
-    letter = path.drive[:1] if path.drive else ""
-    return letter or "Folder"
 
 
 def _clean_label(text: str) -> str:

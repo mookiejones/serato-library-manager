@@ -16,7 +16,7 @@ Quit Serato DJ Pro before any of these actions. The buttons stay off while Serat
 ## Browse
 
 1. Click **Files**.
-2. The first screen lists the music folders Serato uses. A folder of tracks is named from that folder, such as **Music**. A drive that has a `_Serato_` folder is named **USB:** plus the drive's name, such as **USB: GIGDRIVE**.
+2. The first screen lists the music folders Serato uses. Each name is the drive or volume plus the path on it, such as **GIGDRIVE · /Music** or **Home · /Music**. A drive is not listed again when one of those folders is already on it. A folder whose drive is unmounted says **Missing** and does not open.
 3. Click a name to open it. The path line starts at that name. **Up** does not go above it.
 4. Click a folder name to open it. The button reads **Open** plus the folder name.
 5. Click **Up** to go to the parent folder, until you are back at the music folder.

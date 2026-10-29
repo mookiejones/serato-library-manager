@@ -584,9 +584,10 @@ def db_stamp() -> tuple[int, ...]:
 
 
 def invalidate() -> None:
-    """Drop the cached library payloads."""
+    """Drop the cached library payloads and the Files music-root cache."""
     _cache["stamp"] = None
     _cache["libraries"] = {}
+    files.invalidate_browse_cache()
 
 
 def display_name(name: str) -> str:
@@ -1571,8 +1572,14 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/files":
                 raw_elsewhere = query_text(query, "elsewhere", "") or ""
                 elsewhere = raw_elsewhere.lower() in {"1", "true", "yes"}
+                raw_refresh = query_text(query, "refresh", "") or ""
+                refresh = raw_refresh.lower() in {"1", "true", "yes"}
                 self.send_json(
-                    files.list_directory(query_text(query, "path", "") or "", elsewhere=elsewhere)
+                    files.list_directory(
+                        query_text(query, "path", "") or "",
+                        elsewhere=elsewhere,
+                        refresh=refresh,
+                    )
                 )
                 return
             if parsed.path == "/api/snapshots":

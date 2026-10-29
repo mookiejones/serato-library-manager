@@ -55,16 +55,15 @@ describe("files view", () => {
   it("lists named roots with folder and drive icons, and keeps Up off", () => {
     state.filesAtRoots = true;
     state.filesRoots = [
-      { name: "Music", path: "/Users/dj/Music", kind: "folder" },
-      { name: "USB: GIGDRIVE", path: "/Volumes/GIGDRIVE", kind: "drive" },
+      { name: "Home · /Music", path: "/Users/dj/Music", kind: "folder" },
+      { name: "GIGDRIVE · /Music", path: "/Volumes/GIGDRIVE/Music", kind: "folder" },
     ];
     renderFiles();
 
     const rows = [...document.querySelectorAll<HTMLElement>("#files-list .files-row")].map((row) => row.textContent ?? "");
-    expect(rows[0]).toContain("Music");
-    expect(rows[1]).toContain("USB: GIGDRIVE");
-    expect(document.querySelector(".files-icon-folder")).not.toBeNull();
-    expect(document.querySelector(".files-icon-drive")).not.toBeNull();
+    expect(rows[0]).toContain("Home · /Music");
+    expect(rows[1]).toContain("GIGDRIVE · /Music");
+    expect(document.querySelectorAll(".files-icon-folder")).toHaveLength(2);
     expect(document.querySelector(".files-primary")).toBeNull();
     expect(document.querySelector("#files-elsewhere")?.textContent).toBe("Browse elsewhere…");
     expect(document.querySelector("#files-elsewhere")?.className).not.toContain("files-primary");
@@ -73,9 +72,9 @@ describe("files view", () => {
 
     const list = document.querySelector("#files-list") as HTMLElement;
     list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    expect(document.activeElement?.textContent).toContain("USB: GIGDRIVE");
+    expect(document.activeElement?.textContent).toContain("GIGDRIVE · /Music");
     list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-    expect(document.activeElement?.textContent).toContain("Music");
+    expect(document.activeElement?.textContent).toContain("Home · /Music");
     expect(document.activeElement?.textContent).not.toContain("GIGDRIVE");
   });
 
@@ -117,6 +116,20 @@ describe("files view", () => {
     expect((document.querySelector("#files-up") as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("shows a missing drive and does not open it", async () => {
+    state.filesAtRoots = true;
+    state.filesRoots = [
+      { name: "GIGDRIVE · /Music", path: "/Volumes/GIGDRIVE/Music", kind: "folder" },
+      { name: "OLDDRIVE · /Music", path: "/Volumes/OLDDRIVE/Music", kind: "folder", missing: true },
+    ];
+    renderFiles();
+    const missing = document.querySelector("[aria-label='OLDDRIVE · /Music, missing']") as HTMLButtonElement;
+    expect(missing.textContent).toContain("Missing");
+    expect(missing.getAttribute("aria-disabled")).toBe("true");
+    missing.click();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses Run setup as the only primary action when no roots exist", () => {
     state.filesAtRoots = true;
     const opened = vi.fn();
@@ -134,8 +147,9 @@ describe("files view", () => {
 
   it("asks to browse elsewhere only from the secondary link", async () => {
     wireDialogs();
+    fetchMock.mockClear();
     state.filesAtRoots = true;
-    state.filesRoots = [{ name: "Music", path: "/music", kind: "folder" }];
+    state.filesRoots = [{ name: "Home · /Music", path: "/music", kind: "folder" }];
     renderFiles();
     fetchMock.mockResolvedValue({
       ok: true,
@@ -149,8 +163,10 @@ describe("files view", () => {
       }),
     });
     (document.querySelector("#files-elsewhere") as HTMLButtonElement).click();
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/files?elsewhere=1");
+    await vi.waitFor(() => {
+      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(urls).toContain("/api/files?elsewhere=1");
+    });
     await vi.waitFor(() => expect(document.querySelector("#files-path")?.textContent).toContain("Home"));
   });
 

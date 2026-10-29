@@ -92,6 +92,7 @@ class CollapseTests(unittest.TestCase):
             ],
         )
         self.assertNotIn(PurePosixPath("/"), folders)
+        self.assertNotIn(PurePosixPath("/Volumes"), folders)
 
     def test_windows_album_folders_collapse_per_drive(self) -> None:
         """Collapse albums on each drive letter, and keep the drives apart.
@@ -135,6 +136,106 @@ class CollapseTests(unittest.TestCase):
                 str(PureWindowsPath("C:/Other/Clip")),
             ],
         )
+
+
+class WidenTests(unittest.TestCase):
+    """A common ancestor that is home, /, or /Volumes is not a root."""
+
+    def test_music_and_downloads_stay_apart(self) -> None:
+        """Keep ~/Music and ~/Downloads when both hold tracks.
+
+        Returns:
+            None. The test fails if the root is the home directory.
+        """
+        home = PurePosixPath("/Users/dj")
+        folders = music_roots.collapse_track_folders(
+            [
+                home / "Music" / "House",
+                home / "Music" / "Techno",
+                home / "Downloads" / "mix",
+            ],
+            home=home,
+        )
+        self.assertEqual(
+            folders,
+            [
+                home / "Downloads" / "mix",
+                home / "Music",
+            ],
+        )
+        self.assertNotIn(home, folders)
+        self.assertNotIn(PurePosixPath("/"), folders)
+        self.assertNotIn(PurePosixPath("/Volumes"), folders)
+
+    def test_windows_home_is_not_the_root(self) -> None:
+        """Keep Music and Downloads apart on a Windows profile.
+
+        Returns:
+            None. The test fails if the root is the profile directory.
+        """
+        home = PureWindowsPath("C:/Users/dj")
+        folders = music_roots.collapse_track_folders(
+            [
+                home / "Music" / "House",
+                home / "Downloads" / "Set",
+            ],
+            home=home,
+        )
+        self.assertEqual(
+            [str(item) for item in folders],
+            [
+                str(home / "Downloads" / "Set"),
+                str(home / "Music" / "House"),
+            ],
+        )
+        self.assertNotIn(str(home), [str(item) for item in folders])
+        self.assertNotIn(str(PureWindowsPath("C:/")), [str(item) for item in folders])
+
+    def test_two_volume_roots_do_not_widen_to_volumes(self) -> None:
+        """Keep each volume when the tracks sit on the volume itself.
+
+        The volume name is the last component. A looser length check
+        groups both volumes under their parent.
+
+        Returns:
+            None. The test fails if the root is the Volumes directory.
+        """
+        folders = music_roots.collapse_track_folders(
+            [
+                PurePosixPath("/tmp/vtest/Volumes/GIGDRIVE"),
+                PurePosixPath("/tmp/vtest/Volumes/BACKUP"),
+            ]
+        )
+        self.assertEqual(
+            folders,
+            [
+                PurePosixPath("/tmp/vtest/Volumes/BACKUP"),
+                PurePosixPath("/tmp/vtest/Volumes/GIGDRIVE"),
+            ],
+        )
+        self.assertNotIn(PurePosixPath("/tmp/vtest/Volumes"), folders)
+        self.assertNotIn(PurePosixPath("/"), folders)
+        self.assertNotIn(PurePosixPath("/Volumes"), folders)
+
+    def test_a_folder_named_volumes_is_not_a_volume_prefix(self) -> None:
+        """Collapse a path that ends on Volumes with the sibling folder.
+
+        ``Volumes`` with no volume name after it is an ordinary folder.
+        Treating it as a volume prefix leaves it beside Music instead of
+        sharing ``/tmp/vtest``.
+
+        Returns:
+            None. The test fails if Volumes and Music stay separate.
+        """
+        folders = music_roots.collapse_track_folders(
+            [
+                PurePosixPath("/tmp/vtest/Volumes"),
+                PurePosixPath("/tmp/vtest/Music/House"),
+            ]
+        )
+        self.assertEqual(folders, [PurePosixPath("/tmp/vtest")])
+        self.assertNotIn(PurePosixPath("/tmp/vtest/Volumes"), folders)
+        self.assertNotIn(PurePosixPath("/"), folders)
 
 
 class VolumeTests(unittest.TestCase):
@@ -234,25 +335,174 @@ class NameTests(unittest.TestCase):
     """Root names are the folder name or the USB label."""
 
     def test_music_and_a_usb_drive_are_named_for_a_dj(self) -> None:
-        """Label the home music folder Music and the drive USB plus its label.
+        """Label a folder with its volume and path, and skip a duplicate drive.
+
+        A music folder on GIGDRIVE is ``GIGDRIVE · /Music``. The drive root
+        is not a second row. A drive with no tracks is still listed once.
 
         Returns:
-            None. The test fails if the drive is named like a folder.
+            None. The test fails if two rows say Music or the drive is repeated.
         """
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
-            music = Path(tmp) / "Music"
-            music.mkdir()
-            drive = Path("E:\\")
+            volume = Path(tmp) / "Volumes" / "GIGDRIVE"
+            music = volume / "Music"
+            music.mkdir(parents=True)
+            other = Path(tmp) / "Volumes" / "BACKUP"
+            other.mkdir()
+            spare = Path(tmp) / "STICK"
+            spare.mkdir()
             roots = music_roots.name_roots(
                 [music],
-                [(drive, "GIGDRIVE")],
-                exists=lambda path: path == music or _drive_text(path) == "e:\\",
+                [(volume, "GIGDRIVE"), (other, "BACKUP"), (spare, "STICK")],
             )
-            self.assertEqual([item["name"] for item in roots], ["Music", "USB: GIGDRIVE"])
-            self.assertEqual([item["kind"] for item in roots], ["folder", "drive"])
+            self.assertEqual(
+                [item["name"] for item in roots],
+                ["GIGDRIVE · /Music", "BACKUP · /", "STICK · /"],
+            )
+            self.assertEqual([item["kind"] for item in roots], ["folder", "drive", "drive"])
             self.assertEqual(roots[0]["path"], str(music.resolve()))
+            self.assertFalse(roots[0]["missing"])
+            self.assertEqual(sum(1 for item in roots if "GIGDRIVE" in str(item["name"])), 1)
+
+    def test_a_present_folder_keeps_the_resolved_path(self) -> None:
+        """Store the resolved folder when the request path is not canonical.
+
+        Returns:
+            None. The test fails if the path still contains ``..``.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            music = Path(tmp) / "Volumes" / "GIGDRIVE" / "Music"
+            music.mkdir(parents=True)
+            link = Path(tmp) / "Volumes" / "LINK"
+            try:
+                link.symlink_to(music.parent, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            weird = link / "Music"
+            roots = music_roots.name_roots([weird], [])
+            self.assertEqual(len(roots), 1)
+            self.assertEqual(roots[0]["path"], str(music.resolve()))
+            self.assertNotIn("LINK", str(roots[0]["path"]))
+            self.assertFalse(roots[0]["missing"])
+            self.assertEqual(roots[0]["kind"], "folder")
+
+    def test_a_closed_folder_keeps_the_path_it_was_given(self) -> None:
+        """Keep the original text when the folder cannot be opened.
+
+        Resolving a shortcut parent would swap the path the library stored.
+
+        Returns:
+            None. The test fails if the stored path is the resolved folder.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            music = Path(tmp) / "Volumes" / "GIGDRIVE" / "Music"
+            music.mkdir(parents=True)
+            link = Path(tmp) / "Volumes" / "LINK"
+            try:
+                link.symlink_to(music.parent, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            weird = link / "Music"
+            roots = music_roots.name_roots([weird], [], exists=lambda _path: False)
+            self.assertEqual(len(roots), 1)
+            self.assertTrue(roots[0]["missing"])
+            self.assertEqual(roots[0]["path"], str(weird))
+            self.assertIn("LINK", str(roots[0]["path"]))
+            self.assertNotEqual(roots[0]["path"], str(music.resolve()))
+
+    def test_drive_rows_sort_by_name_and_are_present(self) -> None:
+        """Sort two drives by label and store a real path for each.
+
+        The drives are inserted out of order. A sort key that ignores the
+        name keeps that order.
+
+        Returns:
+            None. The test fails if STICK stays first or a drive is missing.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stick = Path(tmp) / "STICK"
+            backup = Path(tmp) / "BACKUP"
+            stick.mkdir()
+            backup.mkdir()
+            roots = music_roots.name_roots(
+                [],
+                [(stick, "STICK"), (backup, "BACKUP")],
+            )
+            self.assertEqual(
+                roots,
+                [
+                    {
+                        "name": "BACKUP · /",
+                        "path": str(backup.resolve()),
+                        "kind": "drive",
+                        "missing": False,
+                    },
+                    {
+                        "name": "STICK · /",
+                        "path": str(stick.resolve()),
+                        "kind": "drive",
+                        "missing": False,
+                    },
+                ],
+            )
+
+    def test_an_unmounted_drive_is_skipped_and_the_next_one_stays(self) -> None:
+        """Leave out a drive that is not mounted, and keep the drive after it.
+
+        Stopping the loop at the missing drive would drop the later one.
+
+        Returns:
+            None. The test fails if OLDDRIVE is listed or STICK is absent.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            gone = Path(tmp) / "OLDDRIVE"
+            stick = Path(tmp) / "STICK"
+            stick.mkdir()
+            roots = music_roots.name_roots([], [(gone, "OLDDRIVE"), (stick, "STICK")])
+            self.assertEqual(
+                roots,
+                [
+                    {
+                        "name": "STICK · /",
+                        "path": str(stick.resolve()),
+                        "kind": "drive",
+                        "missing": False,
+                    }
+                ],
+            )
+
+    def test_a_missing_folder_sorts_after_a_present_one(self) -> None:
+        """List a folder that is on disk before one that is not.
+
+        The missing folder's name comes first alphabetically. Sorting by
+        name alone would put it first.
+
+        Returns:
+            None. The test fails if the missing folder is the first row.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            present = Path(tmp) / "Volumes" / "ZZZDRIVE" / "Music"
+            present.mkdir(parents=True)
+            missing = Path(tmp) / "Volumes" / "AAA" / "Music"
+            roots = music_roots.name_roots(
+                [missing, present],
+                [],
+                exists=lambda path: path == present,
+            )
+            self.assertEqual([item["name"] for item in roots], ["ZZZDRIVE · /Music", "AAA · /Music"])
+            self.assertEqual([item["missing"] for item in roots], [False, True])
 
     def test_library_tracks_collapse_to_the_music_folder(self) -> None:
         """Read portable ids and collapse two albums to one Music root.
@@ -271,12 +521,150 @@ class NameTests(unittest.TestCase):
             with open_database(temp.db) as conn:
                 conn.execute("UPDATE asset SET portable_id = ? WHERE id = 1", (str(house),))
                 conn.execute("UPDATE asset SET portable_id = ? WHERE id = 2", (str(techno),))
-            roots = [item for item in music_roots.music_roots() if item["kind"] == "folder"]
-            self.assertIn(
-                {"name": "Music", "path": str(music.resolve()), "kind": "folder"},
-                roots,
-            )
-            self.assertFalse(any(item["path"].endswith("House") or item["path"].endswith("Techno") for item in roots))
+            music_roots.invalidate()
+            roots = [item for item in music_roots.music_roots(refresh=True) if item["kind"] == "folder"]
+            match = next(item for item in roots if item["path"] == str(music.resolve()))
+            self.assertIn("·", str(match["name"]))
+            self.assertTrue(str(match["name"]).endswith("/Music"))
+            self.assertFalse(match["missing"])
+            self.assertFalse(any(str(item["path"]).endswith("House") or str(item["path"]).endswith("Techno") for item in roots))
+
+
+class DirectoryTests(unittest.TestCase):
+    """Track folders ignore blanks and repeated paths."""
+
+    def test_blank_and_repeated_portable_ids_are_one_folder(self) -> None:
+        """Skip a blank path and list one folder when two tracks share it.
+
+        Returns:
+            None. The test fails if a blank id becomes a folder or a path is repeated.
+        """
+        with TempLibrary() as temp:
+            music_roots.invalidate()
+            shared = temp.root / "Volumes" / "GIGDRIVE" / "Music" / "a.mp3"
+            other = temp.root / "Volumes" / "BACKUP" / "Music" / "b.mp3"
+            shared.parent.mkdir(parents=True)
+            other.parent.mkdir(parents=True)
+            shared.write_bytes(b"a")
+            other.write_bytes(b"b")
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 1", ("   ",))
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 2", (str(shared),))
+                conn.execute(
+                    "INSERT INTO asset (id, name, file_name, portable_id) VALUES (3, 'Again', 'a.mp3', ?)",
+                    (str(shared),),
+                )
+                conn.execute(
+                    "INSERT INTO asset (id, name, file_name, portable_id) VALUES (4, 'Other', 'b.mp3', ?)",
+                    (str(other),),
+                )
+            found = music_roots.track_directories()
+            self.assertEqual(found, [shared.parent, other.parent])
+
+
+class CacheTests(unittest.TestCase):
+    """Roots stay cached until settings or an explicit refresh."""
+
+    def test_a_settings_write_reads_the_library_again(self) -> None:
+        """Drop the cache when settings.json changes.
+
+        Returns:
+            None. The test fails if the second read is skipped after the write.
+        """
+        import app_config
+        from unittest import mock
+
+        music_roots.invalidate()
+        calls = {"n": 0}
+
+        def counted() -> list[Path]:
+            calls["n"] += 1
+            return []
+
+        with mock.patch.object(music_roots, "track_directories", counted):
+            music_roots.music_roots()
+            music_roots.music_roots()
+            self.assertEqual(calls["n"], 1)
+            path = app_config.settings_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"telemetry_consent": false}\n', encoding="utf-8")
+            music_roots.music_roots()
+            self.assertEqual(calls["n"], 2)
+
+
+class MissingDriveTests(unittest.TestCase):
+    """An unmounted drive stays in the list and cannot be opened."""
+
+    def test_unmounted_root_is_missing_and_refused(self) -> None:
+        """Show OLDDRIVE as missing and refuse to browse it.
+
+        A mounted sibling is one row, not a folder plus a USB row.
+        Reading the roots twice does not scan the library twice.
+
+        Returns:
+            None. The test fails if the missing path is opened or the
+            drive is listed twice.
+        """
+        from unittest import mock
+
+        import files
+        import library
+
+        with TempLibrary() as temp:
+            music_roots.invalidate()
+            files.invalidate_browse_cache()
+            volume = temp.root / "Volumes"
+            gig = volume / "GIGDRIVE" / "Music"
+            (gig / "House").mkdir(parents=True)
+            (gig / "Techno").mkdir()
+            track = gig / "House" / "a.mp3"
+            track.write_bytes(b"a")
+            (volume / "GIGDRIVE" / "_Serato_").mkdir()
+            missing_house = volume / "OLDDRIVE" / "Music" / "House" / "b.mp3"
+            missing_techno = volume / "OLDDRIVE" / "Music" / "Techno" / "c.mp3"
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 1", (str(track),))
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 2", (str(missing_house),))
+                conn.execute(
+                    "INSERT INTO asset (id, name, file_name, portable_id) VALUES (3, 'T', 'c.mp3', ?)",
+                    (str(missing_techno),),
+                )
+                conn.execute(
+                    "INSERT INTO asset (id, name, file_name, portable_id) VALUES (4, 'U', 'd.mp3', ?)",
+                    (str(gig / "Techno" / "d.mp3"),),
+                )
+            calls = {"n": 0}
+            real_directories = music_roots.track_directories
+            real_volumes = music_roots.serato_volumes
+
+            def counted() -> list[Path]:
+                calls["n"] += 1
+                return real_directories()
+
+            def volumes(platform: str, **kwargs: object) -> list[tuple[Path, str]]:
+                del platform, kwargs
+                return real_volumes("darwin", volumes_root=volume)
+
+            with mock.patch.object(music_roots, "serato_volumes", volumes):
+                with mock.patch.object(music_roots, "track_directories", counted):
+                    roots = music_roots.music_roots(refresh=True)
+                    again = music_roots.music_roots()
+                    self.assertEqual(calls["n"], 1)
+                    files.list_directory(str(gig / "House"))
+                    self.assertEqual(calls["n"], 1)
+                    listed = files.list_directory(str(gig / "House"), refresh=True)
+                    self.assertGreaterEqual(calls["n"], 2)
+            self.assertEqual(roots, again)
+            names = [str(item["name"]) for item in roots]
+            self.assertEqual(names.count("GIGDRIVE · /Music"), 1)
+            self.assertFalse(any(name.startswith("USB:") for name in names))
+            lost = next(item for item in roots if "OLDDRIVE" in str(item["name"]))
+            self.assertEqual(lost["name"], "OLDDRIVE · /Music")
+            self.assertTrue(lost["missing"])
+            self.assertTrue(str(lost["path"]).replace("\\", "/").endswith("OLDDRIVE/Music"))
+            with self.assertRaises(library.LibraryError):
+                files.list_directory(str(lost["path"]))
+            self.assertIn("GIGDRIVE", str(listed["root"]["name"]))
 
 
 if __name__ == "__main__":

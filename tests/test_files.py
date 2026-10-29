@@ -1021,7 +1021,9 @@ class FileManagerTests(unittest.TestCase):
         self.assertIsNone(listed["parent"])
         self.assertFalse(listed["elsewhere"])
         self.assertEqual(listed["entries"], [])
-        self.assertTrue(any(item["name"] == "Music" and item["path"] == str(self.music.resolve()) for item in listed["roots"]))
+        match = next(item for item in listed["roots"] if item["path"] == str(self.music.resolve()))
+        self.assertIn("·", str(match["name"]))
+        self.assertTrue(str(match["name"]).endswith("/music"))
 
     def test_browse_stays_inside_the_music_root(self) -> None:
         """Refuse a parent, a prefixed sibling, and a path that climbs out.
@@ -1045,12 +1047,14 @@ class FileManagerTests(unittest.TestCase):
             files.list_directory(str(self.music / ".."))
         opened = files.list_directory(str(self.music))
         self.assertIsNone(opened["parent"])
-        self.assertEqual(opened["breadcrumb"], [{"name": "Music", "path": str(self.music.resolve())}])
+        self.assertEqual(opened["breadcrumb"][0]["path"], str(self.music.resolve()))
+        self.assertIn("·", str(opened["breadcrumb"][0]["name"]))
         child = self.music / "Crates"
         child.mkdir()
         inner = files.list_directory(str(child))
         self.assertEqual(inner["parent"], str(self.music.resolve()))
-        self.assertEqual([item["name"] for item in inner["breadcrumb"]], ["Music", "Crates"])
+        self.assertEqual(inner["breadcrumb"][1]["name"], "Crates")
+        self.assertEqual(inner["breadcrumb"][0]["path"], str(self.music.resolve()))
         wider = files.list_directory(str(self.library.root), elsewhere=True)
         self.assertTrue(wider["elsewhere"])
         self.assertEqual(wider["path"], str(self.library.root.resolve()))
@@ -1117,7 +1121,7 @@ class FileManagerTests(unittest.TestCase):
             self.assertEqual(roots_status, 200)
             assert isinstance(roots, dict)
             self.assertEqual(roots["path"], "")
-            self.assertTrue(any(item["name"] == "Music" for item in roots["roots"]))
+            self.assertTrue(any(str(item["path"]) == str(self.music.resolve()) for item in roots["roots"]))
             denied_status, denied = _request(base, f"/api/files?path={outside}")
             self.assertEqual(denied_status, 403)
             assert isinstance(denied, dict)

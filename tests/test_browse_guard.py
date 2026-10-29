@@ -1,0 +1,77 @@
+"""Browse guards for a shortcut that sits near the top of the disk.
+
+The deep-shortcut check allows an alias one or two components below the
+drive. A shortcut inside a music root is still refused. These tests do
+not open a live Serato library.
+"""
+
+from __future__ import annotations
+
+import sys
+import unittest
+import uuid
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import files
+import library
+import music_roots
+from tests.fixture import TempLibrary
+
+
+class ShallowShortcutTests(unittest.TestCase):
+    """A shortcut under a music root is refused even when it is not deep."""
+
+    def test_a_shallow_shortcut_under_the_root_is_refused(self) -> None:
+        """Refuse a shortcut two components below the disk, and open a real folder.
+
+        ``/tmp/<name>`` is shallow enough that the top-of-disk alias check
+        allows it. The music-root check still refuses the shortcut and
+        still opens a real folder at that depth.
+
+        Returns:
+            None. The test fails if the link is listed or the real folder is refused.
+        """
+        with TempLibrary() as temp:
+            secret = temp.root / "secret"
+            secret.mkdir()
+            (secret / "hidden.mp3").write_bytes(b"x")
+            token = uuid.uuid4().hex
+            link = Path("/tmp") / f"serato-shallow-{token}"
+            real = Path("/tmp") / f"serato-real-{token}"
+            real.mkdir()
+            roots = [
+                {
+                    "name": "Temp · /",
+                    "path": "/tmp",
+                    "kind": "folder",
+                    "missing": False,
+                }
+            ]
+            try:
+                link.symlink_to(secret, target_is_directory=True)
+            except OSError:
+                real.rmdir()
+                self.skipTest("symlinks are not available")
+            try:
+                with mock.patch.object(music_roots, "music_roots", return_value=roots):
+                    files.invalidate_browse_cache()
+                    with self.assertRaises(library.LibraryError) as caught:
+                        files.list_directory(str(link))
+                    self.assertEqual(caught.exception.message, "Shortcuts are left alone.")
+                    opened = files.list_directory(str(real))
+                self.assertEqual(opened["path"], str(real.resolve()))
+                self.assertEqual(opened["entries"], [])
+                self.assertEqual(opened["parent"], "/tmp")
+                self.assertEqual(opened["breadcrumb"][0]["path"], "/tmp")
+            finally:
+                link.unlink(missing_ok=True)
+                real.rmdir()
+
+
+if __name__ == "__main__":
+    unittest.main()

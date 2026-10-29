@@ -2310,8 +2310,9 @@ const FILE_OVERSCAN = 8;
  * @param {{keepMessage?: boolean, elsewhere?: boolean}} [options] keepMessage retains the last save note. elsewhere lists outside the roots.
  * @returns {Promise<void>}
  */
-export async function loadFolder(path: string, options: { keepMessage?: boolean; elsewhere?: boolean } = {}) {
+export async function loadFolder(path: string, options: { keepMessage?: boolean; elsewhere?: boolean; refresh?: boolean } = {}) {
   const elsewhere = options.elsewhere === true;
+  const refresh = options.refresh === true;
   const atRoots = path === "" && !elsewhere;
   const token = ++filesRequest;
   state.filesLoading = true;
@@ -2332,6 +2333,7 @@ export async function loadFolder(path: string, options: { keepMessage?: boolean;
   const params = new URLSearchParams();
   if (path) params.set("path", path);
   if (elsewhere) params.set("elsewhere", "1");
+  if (refresh) params.set("refresh", "1");
   const query = params.size ? `?${params.toString()}` : "";
   const response = await fetch(`/api/files${query}`);
   const payload = await readJSONOr<FilesPayload>(response, {});
@@ -2459,11 +2461,15 @@ function visibleCrumbs(): FileCrumb[] {
  */
 function browserRows(): FileEntry[] {
   if (state.filesAtRoots) {
-    return state.filesRoots.map((root) => ({
-      name: root.name,
-      path: root.path,
-      kind: root.kind === "drive" ? "drive" : "folder",
-    }));
+    return state.filesRoots.map((root) => {
+      const entry: FileEntry = {
+        name: root.name,
+        path: root.path,
+        kind: root.kind === "drive" ? "drive" : "folder",
+      };
+      if (root.missing === true) entry.missing = true;
+      return entry;
+    });
   }
   const rank: Record<string, number> = { dir: 0, file: 1, link: 2 };
   return [...state.filesEntries].sort((left, right) => {
@@ -2638,6 +2644,7 @@ function activateFilesIndex(index: number): void {
  * @returns {void}
  */
 function openBrowserRow(entry: FileEntry): void {
+  if (entry.missing) return;
   const elsewhere = state.filesElsewhere && entry.kind === "dir";
   loadFolder(entry.path, { elsewhere }).catch((error) => failFiles(error));
 }
@@ -2694,11 +2701,24 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     name.textContent = entry.name;
     button.append(name);
     button.title = entry.name;
-    button.setAttribute("aria-label", `Open ${entry.name}`);
-    button.addEventListener("click", () => {
-      state.filesActive = index;
-      openBrowserRow(entry);
-    });
+    if (entry.missing) {
+      button.setAttribute("aria-disabled", "true");
+      button.setAttribute("aria-label", `${entry.name}, missing`);
+      const badge = document.createElement("span");
+      badge.className = "files-badge";
+      badge.textContent = "Missing";
+      button.append(name, badge);
+      button.addEventListener("click", () => {
+        state.filesActive = index;
+      });
+    } else {
+      button.setAttribute("aria-label", `Open ${entry.name}`);
+      button.append(name);
+      button.addEventListener("click", () => {
+        state.filesActive = index;
+        openBrowserRow(entry);
+      });
+    }
     row.append(button);
     return row;
   }

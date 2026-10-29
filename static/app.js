@@ -2060,6 +2060,7 @@
   var FILE_OVERSCAN = 8;
   async function loadFolder(path, options = {}) {
     const elsewhere = options.elsewhere === true;
+    const refresh = options.refresh === true;
     const atRoots = path === "" && !elsewhere;
     const token = ++filesRequest;
     state.filesLoading = true;
@@ -2080,6 +2081,7 @@
     const params = new URLSearchParams();
     if (path) params.set("path", path);
     if (elsewhere) params.set("elsewhere", "1");
+    if (refresh) params.set("refresh", "1");
     const query = params.size ? `?${params.toString()}` : "";
     const response = await fetch(`/api/files${query}`);
     const payload = await readJSONOr(response, {});
@@ -2174,11 +2176,15 @@
   }
   function browserRows() {
     if (state.filesAtRoots) {
-      return state.filesRoots.map((root) => ({
-        name: root.name,
-        path: root.path,
-        kind: root.kind === "drive" ? "drive" : "folder"
-      }));
+      return state.filesRoots.map((root) => {
+        const entry = {
+          name: root.name,
+          path: root.path,
+          kind: root.kind === "drive" ? "drive" : "folder"
+        };
+        if (root.missing === true) entry.missing = true;
+        return entry;
+      });
     }
     const rank = { dir: 0, file: 1, link: 2 };
     return [...state.filesEntries].sort((left, right) => {
@@ -2296,6 +2302,7 @@
     openBrowserRow(entry);
   }
   function openBrowserRow(entry) {
+    if (entry.missing) return;
     const elsewhere = state.filesElsewhere && entry.kind === "dir";
     loadFolder(entry.path, { elsewhere }).catch((error) => failFiles(error));
   }
@@ -2337,11 +2344,24 @@
       name2.textContent = entry.name;
       button.append(name2);
       button.title = entry.name;
-      button.setAttribute("aria-label", `Open ${entry.name}`);
-      button.addEventListener("click", () => {
-        state.filesActive = index;
-        openBrowserRow(entry);
-      });
+      if (entry.missing) {
+        button.setAttribute("aria-disabled", "true");
+        button.setAttribute("aria-label", `${entry.name}, missing`);
+        const badge = document.createElement("span");
+        badge.className = "files-badge";
+        badge.textContent = "Missing";
+        button.append(name2, badge);
+        button.addEventListener("click", () => {
+          state.filesActive = index;
+        });
+      } else {
+        button.setAttribute("aria-label", `Open ${entry.name}`);
+        button.append(name2);
+        button.addEventListener("click", () => {
+          state.filesActive = index;
+          openBrowserRow(entry);
+        });
+      }
       row.append(button);
       return row;
     }
@@ -3172,7 +3192,7 @@
     });
     el("files-refresh").addEventListener("click", () => {
       const path = state.filesAtRoots ? "" : state.filesPath;
-      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error) => failFiles(error));
+      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots, refresh: true }).catch((error) => failFiles(error));
     });
     el("files-elsewhere").addEventListener("click", () => {
       if (state.filesElsewhere) loadFolder("").catch((error) => failFiles(error));

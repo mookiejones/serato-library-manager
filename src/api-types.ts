@@ -201,12 +201,14 @@ export interface FileEntry {
   kind: string;
   path: string;
   in_library?: boolean;
+  missing?: boolean;
 }
 
 export interface FileRoot {
   name: string;
   path: string;
   kind: string;
+  missing?: boolean;
 }
 
 export interface FileCrumb {

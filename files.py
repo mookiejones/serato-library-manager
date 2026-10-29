@@ -154,7 +154,7 @@ class Plan:
     trash: list[str] = field(default_factory=list)
 
 
-def list_directory(path: str | None, *, elsewhere: bool = False) -> dict[str, object]:
+def list_directory(path: str | None, *, elsewhere: bool = False, refresh: bool = False) -> dict[str, object]:
     """List the music roots, or one folder under a root.
 
     An empty path lists the folders Serato uses. ``elsewhere`` lists a
@@ -165,6 +165,7 @@ def list_directory(path: str | None, *, elsewhere: bool = False) -> dict[str, ob
         path: Folder to open. Empty selects the music roots.
         elsewhere: When true, a folder outside the music roots may be
             listed. Path checks still apply.
+        refresh: When true, drop the cached roots and read the library again.
 
     Returns:
         The roots, the folder, its parent, and every entry. Folders are
@@ -175,8 +176,10 @@ def list_directory(path: str | None, *, elsewhere: bool = False) -> dict[str, ob
         LibraryError: If the path is missing, outside the music roots,
             or a shortcut.
     """
+    if refresh:
+        invalidate_browse_cache()
     info = _browser_status()
-    roots = music_roots.music_roots()
+    roots = music_roots.music_roots(refresh=refresh)
     if path is None or path == "":
         if not elsewhere:
             return _roots_payload(roots, info)
@@ -799,13 +802,35 @@ def _scan(directory: Path) -> list[dict[str, object]]:
     return found
 
 
+_asset_cache: tuple[tuple[object, ...], dict[Path, list[int]]] | None = None
+
+
+def invalidate_browse_cache() -> None:
+    """Drop the cached music roots and the cached library path index.
+
+    A library write, a settings save, and an explicit refresh call this
+    so the next folder open reads the database again.
+    """
+    global _asset_cache
+    _asset_cache = None
+    music_roots.invalidate()
+
+
 def _index_assets() -> dict[Path, list[int]]:
     """Map resolved audio paths to asset ids.
+
+    The map is cached with the music roots. A folder click does not read
+    every track again until the library, the settings, or a refresh
+    changes that cache.
 
     Returns:
         Paths that are on the asset table. A missing database yields an
         empty map so the folder can still be listed.
     """
+    global _asset_cache
+    stamp = music_roots.cache_stamp()
+    if _asset_cache is not None and _asset_cache[0] == stamp:
+        return _asset_cache[1]
     indexed: dict[Path, list[int]] = {}
     try:
         conn_cm = closing(library.read_conn())
@@ -819,6 +844,7 @@ def _index_assets() -> dict[Path, list[int]]:
             if resolved is None:
                 continue
             indexed.setdefault(resolved, []).append(int(row["id"]))
+    _asset_cache = (stamp, indexed)
     return indexed
 
 
