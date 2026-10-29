@@ -12,6 +12,7 @@ import type {
   FileCrumb,
   FileEntry,
   FileRoot,
+  LibraryRoot,
   HistorySession,
   PendingUndo,
   SeratoStatus,
@@ -23,6 +24,7 @@ import type {
 // the scroll offset by this value, so the two must stay equal.
 export const ROW = 36;
 export const FILE_ROW = 44;
+export const ROOT_ROW = 64;
 
 export const COLORS: Array<[number, string]> = [
   [0xffffff, "None"],
@@ -86,7 +88,7 @@ export interface PageState {
   filesMessage: string;
   filesTruncated: boolean;
   filesAtRoots: boolean;
-  filesRoots: FileRoot[];
+  filesRoots: LibraryRoot[];
   filesRoot: FileRoot | null;
   filesBreadcrumb: FileCrumb[];
   filesElsewhere: boolean;

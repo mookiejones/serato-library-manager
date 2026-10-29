@@ -22,6 +22,7 @@
   --rule: var(--color-border);
   --row: 36px; /* must match ROW in app.js */
   --file-row: 44px; /* must match FILE_ROW in src/state.ts */
+  --file-root-row: 64px; /* must match ROOT_ROW in src/state.ts */
   --font: var(--font-family);
   --display: "Fraunces", "Iowan Old Style", Palatino, serif;
 }
@@ -1050,6 +1051,18 @@ dialog .check input {
   border-bottom: 1px solid var(--rule);
 }
 
+.files-row.is-root {
+  height: var(--file-root-row);
+  min-height: var(--file-root-row);
+  max-height: var(--file-root-row);
+}
+
+.files-row.is-missing .files-icon,
+.files-row.is-missing .files-root-label,
+.files-row.is-missing .files-root-detail {
+  color: var(--quiet);
+}
+
 .files-open:focus-visible,
 .files-kind:focus-visible,
 .files-file input:focus-visible,
@@ -1088,6 +1101,25 @@ dialog .check input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.files-open .files-root-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  gap: 2px;
+}
+
+.files-root-label {
+  font-weight: 600;
+}
+
+.files-root-detail {
+  color: var(--quiet);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .files-badge,

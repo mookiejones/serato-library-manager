@@ -9,17 +9,19 @@ contains a ``_Serato_`` folder is added as well. macOS looks in
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 import sys
 import threading
 from collections.abc import Callable, Sequence
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 _LETTERS = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 _cache_lock = threading.Lock()
-_cache: tuple[tuple[object, ...], list[dict[str, object]]] | None = None
+_cache: tuple[tuple[object, ...], list[dict[str, object]], str] | None = None
 
 
 class _Node:
@@ -221,8 +223,116 @@ def music_roots(*, refresh: bool = False) -> list[dict[str, object]]:
             return [dict(item) for item in _cache[1]]
     found = _discover()
     with _cache_lock:
-        _cache = (stamp, found)
+        _cache = (stamp, found, _computed_at())
         return [dict(item) for item in found]
+
+
+def library_roots(*, refresh: bool = False) -> dict[str, object]:
+    """Return the Files roots in the public library-roots shape.
+
+    The list is the same cache as :func:`music_roots`. ``refresh`` reads
+    the library again. ``computed_at`` stays put until that happens.
+
+    Args:
+        refresh: When true, ignore the cache and read the library again.
+
+    Returns:
+        ``roots`` and ``computed_at``. Each root has ``id``, ``path``,
+        ``label``, ``detail``, ``kind``, ``serato``, ``removable``, and
+        ``missing``. ``id`` is the SHA-256 of the real path. ``kind`` is
+        ``music_library``, ``serato_drive``, or ``user_folder``.
+    """
+    rows = music_roots(refresh=refresh)
+    with _cache_lock:
+        computed = _cache[2] if _cache is not None else _computed_at()
+    return {"roots": [to_library_root(item) for item in rows], "computed_at": computed}
+
+
+def to_library_root(item: dict[str, object]) -> dict[str, object]:
+    """Map one discovered root onto the library-roots contract.
+
+    Args:
+        item: A root from :func:`name_roots` or :func:`music_roots`.
+
+    Returns:
+        The public root. ``label`` is the distinct name. ``detail`` is
+        the path shown under it.
+    """
+    path = str(item.get("path") or "")
+    kind = _public_kind(item)
+    return {
+        "id": root_id(path),
+        "path": path,
+        "label": str(item.get("name") or path or "Folder"),
+        "detail": path,
+        "kind": kind,
+        "serato": kind != "user_folder",
+        "removable": _removable(path),
+        "missing": bool(item.get("missing")),
+    }
+
+
+def root_id(path: str) -> str:
+    """Return a stable id for one real root path.
+
+    Args:
+        path: Resolved path when the folder is on disk, otherwise the
+            path text that was stored.
+
+    Returns:
+        The hex SHA-256 of the normalized path.
+    """
+    key = os.path.normcase(os.path.normpath(path))
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _computed_at() -> str:
+    """Return the UTC time a root list was read.
+
+    Returns:
+        An ISO-8601 timestamp with a ``Z`` suffix.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _public_kind(item: dict[str, object]) -> str:
+    """Classify a discovered root for the library-roots contract.
+
+    Args:
+        item: A root from :func:`name_roots`.
+
+    Returns:
+        ``serato_drive`` for a drive row, ``music_library`` for a folder
+        named Music, otherwise ``user_folder``.
+    """
+    if item.get("kind") == "drive":
+        return "serato_drive"
+    path = str(item.get("path") or "").replace("\\", "/")
+    if PurePosixPath(path).name.casefold() == "music":
+        return "music_library"
+    return "user_folder"
+
+
+def _removable(path: str) -> bool:
+    """Return whether ``path`` sits on a volume other than the home drive.
+
+    Args:
+        path: Root path.
+
+    Returns:
+        True for a macOS ``/Volumes/<name>`` path and for a Windows drive
+        that is not the home drive.
+    """
+    windows = len(path) >= 2 and path[1] == ":"
+    pure = PureWindowsPath(path) if windows else PurePosixPath(path)
+    parts = pure.parts
+    for index, part in enumerate(parts):
+        if part == "Volumes" and index + 1 < len(parts):
+            return True
+    if pure.drive:
+        home_drive = PureWindowsPath(str(Path.home())).drive
+        return os.path.normcase(pure.drive) != os.path.normcase(home_drive)
+    return False
 
 
 def _discover() -> list[dict[str, object]]:

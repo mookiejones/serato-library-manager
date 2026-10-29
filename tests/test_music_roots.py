@@ -670,5 +670,103 @@ class MissingDriveTests(unittest.TestCase):
             self.assertIn("GIGDRIVE", str(listed["root"]["name"]))
 
 
+class LibraryRootsContractTests(unittest.TestCase):
+    """GET /api/library-roots is the cached public shape."""
+
+    def test_public_roots_keep_a_stable_id_until_refresh(self) -> None:
+        """Label a Music folder, a drive, and Downloads, and reuse the time.
+
+        Returns:
+            None. The test fails if the id changes or Downloads is a drive.
+        """
+        import hashlib
+        import os
+
+        music = {
+            "name": "Home · /Music",
+            "path": "/Users/dj/Music",
+            "kind": "folder",
+            "missing": False,
+        }
+        drive = {
+            "name": "GIGDRIVE · /",
+            "path": "/Volumes/GIGDRIVE",
+            "kind": "drive",
+            "missing": False,
+        }
+        downloads = {
+            "name": "Home · /Downloads",
+            "path": "/Users/dj/Downloads",
+            "kind": "folder",
+            "missing": True,
+        }
+        public = [music_roots.to_library_root(item) for item in (music, drive, downloads)]
+        self.assertEqual([item["kind"] for item in public], ["music_library", "serato_drive", "user_folder"])
+        self.assertEqual([item["label"] for item in public], ["Home · /Music", "GIGDRIVE · /", "Home · /Downloads"])
+        self.assertEqual(public[0]["detail"], "/Users/dj/Music")
+        self.assertEqual(public[0]["serato"], True)
+        self.assertEqual(public[0]["removable"], False)
+        self.assertEqual(public[1]["serato"], True)
+        self.assertEqual(public[1]["removable"], True)
+        self.assertEqual(public[2]["serato"], False)
+        self.assertEqual(public[2]["missing"], True)
+        expected = hashlib.sha256(os.path.normcase(os.path.normpath("/Users/dj/Music")).encode("utf-8")).hexdigest()
+        self.assertEqual(public[0]["id"], expected)
+        self.assertEqual(public[0]["id"], music_roots.root_id("/Users/dj/Music"))
+
+        music_roots.invalidate()
+        with self.subTest("cache"):
+            from unittest import mock
+
+            stamps = iter(["2026-10-29T13:00:00Z", "2026-10-29T13:05:00Z"])
+
+            def stamped() -> str:
+                return next(stamps)
+
+            with mock.patch.object(music_roots, "track_directories", lambda: []):
+                with mock.patch.object(music_roots, "_computed_at", stamped):
+                    first = music_roots.library_roots(refresh=True)
+                    second = music_roots.library_roots()
+                    third = music_roots.library_roots(refresh=True)
+            self.assertEqual(first["computed_at"], "2026-10-29T13:00:00Z")
+            self.assertEqual(second["computed_at"], first["computed_at"])
+            self.assertEqual(third["computed_at"], "2026-10-29T13:05:00Z")
+            self.assertEqual(first["roots"], [])
+
+    def test_http_library_roots_accepts_refresh(self) -> None:
+        """Serve the contract from GET /api/library-roots.
+
+        Returns:
+            None. The test fails if refresh is ignored or the shape is wrong.
+        """
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        import server
+
+        music_roots.invalidate()
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        base = f"http://{host}:{port}"
+        try:
+            import json
+            import urllib.request
+
+            with urllib.request.urlopen(base + "/api/library-roots", timeout=5) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(response.status, 200)
+            self.assertIn("computed_at", body)
+            self.assertIsInstance(body["roots"], list)
+            with urllib.request.urlopen(base + "/api/library-roots?refresh=1", timeout=5) as again:
+                refreshed = json.loads(again.read().decode("utf-8"))
+            self.assertIn("roots", refreshed)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=3)
+
+
 if __name__ == "__main__":
     unittest.main()

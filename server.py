@@ -26,6 +26,7 @@ import app_config
 import app_log
 import files
 import library
+import music_roots
 import rekordbox
 import related
 import setup_flow
@@ -1568,6 +1569,11 @@ class Handler(BaseHTTPRequestHandler):
                 space = require_space(query_text(query, "space"))
                 groups = as_dicts(_library_call("duplicate_groups", space))
                 self.send_json({"space": space, "groups": groups, "count": len(groups)})
+                return
+            if parsed.path == "/api/library-roots":
+                raw_refresh = query_text(query, "refresh", "") or ""
+                refresh = raw_refresh.lower() in {"1", "true", "yes"}
+                self.send_json(music_roots.library_roots(refresh=refresh))
                 return
             if parsed.path == "/api/files":
                 raw_elsewhere = query_text(query, "elsewhere", "") or ""

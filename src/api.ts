@@ -9,6 +9,9 @@ import type {
   CrateWriteResult,
   ErrorBody,
   FilesPayload,
+  LibraryRoot,
+  LibraryRootKind,
+  LibraryRootsPayload,
   LogsPayload,
   MergePreview,
   RelatedPayload,
@@ -58,6 +61,54 @@ export function seratoFrom(error: unknown): SeratoStatus | null {
  * Sends Content-Type application/json. A failed response becomes an Error
  * with status and payload so callers can recognize a 409 lock.
  */
+const ROOT_KINDS: readonly LibraryRootKind[] = ["music_library", "serato_drive", "user_folder"];
+
+/**
+ * Return whether a JSON value is one library root.
+ *
+ * @param value Candidate from GET /api/library-roots.
+ * @returns True when every contract field has the right type.
+ */
+export function isLibraryRoot(value: unknown): value is LibraryRoot {
+  if (!value || typeof value !== "object") return false;
+  const record = value as LibraryRoot;
+  return typeof record.id === "string"
+    && typeof record.path === "string"
+    && typeof record.label === "string"
+    && typeof record.detail === "string"
+    && ROOT_KINDS.includes(record.kind)
+    && typeof record.serato === "boolean"
+    && typeof record.removable === "boolean"
+    && typeof record.missing === "boolean";
+}
+
+/**
+ * Read the music roots for this launch.
+ *
+ * `refresh` asks the server to recompute. Otherwise the cached list is
+ * returned, including `computed_at` from that read.
+ *
+ * @param refresh When true, send `refresh=1`.
+ * @returns The roots and the time they were computed.
+ */
+export async function fetchLibraryRoots(refresh = false): Promise<LibraryRootsPayload> {
+  const response = await fetch(refresh ? "/api/library-roots?refresh=1" : "/api/library-roots");
+  const payload = await readJSONOr<LibraryRootsPayload & ErrorBody>(response, {
+    roots: [],
+    computed_at: "",
+  });
+  if (!response.ok) {
+    const error = new Error(payload.error || "Music folders could not be read.") as ApiFailure;
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+  return {
+    roots: Array.isArray(payload.roots) ? payload.roots.filter(isLibraryRoot) : [],
+    computed_at: typeof payload.computed_at === "string" ? payload.computed_at : "",
+  };
+}
+
 export async function postJSON<T = ServerReply>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
     method: "POST",

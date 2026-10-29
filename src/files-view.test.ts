@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileEntry } from "./api-types";
 import { bridge } from "./bridge";
 import { wireDialogs } from "./dialogs";
+import { libraryRootsFixture } from "./library-roots.fixture";
 import { FILE_ROW, state } from "./state";
 import { installPage } from "./test-page";
 import { renderFiles, wireLibrary } from "./views";
@@ -52,17 +53,18 @@ describe("files view", () => {
     wireLibrary();
   });
 
-  it("lists named roots with folder and drive icons, and keeps Up off", () => {
+  it("lists distinct labels with the path under each one", () => {
     state.filesAtRoots = true;
-    state.filesRoots = [
-      { name: "Home · /Music", path: "/Users/dj/Music", kind: "folder" },
-      { name: "GIGDRIVE · /Music", path: "/Volumes/GIGDRIVE/Music", kind: "folder" },
-    ];
+    state.filesRoots = libraryRootsFixture.roots.filter((root) => !root.missing);
     renderFiles();
 
     const rows = [...document.querySelectorAll<HTMLElement>("#files-list .files-row")].map((row) => row.textContent ?? "");
     expect(rows[0]).toContain("Home · /Music");
+    expect(rows[0]).toContain("/Users/dj/Music");
     expect(rows[1]).toContain("GIGDRIVE · /Music");
+    expect(rows[1]).toContain("/Volumes/GIGDRIVE/Music");
+    expect(rows[0]).not.toBe(rows[1]);
+    expect(document.querySelectorAll(".files-root-detail")).toHaveLength(2);
     expect(document.querySelectorAll(".files-icon-folder")).toHaveLength(2);
     expect(document.querySelector(".files-primary")).toBeNull();
     expect(document.querySelector("#files-elsewhere")?.textContent).toBe("Browse elsewhere…");
@@ -118,16 +120,37 @@ describe("files view", () => {
 
   it("shows a missing drive and does not open it", async () => {
     state.filesAtRoots = true;
-    state.filesRoots = [
-      { name: "GIGDRIVE · /Music", path: "/Volumes/GIGDRIVE/Music", kind: "folder" },
-      { name: "OLDDRIVE · /Music", path: "/Volumes/OLDDRIVE/Music", kind: "folder", missing: true },
-    ];
+    state.filesRoots = libraryRootsFixture.roots.filter((root) => root.label !== "Home · /Music");
     renderFiles();
-    const missing = document.querySelector("[aria-label='OLDDRIVE · /Music, missing']") as HTMLButtonElement;
-    expect(missing.textContent).toContain("Missing");
+    const missing = document.querySelector("[aria-label='OLDDRIVE · /Music, Drive not connected']") as HTMLButtonElement;
+    expect(missing.textContent).toContain("Drive not connected");
+    expect(missing.textContent).toContain("/Volumes/OLDDRIVE/Music");
     expect(missing.getAttribute("aria-disabled")).toBe("true");
+    expect(missing.closest(".files-row")?.classList.contains("is-missing")).toBe(true);
     missing.click();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the root list from GET /api/library-roots", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ telemetry_consent: false, wizard_complete: true }),
+    });
+    wireDialogs();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    fetchMock.mockClear();
+    state.filesAtRoots = true;
+    state.filesRoots = libraryRootsFixture.roots;
+    renderFiles();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => libraryRootsFixture,
+    });
+    (document.querySelector("#files-refresh") as HTMLButtonElement).click();
+    await vi.waitFor(() => {
+      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(urls).toContain("/api/library-roots?refresh=1");
+    });
   });
 
   it("uses Run setup as the only primary action when no roots exist", () => {
@@ -149,7 +172,7 @@ describe("files view", () => {
     wireDialogs();
     fetchMock.mockClear();
     state.filesAtRoots = true;
-    state.filesRoots = [{ name: "Home · /Music", path: "/music", kind: "folder" }];
+    state.filesRoots = [libraryRootsFixture.roots[0]!];
     renderFiles();
     fetchMock.mockResolvedValue({
       ok: true,

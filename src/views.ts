@@ -6,7 +6,7 @@
  * attached by wireLibrary, which app.ts calls once at startup.
  */
 
-import { failureOf, postJSON, readJSONOr } from "./api";
+import { failureOf, fetchLibraryRoots, isLibraryRoot, postJSON, readJSONOr } from "./api";
 import type {
   CopyRow,
   Crate,
@@ -27,7 +27,7 @@ import { bridge } from "./bridge";
 import { el } from "./dom";
 import { clockLabel, colorHex, compare, durationLabel, sizeLabel } from "./format";
 import { failSnapshots, loadSnapshots } from "./restore";
-import { COLOR_NAMES, COLORS, FILE_ROW, state } from "./state";
+import { COLOR_NAMES, COLORS, FILE_ROW, ROOT_ROW, state } from "./state";
 import { paintRows } from "./virtual-scroll";
 
 /**
@@ -2299,15 +2299,16 @@ let filesRequest = 0;
 const FILE_OVERSCAN = 8;
 
 /**
- * Load music roots, or one folder, from GET /api/files.
+ * Load music roots, or one folder.
  *
- * An empty path asks for the music folders. ``elsewhere`` asks to browse
- * outside those folders. Selection is cleared because the previous paths
- * are no longer the rows on screen. A success message can be kept when
- * the reload follows a save.
+ * An empty path asks GET /api/library-roots. A folder asks GET /api/files.
+ * ``elsewhere`` asks to browse outside those folders. ``refresh`` recomputes
+ * the roots. Selection is cleared because the previous paths are no longer
+ * the rows on screen. A success message can be kept when the reload follows
+ * a save.
  *
  * @param {string} path Folder to open. Empty selects the music roots.
- * @param {{keepMessage?: boolean, elsewhere?: boolean}} [options] keepMessage retains the last save note. elsewhere lists outside the roots.
+ * @param {{keepMessage?: boolean, elsewhere?: boolean, refresh?: boolean}} [options] keepMessage retains the last save note. elsewhere lists outside the roots. refresh recomputes the roots.
  * @returns {Promise<void>}
  */
 export async function loadFolder(path: string, options: { keepMessage?: boolean; elsewhere?: boolean; refresh?: boolean } = {}) {
@@ -2330,10 +2331,28 @@ export async function loadFolder(path: string, options: { keepMessage?: boolean;
     state.filesRoot = null;
   }
   renderFiles();
+  if (refresh || atRoots) {
+    const rootsPayload = await fetchLibraryRoots(refresh);
+    if (token !== filesRequest) return;
+    state.filesRoots = rootsPayload.roots.filter(isLibraryRoot);
+  }
+  if (atRoots) {
+    state.filesPath = "";
+    state.filesParent = null;
+    state.filesEntries = [];
+    state.filesBreadcrumb = [];
+    state.filesRoot = null;
+    state.filesElsewhere = false;
+    state.filesAtRoots = true;
+    state.filesTruncated = false;
+    state.filesLoading = false;
+    el("files-list").scrollTop = 0;
+    renderFiles();
+    return;
+  }
   const params = new URLSearchParams();
   if (path) params.set("path", path);
   if (elsewhere) params.set("elsewhere", "1");
-  if (refresh) params.set("refresh", "1");
   const query = params.size ? `?${params.toString()}` : "";
   const response = await fetch(`/api/files${query}`);
   const payload = await readJSONOr<FilesPayload>(response, {});
@@ -2342,7 +2361,6 @@ export async function loadFolder(path: string, options: { keepMessage?: boolean;
   state.filesPath = payload.path || "";
   state.filesParent = typeof payload.parent === "string" && payload.parent ? payload.parent : null;
   state.filesEntries = Array.isArray(payload.entries) ? payload.entries : [];
-  if (Array.isArray(payload.roots)) state.filesRoots = payload.roots.filter(isFileRoot);
   state.filesRoot = isFileRoot(payload.root) ? payload.root : null;
   state.filesBreadcrumb = Array.isArray(payload.breadcrumb) ? payload.breadcrumb.filter(isFileCrumb) : [];
   state.filesElsewhere = Boolean(payload.elsewhere);
@@ -2459,15 +2477,20 @@ function visibleCrumbs(): FileCrumb[] {
  *
  * @returns {FileEntry[]} Rows for the virtual window.
  */
+function filesRowHeight(): number {
+  return state.filesAtRoots ? ROOT_ROW : FILE_ROW;
+}
+
 function browserRows(): FileEntry[] {
   if (state.filesAtRoots) {
     return state.filesRoots.map((root) => {
       const entry: FileEntry = {
-        name: root.name,
+        name: root.label,
         path: root.path,
-        kind: root.kind === "drive" ? "drive" : "folder",
+        detail: root.detail,
+        kind: root.kind === "serato_drive" ? "drive" : "folder",
+        missing: root.missing,
       };
-      if (root.missing === true) entry.missing = true;
       return entry;
     });
   }
@@ -2515,16 +2538,17 @@ function paintFileWindow(): void {
   list.tabIndex = -1;
   if (state.filesActive >= rows.length) state.filesActive = rows.length - 1;
   if (state.filesActive < 0) state.filesActive = 0;
+  const rowHeight = filesRowHeight();
   const view = list.clientHeight || 600;
-  const maxScroll = Math.max(0, rows.length * FILE_ROW - view);
+  const maxScroll = Math.max(0, rows.length * rowHeight - view);
   const scrollTop = Math.min(Math.max(0, list.scrollTop), maxScroll);
-  const start = Math.max(0, Math.floor(scrollTop / FILE_ROW) - FILE_OVERSCAN);
-  const end = Math.min(rows.length, Math.ceil((scrollTop + view) / FILE_ROW) + FILE_OVERSCAN);
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - FILE_OVERSCAN);
+  const end = Math.min(rows.length, Math.ceil((scrollTop + view) / rowHeight) + FILE_OVERSCAN);
   const spacer = fileSpacer(list);
   const windowEl = spacer.querySelector<HTMLDivElement>(".files-window");
   if (!windowEl) return;
-  spacer.style.height = `${rows.length * FILE_ROW}px`;
-  windowEl.style.transform = `translateY(${start * FILE_ROW}px)`;
+  spacer.style.height = `${rows.length * rowHeight}px`;
+  windowEl.style.transform = `translateY(${start * rowHeight}px)`;
   windowEl.replaceChildren();
   for (let index = start; index < end; index += 1) {
     const entry = rows[index];
@@ -2604,11 +2628,12 @@ function focusFilesIndex(index: number): void {
   if (!rows.length) return;
   state.filesActive = Math.max(0, Math.min(rows.length - 1, index));
   const list = el("files-list");
+  const rowHeight = filesRowHeight();
   const view = list.clientHeight || 600;
-  const top = state.filesActive * FILE_ROW;
-  const maxScroll = Math.max(0, rows.length * FILE_ROW - view);
+  const top = state.filesActive * rowHeight;
+  const maxScroll = Math.max(0, rows.length * rowHeight - view);
   if (top < list.scrollTop) list.scrollTop = top;
-  if (top + FILE_ROW > list.scrollTop + view) list.scrollTop = Math.min(maxScroll, top + FILE_ROW - view);
+  if (top + rowHeight > list.scrollTop + view) list.scrollTop = Math.min(maxScroll, top + rowHeight - view);
   paintFileWindow();
   const control = list.querySelector<HTMLElement>(`[data-files-index="${state.filesActive}"]`);
   control?.focus();
@@ -2686,6 +2711,8 @@ function onFilesKey(event: KeyboardEvent): void {
 function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "files-row";
+  if (entry.detail) row.classList.add("is-root");
+  if (entry.missing) row.classList.add("is-missing");
   if (index === state.filesActive) row.classList.add("is-active");
   row.setAttribute("role", "listitem");
   const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
@@ -2697,23 +2724,35 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     button.id = `files-item-${index}`;
     button.tabIndex = index === state.filesActive ? 0 : -1;
     if (entry.kind === "drive" || entry.kind === "folder") button.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
-    const name = document.createElement("span");
-    name.textContent = entry.name;
-    button.append(name);
-    button.title = entry.name;
+    if (entry.detail) {
+      const copy = document.createElement("span");
+      copy.className = "files-root-copy";
+      const label = document.createElement("span");
+      label.className = "files-root-label";
+      label.textContent = entry.name;
+      const detail = document.createElement("span");
+      detail.className = "files-root-detail";
+      detail.textContent = entry.detail;
+      copy.append(label, detail);
+      button.append(copy);
+    } else {
+      const name = document.createElement("span");
+      name.textContent = entry.name;
+      button.append(name);
+    }
+    button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
     if (entry.missing) {
       button.setAttribute("aria-disabled", "true");
-      button.setAttribute("aria-label", `${entry.name}, missing`);
+      button.setAttribute("aria-label", `${entry.name}, Drive not connected`);
       const badge = document.createElement("span");
       badge.className = "files-badge";
-      badge.textContent = "Missing";
-      button.append(name, badge);
+      badge.textContent = "Drive not connected";
+      button.append(badge);
       button.addEventListener("click", () => {
         state.filesActive = index;
       });
     } else {
       button.setAttribute("aria-label", `Open ${entry.name}`);
-      button.append(name);
       button.addEventListener("click", () => {
         state.filesActive = index;
         openBrowserRow(entry);

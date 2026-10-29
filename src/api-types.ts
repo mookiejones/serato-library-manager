@@ -202,6 +202,7 @@ export interface FileEntry {
   path: string;
   in_library?: boolean;
   missing?: boolean;
+  detail?: string;
 }
 
 export interface FileRoot {
@@ -209,6 +210,24 @@ export interface FileRoot {
   path: string;
   kind: string;
   missing?: boolean;
+}
+
+export type LibraryRootKind = "music_library" | "serato_drive" | "user_folder";
+
+export interface LibraryRoot {
+  id: string;
+  path: string;
+  label: string;
+  detail: string;
+  kind: LibraryRootKind;
+  serato: boolean;
+  removable: boolean;
+  missing: boolean;
+}
+
+export interface LibraryRootsPayload {
+  roots: LibraryRoot[];
+  computed_at: string;
 }
 
 export interface FileCrumb {

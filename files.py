@@ -481,24 +481,29 @@ def _resolve_directory(path: str, *, elsewhere: bool, roots: list[dict[str, str]
     normalized = os.path.normpath(os.path.abspath(path))
     drive, _rest = os.path.splitdrive(normalized)
     anchor = drive + os.sep if drive else os.path.abspath(os.sep)
-    if not os.path.normcase(normalized).startswith(os.path.normcase(anchor)):
-        raise library.LibraryError("That folder could not be read.", 404)
-    requested = Path(normalized)
-    _refuse_deep_symlink(requested)
-    try:
-        # codeql[py/path-injection]: normalized, then confined to a music root below
-        resolved = requested.resolve(strict=True)
-    except OSError as exc:
-        raise library.LibraryError("That folder could not be read.", 404) from exc
-    if not resolved.is_dir():  # codeql[py/path-injection]
-        raise library.LibraryError("That folder could not be read.", 404)
-    if elsewhere:
+    probe = os.path.normcase(normalized)
+    if not probe.endswith(os.sep):
+        probe = probe + os.sep
+    prefix = os.path.normcase(anchor)
+    if not prefix.endswith(os.sep):
+        prefix = prefix + os.sep
+    if probe.startswith(prefix):
+        requested = Path(probe)
+        _refuse_deep_symlink(requested)
+        try:
+            resolved = requested.resolve(strict=True)
+        except OSError as exc:
+            raise library.LibraryError("That folder could not be read.", 404) from exc
+        if not resolved.is_dir():
+            raise library.LibraryError("That folder could not be read.", 404)
+        if elsewhere:
+            return resolved
+        match = _matching_root(resolved, roots)
+        if match is None:
+            raise library.LibraryError("That folder is outside the music folders.", 403)
+        _refuse_symlink_under_root(Path(match["path"]), requested)
         return resolved
-    match = _matching_root(resolved, roots)
-    if match is None:
-        raise library.LibraryError("That folder is outside the music folders.", 403)
-    _refuse_symlink_under_root(Path(match["path"]), requested)
-    return resolved
+    raise library.LibraryError("That folder could not be read.", 404)
 
 
 def _refuse_deep_symlink(path: Path) -> None:
@@ -517,7 +522,7 @@ def _refuse_deep_symlink(path: Path) -> None:
     current = path
     while True:
         try:
-            linked = current.is_symlink()  # codeql[py/path-injection]
+            linked = current.is_symlink()
         except OSError as exc:
             raise library.LibraryError("That folder could not be read.", 404) from exc
         if linked and _path_depth(current) > 2:
@@ -561,7 +566,6 @@ def _refuse_symlink_under_root(root: Path, requested: Path) -> None:
     probe = requested
     while True:
         try:
-            # codeql[py/path-injection]: finds the music root before any shortcut under it
             if probe.exists() and probe.resolve() == root_resolved:
                 matched = probe
                 break
@@ -580,7 +584,7 @@ def _refuse_symlink_under_root(root: Path, requested: Path) -> None:
     for part in relative.parts:
         current = current / part
         try:
-            if current.is_symlink():  # codeql[py/path-injection]
+            if current.is_symlink():
                 raise library.LibraryError("Shortcuts are left alone.")
         except OSError as exc:
             raise library.LibraryError("That folder could not be read.", 404) from exc
@@ -624,7 +628,6 @@ def _within(child: Path, parent: Path) -> bool:
         True when the resolved child stays inside the resolved parent.
     """
     try:
-        # codeql[py/path-injection]: resolved text is only compared, never opened
         child_text = os.path.normcase(os.path.normpath(str(child.resolve())))
         parent_text = os.path.normcase(os.path.normpath(str(parent.resolve())))
     except OSError:
@@ -655,7 +658,7 @@ def _parent_path(directory: Path, root: dict[str, str] | None, *, elsewhere: boo
     if root is None:
         return None
     try:
-        if directory.resolve() == Path(root["path"]).resolve():  # codeql[py/path-injection]
+        if directory.resolve() == Path(root["path"]).resolve():
             return None
     except OSError:
         return None
@@ -677,7 +680,7 @@ def _breadcrumb(directory: Path, root: dict[str, str] | None, *, elsewhere: bool
         root_path = Path(root["path"])
         crumbs = [{"name": root["name"], "path": str(root_path)}]
         try:
-            relative = directory.resolve().relative_to(root_path.resolve())  # codeql[py/path-injection]
+            relative = directory.resolve().relative_to(root_path.resolve())
         except (OSError, ValueError):
             return crumbs
         current = root_path
@@ -702,7 +705,7 @@ def _elsewhere_breadcrumb(directory: Path) -> list[dict[str, str]]:
     """
     try:
         home = Path.home().resolve()
-        resolved = directory.resolve()  # codeql[py/path-injection]
+        resolved = directory.resolve()
     except OSError:
         home = Path.home()
         resolved = directory
