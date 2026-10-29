@@ -710,26 +710,26 @@ class LibraryRootsContractTests(unittest.TestCase):
         import os
 
         music = {
-            "name": "Home · /Music",
+            "name": "Music (dj)",
             "path": "/Users/dj/Music",
             "kind": "folder",
             "missing": False,
         }
         drive = {
-            "name": "GIGDRIVE · /",
+            "name": "GIGDRIVE",
             "path": "/Volumes/GIGDRIVE",
             "kind": "drive",
             "missing": False,
         }
         downloads = {
-            "name": "Home · /Downloads",
+            "name": "Downloads (dj)",
             "path": "/Users/dj/Downloads",
             "kind": "folder",
             "missing": True,
         }
         public = [music_roots.to_library_root(item) for item in (music, drive, downloads)]
         self.assertEqual([item["kind"] for item in public], ["music_library", "serato_drive", "music_library"])
-        self.assertEqual([item["label"] for item in public], ["Home · /Music", "GIGDRIVE · /", "Home · /Downloads"])
+        self.assertEqual([item["label"] for item in public], ["Music (dj)", "GIGDRIVE", "Downloads (dj)"])
         user = music_roots.to_library_root(
             {"name": "Sets", "path": "/Users/dj/Sets", "kind": "user_folder", "missing": False}
         )
@@ -798,6 +798,77 @@ class LibraryRootsContractTests(unittest.TestCase):
             httpd.shutdown()
             httpd.server_close()
             thread.join(timeout=3)
+
+    def test_http_library_roots_uses_the_public_kinds(self) -> None:
+        """Return one library folder and one Serato drive over HTTP.
+
+        The fixture has a track in Music and a mounted drive with
+        ``_Serato_`` and no tracks. The JSON uses the public kinds only.
+
+        Returns:
+            None. The test fails if a root is still called folder or drive,
+            or if a contract field is missing.
+        """
+        import json
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+
+        import server
+
+        contract = {"id", "path", "label", "detail", "kind", "serato", "removable", "missing"}
+        allowed = {"music_library", "serato_drive", "user_folder"}
+        with TempLibrary() as temp:
+            music_roots.invalidate()
+            music = temp.root / "Music"
+            music.mkdir()
+            track = music / "a.mp3"
+            track.write_bytes(b"a")
+            volumes = temp.root / "Volumes"
+            gig = volumes / "GIGDRIVE"
+            (gig / "_Serato_").mkdir(parents=True)
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 1", (str(track),))
+                conn.execute("DELETE FROM asset WHERE id != 1")
+            real_volumes = music_roots.serato_volumes
+
+            def volumes_fn(platform: str, **kwargs: object) -> list[tuple[Path, str]]:
+                del platform, kwargs
+                return real_volumes("darwin", volumes_root=volumes)
+
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            host, port = httpd.server_address
+            try:
+                with mock.patch.object(music_roots, "serato_volumes", volumes_fn):
+                    music_roots.invalidate()
+                    with urllib.request.urlopen(
+                        f"http://{host}:{port}/api/library-roots?refresh=1",
+                        timeout=5,
+                    ) as response:
+                        self.assertEqual(response.status, 200)
+                        body = json.loads(response.read().decode("utf-8"))
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=3)
+        self.assertIsInstance(body["computed_at"], str)
+        roots = body["roots"]
+        self.assertGreaterEqual(len(roots), 2)
+        for root in roots:
+            self.assertEqual(set(root), contract)
+            self.assertIn(root["kind"], allowed)
+            self.assertNotIn(root["kind"], {"folder", "drive"})
+        library_rows = [root for root in roots if root["kind"] == "music_library"]
+        drive_rows = [root for root in roots if root["kind"] == "serato_drive"]
+        self.assertEqual(len(library_rows), 1)
+        self.assertTrue(str(library_rows[0]["path"]).replace("\\", "/").endswith("/Music"))
+        self.assertEqual(len(drive_rows), 1)
+        self.assertTrue(str(drive_rows[0]["path"]).replace("\\", "/").endswith("/GIGDRIVE"))
+        self.assertTrue(drive_rows[0]["serato"])
+        self.assertFalse(drive_rows[0]["missing"])
 
 
 class ReviewTests(unittest.TestCase):

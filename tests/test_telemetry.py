@@ -25,7 +25,10 @@ try:
     import sentry_sdk
 except ImportError:
     sentry_sdk = None
-from posthog import Posthog
+try:
+    from posthog import Posthog
+except ImportError:
+    Posthog = None
 from tests.fixture import TempLibrary, open_database
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -448,6 +451,7 @@ class ScrubTests(TelemetryCase):
         self.assertEqual(disabled, {"ArgvIntegration", "LoggingIntegration"})
 
 
+@unittest.skipUnless(Posthog is not None, "posthog is not installed")
 class PosthogHookTests(TelemetryCase):
     """The real PostHog client calls the allowlist hook before upload."""
 
