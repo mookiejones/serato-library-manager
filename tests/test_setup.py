@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -641,6 +642,7 @@ class ChosenLibraryTests(unittest.TestCase):
         library.MASTER = self._old_master
         library._backed_up.clear()
         library._backed_up.update(self._old_backed)
+        setup_flow._set_remembered_missing(False)
         server.invalidate()
         self._tmp.cleanup()
 
@@ -783,6 +785,113 @@ class ChosenLibraryTests(unittest.TestCase):
         setup_flow.apply_remembered_library()
         self.assertEqual(library.MASTER, self.missing)
         self.assertEqual(plain_db.read_bytes(), b"not a database")
+        described = setup_flow.describe_library()
+        self.assertNotIn(setup_flow.REMEMBERED_MISSING_NOTE, str(described["summary"]))
+
+    def test_missing_remembered_library_tells_you_the_usual_one_is_in_use(self) -> None:
+        """Say so when a remembered library is gone and the usual one is used.
+
+        The setup response is the sentence the library step shows. It does
+        not include the missing path.
+
+        Returns:
+            None. The test fails if the usual library is hidden or the
+            sentence is absent.
+        """
+        library.MASTER = self.db
+        gone = self.folder.parent / "gone" / "master.sqlite"
+        app_config.remember_library(gone)
+        setup_flow.apply_remembered_library()
+        self.assertEqual(Path(library.MASTER).resolve(), self.db.resolve())
+        status, payload = _request(self.base, "/api/setup")
+        self.assertEqual(status, 200)
+        assert isinstance(payload, dict)
+        self.assertTrue(payload["found"])
+        self.assertIn(setup_flow.REMEMBERED_MISSING_NOTE, str(payload["summary"]))
+        self.assertIn("usual place", str(payload["summary"]))
+        reported = json.dumps(payload)
+        self.assertNotIn(str(gone), reported)
+        self.assertNotIn("master.sqlite", reported)
+
+    def test_library_check_creates_no_sidecars(self) -> None:
+        """Leave the library folder free of wal, shm, and journal files.
+
+        A rollback database and a WAL database are both checked. The WAL
+        file already holds the Serato tables. The check reads a copy, so
+        it does not create those sidecars beside the original.
+
+        Returns:
+            None. The test fails if a sidecar appears or the WAL library
+            is not recognized.
+        """
+        folder = self.folder.parent / "check"
+        folder.mkdir()
+        db = folder / "master.sqlite"
+        build_database(db)
+        self.assertTrue(library.is_serato_database(db))
+        self.assertEqual(_sidecar_names(folder), set())
+        wal = _write_wal_library(db)
+        self.assertTrue(wal.is_file())
+        self.assertFalse((folder / "master.sqlite-shm").exists())
+        self.assertFalse((folder / "master.sqlite-journal").exists())
+        wal_bytes = wal.read_bytes()
+        db_bytes = db.read_bytes()
+        self.assertTrue(library.is_serato_database(db))
+        self.assertEqual(wal.read_bytes(), wal_bytes)
+        self.assertEqual(db.read_bytes(), db_bytes)
+        self.assertEqual(_sidecar_names(folder), {"master.sqlite-wal"})
+
+
+def _sidecar_names(folder: Path) -> set[str]:
+    """Return wal, shm, and journal names in one library folder.
+
+    Args:
+        folder: Directory that holds ``master.sqlite``.
+
+    Returns:
+        File names that end with those suffixes.
+    """
+    found: set[str] = set()
+    for path in folder.iterdir():
+        if path.name.endswith(("-wal", "-shm", "-journal")):
+            found.add(path.name)
+    return found
+
+
+def _write_wal_library(db: Path) -> Path:
+    """Rewrite ``db`` as a WAL library whose tables live in the wal file.
+
+    Args:
+        db: Database to replace. Parent directories must exist.
+
+    Returns:
+        The ``-wal`` file. No ``-shm`` file is left beside ``db``.
+
+    The connection does not checkpoint on close. The shared-memory file
+    created while it was open is removed before this returns, so a later
+    check is what would put it back.
+    """
+    if db.exists():
+        db.unlink()
+    conn = sqlite3.connect(db)
+    try:
+        conn.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA wal_autocheckpoint=0")
+        conn.executescript(
+            """
+            CREATE TABLE asset (id INTEGER);
+            CREATE TABLE container (id INTEGER);
+            CREATE TABLE space (id INTEGER);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    shm = Path(str(db) + "-shm")
+    if shm.exists():
+        shm.unlink()
+    return Path(str(db) + "-wal")
 
 
 class _ArtSlots(HTMLParser):

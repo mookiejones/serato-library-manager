@@ -28,6 +28,11 @@ PICK_FAILED_NEXT = (
     "Choose the folder that contains your library, "
     "or open Serato DJ once, quit it, and choose Check again."
 )
+REMEMBERED_MISSING_NOTE = (
+    "The library you chose before is not on this computer. "
+    "This is the library in the usual place."
+)
+_remembered_missing = False
 WRONG_FOLDER_SUMMARY = "That folder is not the Serato library on this computer."
 WRONG_FOLDER_NEXT = (
     "Choose Check again to use the library that was found, "
@@ -101,11 +106,14 @@ def describe_library() -> dict[str, object]:
     count = _track_count(master)
     places = _extra_places(volume)
     message = info.get("message")
+    summary = _found_summary(volume, count, places)
+    if _remembered_missing:
+        summary = f"{summary} {REMEMBERED_MISSING_NOTE}"
     return {
         "found": True,
         "volume": volume,
         "track_count": count,
-        "summary": _found_summary(volume, count, places),
+        "summary": summary,
         "next": None,
         "places": places,
         "serato_running": running,
@@ -169,12 +177,14 @@ def apply_remembered_library() -> None:
     """Point the process at a library chosen on an earlier launch.
 
     Returns:
-        None. A missing choice, a shortcut, a missing file, or a file
-        that is not a Serato library leaves the usual path in place.
+        None. A missing choice, a shortcut, or a file that is not a
+        Serato library leaves the usual path in place. A missing
+        remembered file does too, and setup then says so.
 
     The database is not created or modified. This does not run when the
     usual library is only being confirmed.
     """
+    _set_remembered_missing(False)
     try:
         saved = app_config.load_remembered_library()
     except OSError:
@@ -182,13 +192,27 @@ def apply_remembered_library() -> None:
     if saved is None:
         return
     try:
-        if saved.is_symlink() or not saved.is_file():
+        if saved.is_symlink():
+            return
+        if not saved.is_file():
+            _set_remembered_missing(True)
             return
         if not library.is_serato_database(saved):
             return
         library.use_library_file(saved)
     except (library.LibraryError, OSError):
         return
+
+
+def _set_remembered_missing(value: bool) -> None:
+    """Remember whether the chosen library file was missing.
+
+    Args:
+        value: True when setup should say the earlier choice is gone
+            and the usual library is in use.
+    """
+    global _remembered_missing
+    _remembered_missing = value
 
 
 def _adopt_unopened_library(directory: Path) -> bool:
@@ -217,6 +241,7 @@ def _adopt_unopened_library(directory: Path) -> bool:
         library.use_library_file(candidate)
     except (library.LibraryError, OSError):
         return False
+    _set_remembered_missing(False)
     try:
         remembered = Path(library.MASTER)
         default = Path(library.LIVE_MASTER)

@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -288,27 +289,58 @@ def is_serato_database(path: Path) -> bool:
             SQLite file is not a Serato library.
 
     Returns:
-        True when the file can be opened read-only and has the ``asset``,
-        ``container``, and ``space`` tables. The file is not created or
-        modified.
+        True when a temporary copy has the ``asset``, ``container``, and
+        ``space`` tables. The library folder is not opened as a database,
+        so the check creates no ``-wal``, ``-shm``, or journal file there.
     """
     candidate = Path(path)
     try:
         if candidate.is_symlink() or not candidate.is_file():
             return False
-    except OSError:
+        names = _serato_table_names(candidate)
+    except (OSError, sqlite3.Error):
         return False
-    try:
-        with closing(read_conn(candidate)) as conn:
+    return names == {"asset", "container", "space"}
+
+
+def _serato_table_names(path: Path) -> set[str]:
+    """Read Serato table names from a temporary copy.
+
+    Args:
+        path: ``master.sqlite`` to copy. It is not opened.
+
+    Returns:
+        Table names from the copy. The set is empty when the file has
+        none of the three Serato tables.
+
+    Raises:
+        OSError: If the copy cannot be made.
+        sqlite3.Error: If the copy cannot be read.
+
+    ``master.sqlite`` and an existing ``-wal`` file are copied into a
+    temporary directory. A ``-wal`` shortcut is left behind so the check
+    cannot follow it. The copy is opened read-only. Any ``-shm`` file
+    SQLite creates stays in that temporary directory.
+    """
+    wal = Path(str(path) + "-wal")
+    with tempfile.TemporaryDirectory(prefix="serato-library-check-") as raw:
+        root = Path(raw)
+        copied = root / "master.sqlite"
+        shutil.copyfile(path, copied)
+        if wal.is_file() and not wal.is_symlink():
+            shutil.copyfile(wal, root / "master.sqlite-wal")
+        uri = f"file:{copied.resolve()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True)
+        try:
             rows = conn.execute(
                 """
                 SELECT name FROM sqlite_master
                 WHERE type = 'table' AND name IN ('asset', 'container', 'space')
                 """
             ).fetchall()
-    except (LibraryError, sqlite3.Error, OSError):
-        return False
-    return {row[0] for row in rows} == {"asset", "container", "space"}
+        finally:
+            conn.close()
+    return {str(row[0]) for row in rows}
 
 
 def use_library_file(path: Path) -> None:
@@ -325,8 +357,9 @@ def use_library_file(path: Path) -> None:
         LibraryError: If the path is not an absolute ``master.sqlite``
             file, is a shortcut, or is not a Serato library.
 
-    The database is opened read-only to check its tables. Nothing is
-    written, and no backup is taken, because the file is not changed.
+    The tables are read from a temporary copy. The library folder gains
+    no ``-wal``, ``-shm``, or journal file, and no backup is taken,
+    because the file is not changed.
     """
     global MASTER
     candidate = Path(path)
