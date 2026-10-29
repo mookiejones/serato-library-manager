@@ -96,7 +96,7 @@ A GET path under `/api/` runs a query. Any other GET path is a file in `static/`
 
 `load_library` caches one payload per space. The cache key is the size and modification time of `master.sqlite` and its WAL file. A cache miss can record `library_scanned` with a track-count bucket. A POST takes a process lock, drops that cache, then writes. Settings and log routes are answered before that lock. `serve` calls `files.recover_interrupted` after the database is known to exist. A journal that cannot be repaired is logged. The server still starts.
 
-The HTTP banner is `SeratoLibrary/1.0`. A release tag does not change that banner. The app version is `app_config.APP_VERSION` (`1.1.0`). `__version__` is that same string. Sentry's release and PostHog's `app_version` read the constant.
+The HTTP banner is `SeratoLibrary/1.0`. A release tag does not change that banner. The package version is `app_config.APP_VERSION` (`1.1.0`). `__version__` is that same string. Sentry's release and PostHog's `app_version` read the constant. `GET /api/version` reports a different string: the release tag when the build was stamped, otherwise `git describe`, otherwise `0.0.0+dev`. The release workflow writes `_version.py` from the tag before PyInstaller runs. A development checkout leaves `VERSION` empty. `version_info.resolve` does not raise when git is missing.
 
 `load_track` returns every column listed in `FIELDS`, plus the edit form, crate membership, near-duplicate copies, Prepare membership, the resolved file path, and marker data. Copies share title, artist, and length in whole seconds. The query returns at most 12 copies.
 
@@ -271,6 +271,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | Method | Path | Query or body | Result |
 |--------|------|---------------|--------|
 | GET | `/api/health` | none | `{"ok": true}`. Does not open the library |
+| GET | `/api/version` | none | `version`, `commit`, and `source`. Does not open the library. `version` is the release tag (`v1.2.3`, `v1.2.3-rc1`, or `v1.2.3-beta1`) when the build was stamped from that tag. A development checkout uses `git describe --tags --always --dirty`. When git is missing or fails, `version` is `0.0.0+dev`. `commit` is the first 12 hex digits of the commit, or `null`. `source` is `release`, `git`, or `dev` |
 | POST | `/api/shutdown` | header `X-Serato-Library-Shutdown` | Stops the desktop server when the token matches. 404 when no token is set. 403 when it does not match |
 | POST | `/api/focus` | header `X-Serato-Library-Focus` | Brings the desktop window forward when the token matches. 404 when no token is set. 403 when it does not match. The token is not in the page |
 | GET | `/api/status` | none | Lock status |
@@ -290,7 +291,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | POST | `/api/import.m3u` | `space`, `parent`, `name`, `text` | New crate from playlist text |
 | POST | `/api/reveal` | `id` | Reveals the file in Finder or File Explorer |
 | POST | `/api/related` | `action` `add`, `remove`, or `crate` | Saves or removes a sidecar link, or writes the `Related - ` crate |
-| GET | `/api/settings` | none | `telemetry_consent` (`true`, `false`, or `null`), `needs_consent_prompt`, `wizard_complete`, `telemetry_configured`, `app_version`, `layout` (`track_list_width`, an integer or `null`), and `rekordbox` (`hot_loops`, `memory_cues`, `key_notation`). The install id and the keys are omitted |
+| GET | `/api/settings` | none | `telemetry_consent` (`true`, `false`, or `null`), `needs_consent_prompt`, `wizard_complete`, `telemetry_configured`, `app_version`, `layout` (`track_list_width`, an integer or `null`), and `rekordbox` (`hot_loops`, `memory_cues`, `key_notation`). `app_version` is `app_config.APP_VERSION` (`1.1.0`), not the release tag. The release tag is `GET /api/version`. The install id and the keys are omitted |
 | POST | `/api/settings` | `telemetry_consent` and/or `rekordbox` | Saves the boolean sharing choice, the export bar, or both. `rekordbox.hot_loops` and `rekordbox.memory_cues` must be booleans. `rekordbox.key_notation` must be `asis`, `camelot`, or `classical`. Any other field, or a wrong type, returns 400 and leaves the file unchanged |
 | POST | `/api/settings` | `wizard_complete` | Saves whether setup finished. The body must be that one boolean field. True before a sharing choice returns 400 |
 | POST | `/api/settings` | `layout` | `{"track_list_width": int}` saves the track list width. `null` resets the default split. Any other field, a bool, a float, or a width outside 240..8192 returns 400 |
@@ -308,7 +309,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 
 A restore plan has `crates` (`added`, `removed`, `changed`, `unavailable`), `tracks` (`added`, `removed`, `unavailable`), `cues`, `grids`, `dry_run`, and `restore_blocked`. `cues` and `grids` are one row per file that would change. An unavailable drive is not listed as removed.
 
-`GET /api/settings`, `GET /api/setup`, and `GET /api/logs` do not take the library write lock. `POST /api/settings`, `POST /api/setup`, and `POST /api/logs/open` are handled before that lock. `GET /api/related` and `POST /api/related` with `add` or `remove` write only the sidecar file and do not take that lock. `action` `crate` takes the lock, then `library.crate_action`. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
+`GET /api/version` is answered with health, before any library call. `GET /api/settings`, `GET /api/setup`, and `GET /api/logs` do not take the library write lock. `POST /api/settings`, `POST /api/setup`, and `POST /api/logs/open` are handled before that lock. `GET /api/related` and `POST /api/related` with `add` or `remove` write only the sidecar file and do not take that lock. `action` `crate` takes the lock, then `library.crate_action`. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
 
 `GET /api/library` crate objects use `id`, `parent`, `name`, `smart`, `order`, `color`, `expanded`, `added`, `tracks`, and `rules` on smart crates. The space root crate is omitted. `root_id` is returned separately.
 
