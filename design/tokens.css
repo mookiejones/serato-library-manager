@@ -32,4 +32,10 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+
+  /* Spot illustrations. Roles use the tokens above. No separate hex. */
+  --illus-primary: var(--color-primary);
+  --illus-surface: var(--color-card);
+  --illus-ink: var(--color-text);
+  --illus-accent: var(--color-safe);
 }
