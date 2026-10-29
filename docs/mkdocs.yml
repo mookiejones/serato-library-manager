@@ -16,6 +16,7 @@ exclude_docs: |
   related-tracks.md
   serato-library-tools.md
   wiki/*.md
+  agents/*.md
 
 theme:
   name: material
