@@ -1010,6 +1010,130 @@ class FileManagerTests(unittest.TestCase):
         self.assertIn("Move to Trash", script)
         self.assertNotIn("innerHTML", script)
 
+    def test_empty_browse_lists_music_roots(self) -> None:
+        """Open Files on the music folder, not the computer root.
+
+        Returns:
+            None. The test fails if the home directory is listed.
+        """
+        listed = files.list_directory("")
+        self.assertEqual(listed["path"], "")
+        self.assertIsNone(listed["parent"])
+        self.assertFalse(listed["elsewhere"])
+        self.assertEqual(listed["entries"], [])
+        match = next(item for item in listed["roots"] if item["path"] == str(self.music.resolve()))
+        self.assertEqual(match["name"], "music")
+
+    def test_browse_stays_inside_the_music_root(self) -> None:
+        """Refuse a parent, a prefixed sibling, and a path that climbs out.
+
+        A child folder is listed. Up is unavailable on the root itself.
+        ``elsewhere`` lists the parent.
+
+        Returns:
+            None. The test fails if a path outside the music folder is opened.
+        """
+        with self.assertRaises(library.LibraryError) as outside:
+            files.list_directory(str(self.library.root))
+        self.assertEqual(outside.exception.status, 403)
+        self.assertEqual(outside.exception.message, "That folder is outside the music folders.")
+        sibling = self.library.root / "music-extra"
+        sibling.mkdir()
+        with self.assertRaises(library.LibraryError) as prefixed:
+            files.list_directory(str(sibling))
+        self.assertEqual(prefixed.exception.status, 403)
+        with self.assertRaises(library.LibraryError):
+            files.list_directory(str(self.music / ".."))
+        opened = files.list_directory(str(self.music))
+        self.assertIsNone(opened["parent"])
+        self.assertEqual(opened["breadcrumb"][0]["path"], str(self.music.resolve()))
+        self.assertEqual(opened["breadcrumb"][0]["name"], "music")
+        child = self.music / "Crates"
+        child.mkdir()
+        inner = files.list_directory(str(child))
+        self.assertEqual(inner["parent"], str(self.music.resolve()))
+        self.assertEqual(inner["breadcrumb"][1]["name"], "Crates")
+        self.assertEqual(inner["breadcrumb"][0]["path"], str(self.music.resolve()))
+        wider = files.list_directory(str(self.library.root), elsewhere=True)
+        self.assertTrue(wider["elsewhere"])
+        self.assertEqual(wider["path"], str(self.library.root.resolve()))
+
+    def test_a_shortcut_cannot_leave_the_music_root(self) -> None:
+        """Refuse a shortcut and a folder reached through that shortcut.
+
+        Returns:
+            None. The test fails if the target directory is listed.
+        """
+        secret = self.library.root / "secret"
+        secret.mkdir()
+        (secret / "nested").mkdir()
+        link = self.music / "escape"
+        try:
+            link.symlink_to(secret, target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks are not available")
+        with self.assertRaises(library.LibraryError) as caught:
+            files.list_directory(str(link))
+        self.assertEqual(caught.exception.message, "Shortcuts are left alone.")
+        with self.assertRaises(library.LibraryError) as nested:
+            files.list_directory(str(link / "nested"))
+        self.assertEqual(nested.exception.message, "Shortcuts are left alone.")
+        with self.assertRaises(library.LibraryError) as escaped:
+            files.list_directory(str(link / "nested"), elsewhere=True)
+        self.assertEqual(escaped.exception.message, "Shortcuts are left alone.")
+
+    def test_more_than_5000_entries_are_all_listed_folders_first(self) -> None:
+        """Return every name in a large folder, with folders before files.
+
+        Returns:
+            None. The test fails if the last file is missing or a file sorts first.
+        """
+        folder = self.music / "crate"
+        folder.mkdir()
+        total = 5001
+        for index in range(total):
+            (folder / f"file-{index:05d}.mp3").write_bytes(b"")
+        (folder / "zzz-folder").mkdir()
+        listed = files.list_directory(str(folder))
+        names = [entry["name"] for entry in listed["entries"]]
+        self.assertEqual(len(names), total + 1)
+        self.assertFalse(listed["truncated"])
+        self.assertEqual(names[0], "zzz-folder")
+        self.assertEqual(listed["entries"][0]["kind"], "dir")
+        self.assertEqual(names[-1], "file-05000.mp3")
+        self.assertLess(names.index("zzz-folder"), names.index("file-00000.mp3"))
+
+    def test_http_browse_refuses_a_path_outside_the_roots(self) -> None:
+        """Refuse an outside path over HTTP unless elsewhere is set.
+
+        Returns:
+            None. The test fails if the outside path is listed by default.
+        """
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        base = f"http://{host}:{port}"
+        outside = urllib.request.quote(str(self.library.root))
+        try:
+            roots_status, roots = _request(base, "/api/files")
+            self.assertEqual(roots_status, 200)
+            assert isinstance(roots, dict)
+            self.assertEqual(roots["path"], "")
+            self.assertTrue(any(str(item["path"]) == str(self.music.resolve()) for item in roots["roots"]))
+            denied_status, denied = _request(base, f"/api/files?path={outside}")
+            self.assertEqual(denied_status, 403)
+            assert isinstance(denied, dict)
+            self.assertEqual(denied["error"], "That folder is outside the music folders.")
+            allowed_status, allowed = _request(base, f"/api/files?path={outside}&elsewhere=1")
+            self.assertEqual(allowed_status, 200)
+            assert isinstance(allowed, dict)
+            self.assertTrue(allowed["elsewhere"])
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=3)
+
 
 def _title_tag(text: str) -> bytes:
     """Build a tiny ID3v2.3 tag whose only frame is a title.

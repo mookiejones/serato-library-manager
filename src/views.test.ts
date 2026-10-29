@@ -55,6 +55,12 @@ function resetState(): void {
   state.filesError = "";
   state.filesMessage = "";
   state.filesTruncated = false;
+  state.filesAtRoots = false;
+  state.filesRoots = [];
+  state.filesRoot = null;
+  state.filesBreadcrumb = [];
+  state.filesElsewhere = false;
+  state.filesActive = 0;
   state.view = [];
 }
 
@@ -175,19 +181,22 @@ describe("library views", () => {
     state.mode = "files";
     state.writable = true;
     state.filesPath = "/music";
-    state.filesParent = "/";
+    state.filesParent = null;
+    state.filesRoot = { name: "Music", path: "/music", kind: "folder" };
+    state.filesBreadcrumb = [{ name: "Music", path: "/music" }];
     state.filesEntries = [
-      { name: "Crates", kind: "dir", path: "/music/Crates" },
       { name: "a.mp3", kind: "file", path: "/music/a.mp3", in_library: true },
       { name: "alias", kind: "link", path: "/music/alias" },
+      { name: "Crates", kind: "dir", path: "/music/Crates" },
     ];
     renderFiles();
-    const text = document.querySelector("#files-list")?.textContent ?? "";
-    expect(text).toContain("Crates");
-    expect(text).toContain("a.mp3");
-    expect(text).toContain("In library");
-    expect(text).toContain("alias (shortcut)");
-    expect(document.querySelector("#files-path")?.textContent).toBe("/music");
+    const names = [...document.querySelectorAll<HTMLElement>("#files-list .files-row")].map((row) => row.textContent ?? "");
+    expect(names[0]).toContain("Crates");
+    expect(names[1]).toContain("a.mp3");
+    expect(names[2]).toContain("alias (shortcut)");
+    expect(names[1]).toContain("In library");
+    expect(document.querySelector("#files-path")?.textContent).toContain("Music");
+    expect((document.querySelector("#files-up") as HTMLButtonElement).disabled).toBe(true);
     expect((document.querySelector("#files-rename") as HTMLButtonElement).disabled).toBe(true);
     expect(document.querySelector("#mode-note")?.textContent).toContain("Files on disk");
 

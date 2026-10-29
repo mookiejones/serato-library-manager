@@ -19,9 +19,16 @@ from unittest import mock
 import app_config
 import app_log
 import library
-import sentry_sdk
 import telemetry
-from posthog import Posthog
+
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
+try:
+    from posthog import Posthog
+except ImportError:
+    Posthog = None
 from tests.fixture import TempLibrary, open_database
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +65,7 @@ class FakePosthog:
         self.closed = True
 
 
+@unittest.skipUnless(sentry_sdk is not None, "sentry_sdk is not installed")
 class TelemetryCase(unittest.TestCase):
     """Share a temporary settings directory and a fake PostHog client.
 
@@ -443,6 +451,7 @@ class ScrubTests(TelemetryCase):
         self.assertEqual(disabled, {"ArgvIntegration", "LoggingIntegration"})
 
 
+@unittest.skipUnless(Posthog is not None, "posthog is not installed")
 class PosthogHookTests(TelemetryCase):
     """The real PostHog client calls the allowlist hook before upload."""
 
