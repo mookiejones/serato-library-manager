@@ -2202,6 +2202,36 @@
     const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
     return report ? `${base}&report=1` : base;
   }
+  var rekordboxToken = 0;
+  function applyRekordboxExport(payload) {
+    const section = payload.rekordbox;
+    if (section == null) return;
+    if (typeof section.hot_loops === "boolean") {
+      el("rekordbox-hot-loops").checked = section.hot_loops;
+    }
+    if (typeof section.memory_cues === "boolean") {
+      el("rekordbox-memory").checked = section.memory_cues;
+    }
+    if (section.key_notation === "asis" || section.key_notation === "camelot" || section.key_notation === "classical") {
+      el("rekordbox-key").value = section.key_notation;
+    }
+  }
+  async function saveRekordboxExport() {
+    const key = el("rekordbox-key").value;
+    const notation = key === "camelot" || key === "classical" ? key : "asis";
+    const token = ++rekordboxToken;
+    try {
+      const payload = await postJSON("/api/settings", {
+        rekordbox: {
+          hot_loops: el("rekordbox-hot-loops").checked,
+          memory_cues: el("rekordbox-memory").checked,
+          key_notation: notation
+        }
+      });
+      if (token === rekordboxToken) applyRekordboxExport(payload);
+    } catch {
+    }
+  }
   function fillRekordboxReport(lines) {
     const list = el("rekordbox-report");
     list.replaceChildren();
@@ -2478,10 +2508,12 @@
     return true;
   }
   async function loadPrivacy() {
+    const token = rekordboxToken;
     const response = await fetch("/api/settings");
     const payload = await readJSONOr(response, {});
     if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
     applyPrivacy(payload);
+    if (token === rekordboxToken) applyRekordboxExport(payload);
     if (!state.wizardComplete && openWizard(false, el("search"))) return;
     if (payload.needs_consent_prompt) showConsent();
   }
@@ -2599,6 +2631,16 @@
     }
   }
   function wireDialogs() {
+    const saveExportBar = () => {
+      saveRekordboxExport().catch(() => {
+      });
+    };
+    el("rekordbox-hot-loops").addEventListener("change", saveExportBar);
+    el("rekordbox-memory").addEventListener("change", saveExportBar);
+    el("rekordbox-key").addEventListener("change", saveExportBar);
+    loadPrivacy().catch((error) => {
+      setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent.");
+    });
     el("export-rekordbox").addEventListener("click", () => {
       rekordboxXml = "";
       fetch(rekordboxExportUrl(true)).then((response) => response.json().then((body) => ({ ok: response.ok, body }))).then(({ ok, body }) => {
@@ -2854,6 +2896,5 @@
   wireSnapshots();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
-  loadPrivacy().catch((error) => setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent."));
 })();
 //# sourceMappingURL=app.js.map

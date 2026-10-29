@@ -834,8 +834,8 @@ def public_settings() -> dict[str, object]:
 
     Returns:
         Consent, whether the first-launch prompt should show, whether
-        this build has a key, and the app version. The install id and
-        the keys themselves are not included.
+        this build has a key, the app version, and the Rekordbox export
+        bar. The install id and the telemetry keys are not included.
     """
     settings = app_config.load_settings()
     return {
@@ -844,6 +844,7 @@ def public_settings() -> dict[str, object]:
         "wizard_complete": settings.wizard_complete is True,
         "telemetry_configured": telemetry_configured(),
         "app_version": app_config.APP_VERSION,
+        "rekordbox": settings.rekordbox.as_json(),
     }
 
 

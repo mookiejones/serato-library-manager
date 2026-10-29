@@ -30,6 +30,8 @@ A missing `SENTRY_DSN` keeps crash reports off even after you opt in. A missing 
 | Windows | `%APPDATA%\Serato Library\settings.json` and `related.sqlite` | `%LOCALAPPDATA%\Serato Library\Logs\` |
 | Linux | `$XDG_CONFIG_HOME/serato-library/settings.json` and `related.sqlite`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
 
+`settings.json` also stores the Rekordbox export bar: whether hot loops and memory cues are on, and which key notation was chosen. Those choices are not sent.
+
 `related.sqlite` stores which tracks you marked as going well together, including file paths, titles, artists, lengths, notes, and ratings. That file stays on this machine. It is not a usage report. The schema is in [docs/related-tracks.md](docs/related-tracks.md).
 
 The log file is `serato-library.log`. It rotates at 1 MiB and keeps three older files. Logs stay on this machine. They can include the path of the library database. They are not uploaded. Settings has **Open logs folder** and **Copy logs**.

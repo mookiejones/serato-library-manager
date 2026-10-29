@@ -75,4 +75,4 @@ If the copy fails, a box of log text appears. The line says **Couldn't copy auto
 | macOS | `~/Library/Application Support/Serato Library/settings.json` |
 | Windows | `%APPDATA%\Serato Library\settings.json` |
 
-This folder is **Serato Library**, with a space. It is separate from `Serato/Library`, which holds `master.sqlite`. The same file records whether setup has finished. A new install runs setup until you choose **Open my library**.
+This folder is **Serato Library**, with a space. It is separate from `Serato/Library`, which holds `master.sqlite`. The same file records whether setup has finished. A new install runs setup until you choose **Open my library**. It also stores the Rekordbox export bar: Memory cues, Hot loops, and the key notation. Those choices stay on this computer.
