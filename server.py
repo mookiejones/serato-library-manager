@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 import app_config
 import app_log
+import drive_check
 import files
 import library
 import rekordbox
@@ -1491,7 +1492,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Answer a GET request.
 
-        Health and version are answered before the library is opened.
+        Health, version, and the portable-drive check are answered before the library is opened.
         Settings and logs are answered before the library routes. Library,
         status, track, history, duplicate, file, related-track, M3U, and
         rekordbox XML paths return data. Every other path is a file under static/.
@@ -1504,9 +1505,9 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Health and version do not open the library. Library, status, track,
-        history, duplicate, file, M3U, and rekordbox XML paths return data.
-        Every other path is a file under static/.
+        Health, version, and the portable-drive check do not open the library.
+        Library, status, track, history, duplicate, file, M3U, and rekordbox
+        XML paths return data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1517,6 +1518,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(version_info.payload())
             return
         try:
+            if parsed.path == "/api/drive-check":
+                self._get_drive_check(query)
+                return
             if parsed.path == "/api/settings":
                 self.send_json(telemetry.public_settings())
                 return
@@ -2131,6 +2135,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(store.restore(snapshot_id))
             return
         self.send_json({"error": "That action is not available."}, status=404)
+
+    def _get_drive_check(self, query: dict[str, list[str]]) -> None:
+        """Report whether a portable drive's crates can leave the laptop.
+
+        Args:
+            query: Parsed query. ``drive`` is the drive root. ``crate`` may
+                be repeated. A filesystem name in the query is ignored.
+
+        Raises:
+            library.LibraryError: The drive was not chosen, the folder has
+                no ``_Serato_`` directory, or a requested crate is not there.
+        """
+        raw = query_text(query, "drive", "") or ""
+        if not raw.strip():
+            raise library.LibraryError("Choose a drive.", 400)
+        crates = [item.strip() for item in query.get("crate", []) if item.strip()]
+        report = drive_check.check_drive(raw, crates or None)
+        self.send_json(report.to_dict())
 
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.
