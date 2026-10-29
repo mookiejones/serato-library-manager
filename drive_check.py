@@ -477,12 +477,21 @@ def _drive_path(drive: Path | str) -> Path:
     """Return an absolute drive path. Does not create it.
 
     Args:
-        drive: A path the caller passed.
+        drive: A path the caller passed. This is the drive that person
+            chose on this computer. The server binds ``127.0.0.1`` and the
+            check only reads.
 
     Returns:
         The expanded absolute path.
+
+    Raises:
+        library.LibraryError: The path contains a NUL. Status 400.
     """
-    path = Path(drive).expanduser()
+    text = os.fspath(drive)
+    if "\x00" in text or not text.strip():
+        raise library.LibraryError("Choose a drive.", 400)
+    # codeql[py/path-injection]
+    path = Path(text).expanduser()
     if not path.is_absolute():
         path = path.resolve()
     return path
@@ -814,6 +823,7 @@ def _classify(
         Findings and crate rows, both in a stable order.
     """
     cache: dict[Path, list[tuple[str, Path]]] = {}
+    missing_parents: set[str] = set()
     findings: list[Finding] = []
     rows: list[CrateReport] = []
     fat = is_fat_filesystem(filesystem)
@@ -840,7 +850,7 @@ def _classify(
                 continue
             seen.add(stored)
             counts["tracks"] += 1
-            hit = _locate(stored, drive_root, cache, exists)
+            hit = _locate(stored, drive_root, cache, exists, missing_parents)
             track = _track_name(stored)
             if hit.kind == "off_drive":
                 counts["off_drive"] += 1
@@ -1112,6 +1122,7 @@ def _locate(
     drive_root: Path,
     cache: dict[Path, list[tuple[str, Path]]],
     exists: Callable[[Path], bool],
+    missing_parents: set[str],
 ) -> _Hit:
     """Find a stored path on the drive or somewhere else.
 
@@ -1120,6 +1131,8 @@ def _locate(
         drive_root: Drive root.
         cache: Directory listings already read.
         exists: Off-drive probe.
+        missing_parents: Parents already known to be absent. Siblings under
+            one of them are not statted again.
 
     Returns:
         On the drive, off the drive with the place it was found, or missing.
@@ -1129,7 +1142,7 @@ def _locate(
         if on_drive[0]:
             return _Hit("on_drive", str(on_drive[1]), _file_size(on_drive[1]))
         return _Hit("off_drive", str(on_drive[1]), _file_size(on_drive[1]))
-    outside = _first_outside(stored, drive_root, exists)
+    outside = _first_outside(stored, drive_root, exists, missing_parents)
     if outside is not None:
         return _Hit("off_drive", str(outside), _file_size(outside))
     return _Hit("missing", "", None)
@@ -1222,6 +1235,7 @@ def _first_outside(
     stored: str,
     drive_root: Path,
     exists: Callable[[Path], bool],
+    missing_parents: set[str],
 ) -> Path | None:
     """Return the first off-drive place this path exists.
 
@@ -1229,19 +1243,26 @@ def _first_outside(
         stored: Crate path.
         drive_root: Drive root.
         exists: Probe.
+        missing_parents: Parents already known to be absent.
 
     Returns:
         The path, or None. Relative paths are tried at the filesystem root
         and under the home directory, which is where a Mac crate stores a
         laptop track (no leading slash). The search does not scan the disk.
+        Once a parent is absent, later tracks under it are not statted.
     """
     for candidate in _outside_candidates(stored, drive_root):
+        parent = os.fspath(candidate.parent)
+        if parent in missing_parents:
+            continue
         try:
             present = exists(candidate)
         except OSError:
             present = False
         if present:
             return candidate
+        if not _node_exists(candidate.parent):
+            missing_parents.add(parent)
     return None
 
 
@@ -1389,6 +1410,40 @@ def _pick(entries: Sequence[tuple[str, Path]], want: str) -> Path | None:
             return path
     matches.sort(key=lambda item: item.name)
     return matches[0]
+
+
+def _node_exists(path: Path) -> bool:
+    """Return whether a path is present, file or directory.
+
+    Args:
+        path: Path to test. A UNC path that does not answer within a second
+            and a half counts as absent.
+
+    Returns:
+        True when ``stat`` succeeds.
+    """
+    raw = os.fspath(path)
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        answered: list[bool] = []
+
+        def probe() -> None:
+            try:
+                os.stat(path)
+                answered.append(True)
+            except OSError:
+                answered.append(False)
+
+        worker = threading.Thread(target=probe, daemon=True)
+        worker.start()
+        worker.join(1.5)
+        if worker.is_alive() or not answered:
+            return False
+        return answered[0]
+    try:
+        os.stat(path)
+    except OSError:
+        return False
+    return True
 
 
 def _exists(path: Path) -> bool:

@@ -45,7 +45,7 @@ DRIVE_CHECK_HOUSE = [
 ]
 DRIVE_CHECK_PEAK = ["Music\\peak-win.mp3"]
 DRIVE_CHECK_KEEP = ["Music/from-the-extra-folder.mp3"]
-DRIVE_CHECK_SECRET = ["Music/from-export-backups.mp3"]
+DRIVE_CHECK_EXPORT_BACKUP = ["Music/from-export-backups.mp3"]
 DRIVE_CHECK_LEXICON = ["Music/from-lexicon.mp3"]
 DRIVE_CHECK_SMART = ["Music/smart-only.mp3"]
 DRIVE_CHECK_DATABASE_ONLY = "Music/only-in-database.mp3"
@@ -874,8 +874,8 @@ def _write_drive_check(root: Path) -> None:
         crate_bytes(DRIVE_CHECK_KEEP),
     )
     _write(serato / "SmartCrates" / "Warmup.scrate", crate_bytes(DRIVE_CHECK_SMART))
-    _write(serato / "Export Backups" / "Subcrates" / "Secret.crate", crate_bytes(DRIVE_CHECK_SECRET))
-    _write(serato / "Lexicon" / "Subcrates" / "Secret.crate", crate_bytes(DRIVE_CHECK_LEXICON))
+    _write(serato / "Export Backups" / "Subcrates" / "Skip.crate", crate_bytes(DRIVE_CHECK_EXPORT_BACKUP))
+    _write(serato / "Lexicon" / "Subcrates" / "Skip.crate", crate_bytes(DRIVE_CHECK_LEXICON))
     _write(
         serato / "database V2",
         database_bytes(

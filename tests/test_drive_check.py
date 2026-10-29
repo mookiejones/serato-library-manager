@@ -187,7 +187,7 @@ class DriveCheckTests(unittest.TestCase):
         self.assertNotIn(BUILDER.DRIVE_CHECK_DATABASE_ONLY, found)
         self.assertNotIn(BUILDER.DRIVE_CHECK_SMART[0], found)
         self.assertNotIn("Music\\peak-win.mp3", found)
-        self.assertNotIn(BUILDER.DRIVE_CHECK_SECRET[0], found)
+        self.assertNotIn(BUILDER.DRIVE_CHECK_EXPORT_BACKUP[0], found)
         self.assertNotIn(BUILDER.DRIVE_CHECK_LEXICON[0], found)
         self.assertEqual(found[BUILDER.DRIVE_CHECK_KEEP[0]], {"missing"})
         smart = [item for item in report.findings if item.kind == "smart_crate"]
@@ -627,7 +627,8 @@ class DriveCheckTests(unittest.TestCase):
         real_open = os.open
 
         def guard(path: object, flags: int, *args: object, **kwargs: object) -> int:
-            acc = flags & os.O_ACCMODE
+            accmode = getattr(os, "O_ACCMODE", os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
+            acc = flags & accmode
             blocked = 0
             for name in ("O_WRONLY", "O_RDWR", "O_CREAT", "O_TRUNC", "O_APPEND"):
                 blocked |= getattr(os, name, 0)
@@ -691,6 +692,34 @@ class DriveCheckTests(unittest.TestCase):
             present = drive_check._exists_timed(Path("//server/share/a.mp3"), 0.2)
         self.assertFalse(present)
         self.assertLess(time.perf_counter() - started, 2)
+
+    def test_null_byte_in_the_drive_path_is_refused(self) -> None:
+        """A NUL in the drive path is not opened.
+
+        Returns:
+            None.
+        """
+        with self.assertRaises(library.LibraryError) as caught:
+            drive_check.check_drive("/tmp/ok\x00/drive")
+        self.assertEqual(caught.exception.status, 400)
+
+    def test_missing_siblings_are_not_statted_one_by_one(self) -> None:
+        """Thirty tracks under one absent folder do not become thirty stats.
+
+        Returns:
+            None.
+        """
+        calls: list[str] = []
+
+        def exists(path: Path) -> bool:
+            calls.append(os.fspath(path))
+            return False
+
+        paths = [f"Music/missing-{index}.mp3" for index in range(30)]
+        drive = self._drive(paths)
+        report = drive_check.check_drive(drive, exists=exists, filesystem="ext4")
+        self.assertEqual(report.counts["missing"], 30)
+        self.assertLess(len(calls), 20)
 
     def test_ten_thousand_tracks_finish_within_ten_seconds(self) -> None:
         """A crate of 10,000 missing tracks is classified in under 10 seconds.
