@@ -108,6 +108,18 @@ describe("version on the page", () => {
     expect(el("app-version").textContent).toContain("v1.1.0-rc2 · abc123d");
   });
 
+  it("shows a dev source with the fallback version and a short commit", async () => {
+    fetchMock().mockResolvedValue(jsonResponse({
+      version: "0.0.0+dev",
+      commit: "abc123def456",
+      source: "dev",
+    }));
+    await loadVersion();
+    expect(el("app-version").hidden).toBe(false);
+    expect(el("about-version").textContent).toBe("v0.0.0+dev · abc123d");
+    expect(el("app-version").textContent).toBe("App version v0.0.0+dev · abc123d");
+  });
+
   it("hides the footer and says Version unavailable when the request fails", async () => {
     const raw = "OperationalError: disk I/O error near master.sqlite";
     fetchMock().mockResolvedValue(jsonResponse({ error: raw }, false));
@@ -294,6 +306,18 @@ describe("version on the page", () => {
     expect(el("about-version").children).toHaveLength(0);
     expect(el("about-version").textContent).toBe(hostile);
     expect(el("app-version").textContent).toBe(`App version ${hostile}`);
+  });
+
+  it("getVersion rejects a null body and a blank version", async () => {
+    fetchMock().mockResolvedValue(jsonResponse(null));
+    await expect(getVersion()).rejects.toThrow(/^Version unavailable$/);
+
+    fetchMock().mockResolvedValue(jsonResponse({
+      version: "   ",
+      commit: null,
+      source: "dev",
+    }));
+    await expect(getVersion()).rejects.toThrow(/^Version unavailable$/);
   });
 
   it("trims a padded version on the page and in the client", async () => {
