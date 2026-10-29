@@ -385,7 +385,10 @@ def _read_only_uri(path: Path, query: str) -> str:
         end the URI early.
     """
     posix = path.resolve().as_posix()
-    if sys.platform == "win32" and len(posix) >= 2 and posix[1] == ":":
+    # A drive letter needs an empty URI authority (file:///C:/...). Checking
+    # the path, not sys.platform, still does that when a test has patched
+    # the platform to linux while the file remains on a Windows drive.
+    if len(posix) >= 2 and posix[1] == ":":
         posix = "/" + posix
     return "file://" + quote(posix, safe="/:") + "?" + query
 
