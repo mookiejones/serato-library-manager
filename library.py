@@ -1208,10 +1208,13 @@ def begin_write() -> sqlite3.Connection:
 
     The first call in a process also copies the databases into Library/Backups.
     Every call first saves a content-addressed snapshot, after Serato 5 has
-    been allowed to proceed.
+    been allowed to proceed. A ``safe_write`` session takes that snapshot
+    once and this function does not take a second one while the session is open.
 
     Returns:
         A connection inside BEGIN IMMEDIATE. The caller commits and closes it.
+        Library edits go through ``safe_write.run``, which checks the commit
+        and puts the snapshot back when the rows do not match.
 
     Raises:
         SeratoOpen: If Serato holds the lock or the database is locked.
@@ -1225,11 +1228,15 @@ def begin_write() -> sqlite3.Connection:
     blocked = snapshots.write_block_message()
     if blocked:
         raise LibraryError(blocked, 409)
-    snapshots.snapshot_before_write()
-    ensure_backup()
+    import safe_write
+
+    if not safe_write.holding_snapshot():
+        snapshots.snapshot_before_write()
+        ensure_backup()
     conn = sqlite3.connect(Path(MASTER), timeout=1)
     conn.row_factory = sqlite3.Row
     register(conn)
+    _keep_wal(conn)
     try:
         conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("BEGIN IMMEDIATE")
@@ -1243,6 +1250,22 @@ def begin_write() -> sqlite3.Connection:
         conn.close()
         raise SeratoOpen(status())
     return conn
+
+
+def _keep_wal(conn: sqlite3.Connection) -> None:
+    """Leave committed frames in the WAL file until the write is checked.
+
+    The check copies ``master.sqlite`` and ``-wal``. A checkpoint on close
+    would fold those frames into the main file first, and the copy of
+    ``-wal`` would no longer be what the write committed.
+
+    Args:
+        conn: Connection that is about to start a write transaction.
+    """
+    flag = getattr(sqlite3, "SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE", None)
+    if flag is not None:
+        conn.setconfig(flag, True)
+    conn.execute("PRAGMA wal_autocheckpoint=0")
 
 
 def _space_id(conn: sqlite3.Connection, space: str) -> int:
@@ -1762,6 +1785,50 @@ def _mirror_asset(master: sqlite3.Connection, asset_id: int, columns: Mapping[st
     return _with_location(path, apply)
 
 
+def _expect_asset(session: object, asset_id: int, values: Mapping[str, object]) -> None:
+    """Register the track fields a save must leave behind.
+
+    Args:
+        session: The safe-write session, or another object when this helper
+            is called without one.
+        asset_id: Asset id.
+        values: Columns this save assigned.
+    """
+    import safe_write
+
+    if not isinstance(session, safe_write.Session):
+        return
+    allowed = TRACK_FIELDS | {"file_name", "is_missing", "file_size", "time_modified"}
+    columns = tuple(name for name in values if isinstance(name, str) and name.isidentifier() and name in allowed)
+    expected = tuple(values[name] for name in columns)
+
+    def check(
+        copied: sqlite3.Connection,
+        columns: tuple[str, ...] = columns,
+        expected: tuple[object, ...] = expected,
+        asset_id: int = asset_id,
+    ) -> None:
+        """Fail when the copied row does not hold the saved fields.
+
+        Args:
+            copied: Read-only connection to the temporary database copy.
+            columns: Column names that were assigned.
+            expected: Values those columns should have.
+            asset_id: Asset id.
+
+        Raises:
+            VerifyMismatch: If the row is missing or different.
+        """
+        if not columns:
+            return
+        sql = "SELECT " + ", ".join(columns) + " FROM asset WHERE id = ?"
+        row = copied.execute(sql, (asset_id,)).fetchone()
+        if row is None or tuple(row) != expected:
+            raise safe_write.VerifyMismatch("The track fields do not match.")
+
+    session.check(check)
+
+
 def save_track(asset_id: int, fields: object, space: str = LIBRARY_SPACE) -> dict[str, object]:
     """Save editable fields for one track.
 
@@ -1779,8 +1846,24 @@ def save_track(asset_id: int, fields: object, space: str = LIBRARY_SPACE) -> dic
     """
     cleaned = _clean_fields(fields)
     portable = cleaned.get("portable_id")
-    conn = begin_write()
-    try:
+    target = str(cleaned.get("name") or f"track {asset_id}")
+
+    def apply(conn: sqlite3.Connection, write: object) -> dict[str, object]:
+        """Update the asset row and register the fields the check must see.
+
+        Args:
+            conn: Open write connection.
+            write: The safe-write session.
+
+        Returns:
+            The column values that were saved.
+
+        Raises:
+            LibraryError: If the track is not in the space or a path cannot be read.
+        """
+        import safe_write
+
+        session = write if isinstance(write, safe_write.Session) else None
         _space_id(conn, space)
         row = conn.execute(
             """
@@ -1804,13 +1887,15 @@ def save_track(asset_id: int, fields: object, space: str = LIBRARY_SPACE) -> dic
                 raise LibraryError("That path could not be read.", 400) from exc
         values["time_modified"] = int(time.time())
         _assign(conn, "asset", values, "id = ?", asset_id)
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+        if isinstance(values.get("name"), str):
+            if session is not None:
+                session.set_target(str(values["name"]))
+        _expect_asset(session, asset_id, values)
+        return values
 
+    import safe_write
+
+    values = safe_write.run("save_track", target, apply)
     mirror_values = {key: value for key, value in values.items() if key != "time_modified"}
     mirror_values["time_modified"] = values["time_modified"]
     with closing(read_conn()) as master:
@@ -2748,6 +2833,152 @@ def _remove_from_space(conn: sqlite3.Connection, asset_id: int, space: str) -> d
     return {"ok": True, "id": asset_id, "warning": warning}
 
 
+def _crate_target(payload: Mapping[str, object]) -> str:
+    """Return the human-readable crate or track name for a crate edit.
+
+    Args:
+        payload: Crate action body.
+
+    Returns:
+        The name field when it is text, otherwise a short fallback.
+    """
+    name = payload.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    action = payload.get("action")
+    if action == "prepare":
+        return "Prepare"
+    if action == "remove_library":
+        return "library"
+    return "crate"
+
+
+def _expect_crate(
+    session: object,
+    action: object,
+    payload: Mapping[str, object],
+    result: Mapping[str, object],
+) -> None:
+    """Register the row check for one crate edit.
+
+    Args:
+        session: The safe-write session.
+        action: Action name from the request.
+        payload: Request body.
+        result: Result dict from the edit. The check uses the request, and
+            the result id when the action created a row.
+    """
+    import safe_write
+
+    if not isinstance(session, safe_write.Session):
+        return
+    if action in {"create", "rename"}:
+        crate_id = result.get("id")
+        wanted = str(payload.get("name") or "").strip()
+        if not isinstance(crate_id, int):
+            return
+
+        def check(copied: sqlite3.Connection, crate_id: int = crate_id, wanted: str = wanted) -> None:
+            """Fail when the crate's display name is not the one that was asked for.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                crate_id: Container id.
+                wanted: Display name from the request.
+
+            Raises:
+                VerifyMismatch: If the stored name does not display as ``wanted``.
+            """
+            row = copied.execute("SELECT name FROM container WHERE id = ?", (crate_id,)).fetchone()
+            if row is None or display_name(str(row[0])) != wanted:
+                raise safe_write.VerifyMismatch("The crate name does not match.")
+
+        session.check(check)
+        return
+    if action == "delete":
+        crate_id = _as_int(payload["id"])
+
+        def check_gone(copied: sqlite3.Connection, crate_id: int = crate_id) -> None:
+            """Fail when the deleted crate is still in the library.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                crate_id: Container id.
+
+            Raises:
+                VerifyMismatch: If the crate row remains.
+            """
+            row = copied.execute("SELECT COUNT(*) FROM container WHERE id = ?", (crate_id,)).fetchone()
+            if row is None or int(row[0]) != 0:
+                raise safe_write.VerifyMismatch("The crate is still in the library.")
+
+        session.check(check_gone)
+        return
+    if action in {"add", "remove"}:
+        crate_id = _as_int(payload["id"])
+        asset_id = _as_int(payload["asset"])
+        present = 1 if action == "add" else 0
+
+        def check_member(
+            copied: sqlite3.Connection,
+            crate_id: int = crate_id,
+            asset_id: int = asset_id,
+            present: int = present,
+        ) -> None:
+            """Fail when crate membership does not match the request.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                crate_id: Container id.
+                asset_id: Asset id.
+                present: 1 when the track should be in the crate.
+
+            Raises:
+                VerifyMismatch: If the membership row is missing or still there.
+            """
+            row = copied.execute(
+                """
+                SELECT COUNT(*) FROM container_asset ca
+                JOIN location_container lc ON lc.id = ca.location_container_id
+                WHERE lc.container_id = ? AND ca.asset_id = ?
+                """,
+                (crate_id, asset_id),
+            ).fetchone()
+            count = 0 if row is None else int(row[0])
+            if (count > 0) != (present == 1):
+                raise safe_write.VerifyMismatch("The crate membership does not match.")
+
+        session.check(check_member)
+        return
+    if action == "remove_library":
+        asset_id = _as_int(payload["asset"])
+        space = cast(str, payload.get("space") or LIBRARY_SPACE)
+
+        def check_removed(copied: sqlite3.Connection, asset_id: int = asset_id, space: str = space) -> None:
+            """Fail when the track is still in the space.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                asset_id: Asset id.
+                space: Space name.
+
+            Raises:
+                VerifyMismatch: If the space membership remains.
+            """
+            row = copied.execute(
+                """
+                SELECT COUNT(*) FROM space_asset sa
+                JOIN space s ON s.id = sa.space_id
+                WHERE sa.asset_id = ? AND s.name = ?
+                """,
+                (asset_id, space),
+            ).fetchone()
+            if row is None or int(row[0]) != 0:
+                raise safe_write.VerifyMismatch("The track is still in the library.")
+
+        session.check(check_removed)
+
+
 def crate_action(payload: Mapping[str, object]) -> dict[str, object]:
     """Run one crate edit.
 
@@ -2766,8 +2997,23 @@ def crate_action(payload: Mapping[str, object]) -> dict[str, object]:
     """
     action = payload.get("action")
     space = cast(str, payload.get("space") or LIBRARY_SPACE)
-    conn = begin_write()
-    try:
+    target = _crate_target(payload)
+    import safe_write
+
+    def apply(conn: sqlite3.Connection, write: safe_write.Session) -> dict[str, object]:
+        """Run the crate edit and register the row the check must see.
+
+        Args:
+            conn: Open write connection.
+            write: Session that records the expected rows.
+
+        Returns:
+            The action result dict.
+
+        Raises:
+            LibraryError: If the action is unknown or its fields are invalid.
+            KeyError: If a required id is missing.
+        """
         if action == "create":
             result = _create_crate(
                 conn,
@@ -2802,13 +3048,12 @@ def crate_action(payload: Mapping[str, object]) -> dict[str, object]:
             result = _remove_from_space(conn, _as_int(payload["asset"]), space)
         else:
             raise LibraryError("That crate action is not available.")
-        conn.commit()
+        if isinstance(result.get("name"), str):
+            write.set_target(str(result["name"]))
+        _expect_crate(write, action, payload, result)
         return result
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+
+    return safe_write.run(f"crate_{action}", target, apply)
 
 
 def history_sessions() -> list[dict[str, object]]:
@@ -4447,19 +4692,60 @@ def merge_duplicates(payload: Mapping[str, object]) -> dict[str, object]:
         early = _build_merge_plan(conn, space, keep_id)
     if delete_files:
         _refuse_unsafe_trash(early)
-    conn = begin_write()
-    try:
+    import safe_write
+
+    def apply(conn: sqlite3.Connection, write: safe_write.Session) -> tuple[dict[str, object], list[str | None]]:
+        """Merge the group and register the rows the check must see.
+
+        Args:
+            conn: Open write connection.
+            write: Session that records the expected rows.
+
+        Returns:
+            The plan and any mirror warnings.
+
+        Raises:
+            LibraryError: If a requested file move is unsafe.
+        """
         plan = _build_merge_plan(conn, space, keep_id)
         if delete_files:
             _refuse_unsafe_trash(plan)
         _apply_merge(conn, plan)
         warnings = _mirror_merge(conn, plan)
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+        kept = plan.get("kept")
+        if isinstance(kept, dict) and isinstance(kept.get("name"), str) and kept["name"]:
+            write.set_target(str(kept["name"]))
+        remove_ids = tuple(int(item) for item in cast(list[int], plan["remove_ids"]))
+        kept_id = int(cast(int, plan["keep_id"]))
+
+        def check(
+            copied: sqlite3.Connection,
+            kept_id: int = kept_id,
+            remove_ids: tuple[int, ...] = remove_ids,
+        ) -> None:
+            """Fail when the kept track is missing or a duplicate remains.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                kept_id: Asset id that should remain.
+                remove_ids: Asset ids that should be gone.
+
+            Raises:
+                VerifyMismatch: If the group was not folded into the kept copy.
+            """
+            row = copied.execute("SELECT COUNT(*) FROM asset WHERE id = ?", (kept_id,)).fetchone()
+            if row is None or int(row[0]) != 1:
+                raise safe_write.VerifyMismatch("The track that should be kept is missing.")
+            for asset_id in remove_ids:
+                gone = copied.execute("SELECT COUNT(*) FROM asset WHERE id = ?", (asset_id,)).fetchone()
+                if gone is None or int(gone[0]) != 0:
+                    raise safe_write.VerifyMismatch("A duplicate track is still in the library.")
+
+        write.check(check)
+        return plan, warnings
+
+    kept_name = "track"
+    plan, warnings = safe_write.run("merge_duplicates", kept_name, apply)
     trashed: list[str] = []
     trash_warning = None
     if delete_files:
@@ -4636,8 +4922,22 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: object) -> di
         if not line or line.startswith("#"):
             continue
         paths.append(line)
-    conn = begin_write()
-    try:
+    label = name or "Imported playlist"
+    import safe_write
+
+    def apply(conn: sqlite3.Connection, write: safe_write.Session) -> dict[str, object]:
+        """Create the crate, add the known tracks, and register that check.
+
+        Args:
+            conn: Open write connection.
+            write: Session that records the expected rows.
+
+        Returns:
+            The import result, without the fields added after the check.
+
+        Raises:
+            LibraryError: If the crate cannot be created.
+        """
         matched: list[int] = []
         unmatched: list[str] = []
         seen: set[int] = set()
@@ -4649,27 +4949,54 @@ def import_m3u(space: str, parent_id: int | None, name: str, text: object) -> di
                 continue
             seen.add(asset_id)
             matched.append(asset_id)
-        created = _create_crate(conn, space, parent_id, name or "Imported playlist", False, None)
+        created = _create_crate(conn, space, parent_id, label, False, None)
         crate_id = created["id"]
         if not isinstance(crate_id, int):
             raise LibraryError("The crate could not be created.")
         for asset_id in matched:
             _membership(conn, crate_id, asset_id, space, True)
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-    return {
-        "ok": True,
-        "id": created["id"],
-        "name": created["name"],
-        "added": len(matched),
-        "unmatched": unmatched[:50],
-        "unmatched_count": len(unmatched),
-        "warning": created.get("warning"),
-    }
+        if isinstance(created.get("name"), str):
+            write.set_target(str(created["name"]))
+        wanted = tuple(matched)
+
+        def check(copied: sqlite3.Connection, crate_id: int = crate_id, wanted: tuple[int, ...] = wanted) -> None:
+            """Fail when the new crate is missing a track the playlist already had.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                crate_id: New container id.
+                wanted: Asset ids that should be members.
+
+            Raises:
+                VerifyMismatch: If the crate name or a membership does not match.
+            """
+            row = copied.execute("SELECT name FROM container WHERE id = ?", (crate_id,)).fetchone()
+            if row is None or display_name(str(row[0])) != label:
+                raise safe_write.VerifyMismatch("The imported crate name does not match.")
+            for asset_id in wanted:
+                member = copied.execute(
+                    """
+                    SELECT COUNT(*) FROM container_asset ca
+                    JOIN location_container lc ON lc.id = ca.location_container_id
+                    WHERE lc.container_id = ? AND ca.asset_id = ?
+                    """,
+                    (crate_id, asset_id),
+                ).fetchone()
+                if member is None or int(member[0]) != 1:
+                    raise safe_write.VerifyMismatch("A playlist track was not added.")
+
+        write.check(check)
+        return {
+            "ok": True,
+            "id": created["id"],
+            "name": created["name"],
+            "added": len(matched),
+            "unmatched": unmatched[:50],
+            "unmatched_count": len(unmatched),
+            "warning": created.get("warning"),
+        }
+
+    return safe_write.run("import_m3u", label, apply)
 
 
 def reveal_command(path: str) -> list[str]:

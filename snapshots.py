@@ -476,6 +476,7 @@ class SnapshotStore:
         self.process_names: Callable[[], Sequence[str]] = default_process_names
         self._depth = 0
         self._recover_if_journal()
+        self._recover_interrupted_write()
 
     def list_snapshots(self) -> list[SnapshotInfo]:
         """Return snapshots, newest first.
@@ -715,6 +716,19 @@ class SnapshotStore:
         self._clear_restore_journal()
         self.rebase_fingerprint()
         return True
+
+    def _recover_interrupted_write(self) -> None:
+        """Roll back a library write that stopped after its journal was saved.
+
+        A missing journal does nothing. Serato 5 and a running Serato DJ
+        process leave the journal in place. A failure is logged.
+        """
+        try:
+            import safe_write
+
+            safe_write.recover_interrupted_write()
+        except Exception:
+            app_log.logger.exception("An unfinished library write could not be rolled back.")
 
     def _recover_if_journal(self) -> None:
         """Roll back an unfinished restore when this store is opened.

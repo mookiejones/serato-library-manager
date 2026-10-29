@@ -264,30 +264,53 @@ def execute(payload: Mapping[str, object]) -> dict[str, object]:
     built = _build(payload)
     if not built.ok:
         raise library.LibraryError(built.error or "That change was not saved.")
-    snapshots.snapshot_before_write()
-    library.ensure_backup()
-    journal = _journal_for(built)
-    _write_journal(journal)
-    cue_status = built.cues
-    try:
-        cue_status = _perform_files(built, journal)
-        _commit_database(built, journal)
-        journal["done"] = True
+    import safe_write
+
+    extra = [change.source for change in built.changes]
+    extra.extend(removal.path for removal in built.removals if removal.path is not None)
+    holder: dict[str, dict[str, object]] = {}
+
+    def undo_files() -> None:
+        """Put moved files back from the in-memory journal.
+
+        The journal file may already have been removed. The dict still
+        describes the moves.
+        """
+        journal = holder.get("journal")
+        if journal is None:
+            return
+        _undo_journal(journal)
+
+    with safe_write.session(
+        built.action,
+        _file_target(built),
+        extra,
+        on_rollback=undo_files,
+    ) as write:
+        journal = _journal_for(built)
+        holder["journal"] = journal
         _write_journal(journal)
-    except library.SeratoOpen:
-        _undo_and_drop(journal)
-        raise
-    except library.LibraryError:
-        _undo_and_drop(journal)
-        raise
-    except Exception as exc:
-        logger.exception("File change failed")
-        _undo_and_drop(journal)
-        raise library.LibraryError(
-            "The files could not be changed. Nothing was left halfway."
-        ) from exc
-    _finish_journal(journal)
-    _delete_journal()
+        cue_status = built.cues
+        try:
+            cue_status = _perform_files(built, journal)
+            _commit_database(built, journal)
+            journal["done"] = True
+            _write_journal(journal)
+            write.mark_committed()
+        except library.SeratoOpen:
+            _undo_and_drop(journal)
+            raise
+        except library.LibraryError:
+            _undo_and_drop(journal)
+            raise
+        except Exception as exc:
+            logger.exception("File change failed")
+            _undo_and_drop(journal)
+            raise library.LibraryError(
+                "The files could not be changed. Nothing was left halfway."
+            ) from exc
+        _finish_journal(journal)
+        _delete_journal()
     related_notes = _retarget_related(built)
     _capture(built, cue_status)
     body = _public(built)
@@ -1182,6 +1205,11 @@ def _commit_database(plan: Plan, journal: dict[str, object]) -> None:
         sqlite3.Error: If the commit fails. The caller puts the files back.
     """
     del journal
+    import safe_write
+
+    active = safe_write.current_session()
+    if active is not None:
+        _expect_file_plan(active, plan)
     conn = library.begin_write()
     schemas: dict[Path, str] = {}
     try:
@@ -1208,6 +1236,86 @@ def _commit_database(plan: Plan, journal: dict[str, object]) -> None:
             except sqlite3.Error:
                 pass
         conn.close()
+
+
+def _file_target(plan: Plan) -> str:
+    """Return the file name a person would recognize for this change.
+
+    Args:
+        plan: Checked plan.
+
+    Returns:
+        The destination or removal name. Several files are joined, up to three.
+    """
+    names = [change.dest.name for change in plan.changes]
+    if not names:
+        names = [removal.name for removal in plan.removals]
+    if not names:
+        return plan.action
+    shown = names[:3]
+    if len(names) > 3:
+        shown.append(f"and {len(names) - 3} more")
+    return ", ".join(shown)
+
+
+def _expect_file_plan(session: safe_write.Session, plan: Plan) -> None:
+    """Register the path check for a file change.
+
+    Args:
+        session: The write session that will open the temporary copy.
+        plan: Checked plan. Delete expects the asset rows to be gone.
+            Other actions expect each asset's file name and portable id.
+    """
+    import safe_write as safe
+
+    if plan.action == "delete":
+        ids = tuple(asset_id for removal in plan.removals for asset_id in removal.asset_ids)
+
+        def check_gone(copied: sqlite3.Connection, ids: tuple[int, ...] = ids) -> None:
+            """Fail when a deleted track is still in the library.
+
+            Args:
+                copied: Read-only connection to the temporary database copy.
+                ids: Asset ids that should be gone.
+
+            Raises:
+                VerifyMismatch: If an asset row remains.
+            """
+            for asset_id in ids:
+                row = copied.execute("SELECT COUNT(*) FROM asset WHERE id = ?", (asset_id,)).fetchone()
+                if row is None or int(row[0]) != 0:
+                    raise safe.VerifyMismatch("A deleted track is still in the library.")
+
+        session.check(check_gone)
+        return
+    expected = tuple(
+        (asset_id, change.dest.name, to_portable(change.dest))
+        for change in plan.changes
+        for asset_id in change.asset_ids
+    )
+
+    def check_paths(
+        copied: sqlite3.Connection,
+        expected: tuple[tuple[int, str, str], ...] = expected,
+    ) -> None:
+        """Fail when a moved track does not store its new path.
+
+        Args:
+            copied: Read-only connection to the temporary database copy.
+            expected: Asset id, file name, and portable id.
+
+        Raises:
+            VerifyMismatch: If the row is missing or still has the old path.
+        """
+        for asset_id, name, portable in expected:
+            row = copied.execute(
+                "SELECT file_name, portable_id FROM asset WHERE id = ?",
+                (asset_id,),
+            ).fetchone()
+            if row is None or row[0] != name or row[1] != portable:
+                raise safe.VerifyMismatch("The saved file path does not match.")
+
+    session.check(check_paths)
 
 
 def _commit(conn: sqlite3.Connection) -> None:
