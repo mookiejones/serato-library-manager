@@ -17,8 +17,8 @@
   Radius tokens are the design scale: 8, 12, and 14. The page keeps its
   3px, 4px, and 10px corners. --radius-pill is used by .pill-preview.
   Type sizes are the design scale. The page uses --font-heading and
-  --font-body where it already set 14px and 13px. Larger display sizes
-  stay in app.css. --font-family is Familjen Grotesk, the face already
+  --font-body where it already set 14px and 13px. --font-display is the
+  ready-score size. --font-family is Familjen Grotesk, the face already
   loaded for the page.
 */
 
@@ -61,6 +61,7 @@
   --radius-pill: 14px;
 
   --font-family: "Familjen Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  --font-display: 56px;
   --font-title: 20px;
   --font-heading: 14px;
   --font-body: 13px;

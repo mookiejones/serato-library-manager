@@ -40,6 +40,7 @@ export interface ElementIds {
   "snapshots-take": HTMLButtonElement;
   "gig-panel": HTMLElement;
   "gig-scope": HTMLParagraphElement;
+  "gig-status": HTMLParagraphElement;
   "gig-report": HTMLDivElement;
   "gig-refresh": HTMLButtonElement;
   "crate-search": HTMLInputElement;

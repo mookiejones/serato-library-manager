@@ -328,6 +328,7 @@ def _length(value: str, colors: dict[str, str]) -> float:
     named = re.search(r"var\(\s*(--[A-Za-z0-9-]+)", value)
     if named:
         token = {
+            "--font-display": 56,
             "--font-title": 20,
             "--font-heading": 14,
             "--font-body": 13,

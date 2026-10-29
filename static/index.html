@@ -47,7 +47,7 @@
         <button type="button" data-view="stems" role="tab">Stems</button>
         <button type="button" data-view="files" role="tab">Files</button>
         <button type="button" data-view="snapshots" role="tab">Snapshots</button>
-        <button type="button" data-view="gig" role="tab">Gig</button>
+        <button type="button" id="gig-tab" data-view="gig" role="tab" aria-controls="gig-panel">Gig</button>
       </div>
       <div id="crate-tools">
         <label class="rail-field">
@@ -166,13 +166,14 @@
         <div id="snapshots-list" class="files-list" role="list" aria-label="Snapshots" aria-busy="false" tabindex="0"></div>
       </section>
 
-      <section id="gig-panel" class="gig-panel" hidden aria-labelledby="gig-heading">
+      <section id="gig-panel" class="gig-panel" role="tabpanel" hidden aria-labelledby="gig-heading" aria-busy="false">
         <h2 id="gig-heading" class="visually-hidden">Gig check</h2>
         <div class="browser-bar">
-          <p id="gig-scope" class="files-path">Checking the library</p>
+          <p id="gig-scope" class="files-path">Whole space</p>
           <button id="gig-refresh" type="button">Check again</button>
         </div>
-        <div id="gig-report" class="gig-report" aria-live="polite" aria-busy="false"></div>
+        <p id="gig-status" class="gig-status" role="status" aria-live="polite"></p>
+        <div id="gig-report" class="gig-report"></div>
       </section>
     </main>
   </div>

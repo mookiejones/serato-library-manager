@@ -290,108 +290,185 @@
   }
 
   // src/gig.ts
-  async function loadGigCheck() {
+  var STEP_COUNT = 5;
+  var LIST_CAP = 100;
+  var UNREACHABLE = "Couldn't reach the library server. Check it's running, then press Check again";
+  var STEPS = [
+    { title: "Drives", action: "Check drives", empty: "No drives are unplugged." },
+    { title: "Missing files", action: "Locate missing files", empty: "No files are missing." },
+    { title: "Streaming", action: "Review streaming tracks", empty: "No streaming tracks." },
+    { title: "Empty crates", action: "Fill empty crates", empty: "No empty crates." },
+    { title: "Since last gig", action: "Review changes", empty: "Nothing changed since the last snapshot." }
+  ];
+  var stepIndex = 0;
+  var latest = null;
+  var checkedAt = "";
+  var exitGig = () => {
+  };
+  function wireGigCheck(exit) {
+    exitGig = exit;
+    const panel = el("gig-panel");
+    if (panel.dataset.gigWired === "true") return;
+    panel.dataset.gigWired = "true";
+    el("gig-refresh").addEventListener("click", () => {
+      void loadGigCheck(true);
+    });
+    panel.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const button = target.closest("button");
+      if (!(button instanceof HTMLButtonElement) || !latest) return;
+      const action = button.dataset.gigAction;
+      if (action === "next") stepIndex = Math.min(stepIndex + 1, STEP_COUNT);
+      else if (action === "back") stepIndex = Math.max(0, stepIndex - 1);
+      else if (action === "exit") {
+        exitGig();
+        return;
+      } else return;
+      renderGigReport(latest);
+      focusHeading();
+    });
+  }
+  async function loadGigCheck(keepStep = false) {
     const token = ++state.gigToken;
-    const report = el("gig-report");
-    report.setAttribute("aria-busy", "true");
-    el("gig-scope").textContent = "Checking the library";
-    const waiting = document.createElement("p");
-    waiting.className = "gig-note";
-    waiting.textContent = "Checking the library…";
-    report.replaceChildren(waiting);
+    if (!keepStep) stepIndex = 0;
+    beginBusy();
+    let settle = "none";
     const crate = state.activeCrate === "all" ? "all" : String(state.activeCrate);
-    const response = await fetch(
-      `/api/gig-check?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`
-    );
-    const payload = await readJSON(response).catch(() => ({ ready: false, score: 0, hard_red: false }));
-    if (token !== state.gigToken) return;
-    report.setAttribute("aria-busy", "false");
-    if (!response.ok) throw new Error(payload.error || "The gig check could not be read.");
-    renderGigReport(payload);
+    try {
+      const response = await fetch(
+        `/api/gig-check?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}`
+      );
+      if (token !== state.gigToken) return;
+      const payload = await readJSON(response).catch(() => null);
+      if (token !== state.gigToken) return;
+      if (!response.ok || payload === null) {
+        failStatus(payload?.error || "The gig check could not be read.");
+        settle = "retry";
+        return;
+      }
+      checkedAt = formatCheckedAt(/* @__PURE__ */ new Date());
+      latest = payload;
+      el("gig-status").textContent = "";
+      renderGigReport(payload);
+      settle = "heading";
+    } catch {
+      if (token !== state.gigToken) return;
+      failStatus(UNREACHABLE);
+      settle = "retry";
+    } finally {
+      if (token !== state.gigToken) return;
+      endBusy();
+      if (settle === "retry") el("gig-refresh").focus();
+      if (settle === "heading") focusHeading();
+    }
   }
   function showGigFailure(error) {
-    const report = el("gig-report");
-    report.setAttribute("aria-busy", "false");
-    const failure = document.createElement("p");
-    failure.className = "detail-error";
-    failure.textContent = failureOf(error).message || "The gig check could not be read.";
-    report.replaceChildren(failure);
-  }
-  function appendGigList(parent, heading, lines) {
-    if (!lines.length) return;
-    const title = document.createElement("h3");
-    title.textContent = heading;
-    const list = document.createElement("ul");
-    const shown = lines.slice(0, 100);
-    for (const line of shown) {
-      const item = document.createElement("li");
-      item.textContent = line;
-      list.append(item);
-    }
-    parent.append(title, list);
-    if (lines.length > shown.length) {
-      const more = document.createElement("p");
-      more.className = "gig-note";
-      more.textContent = `And ${lines.length - shown.length} more.`;
-      parent.append(more);
-    }
+    const message = error instanceof Error && error.message ? error.message : "The gig check could not be read.";
+    failStatus(message);
+    endBusy();
+    el("gig-refresh").focus();
   }
   function renderGigReport(payload) {
     const report = el("gig-report");
-    const crateName = payload.scope?.crate_name;
-    el("gig-scope").textContent = crateName ? `Checking ${crateName}. Nothing is written.` : "Checking the whole space. Nothing is written.";
-    report.replaceChildren();
-    const scoreLabel = document.createElement("p");
-    scoreLabel.className = "visually-hidden";
-    scoreLabel.textContent = "Ready score";
+    el("gig-scope").textContent = payload.scope?.crate_name || "Whole space";
+    report.replaceChildren(scoreBlock(payload));
+    if (stepIndex >= STEP_COUNT) {
+      report.append(doneScreen(payload));
+      return;
+    }
+    const step = STEPS[stepIndex];
+    report.append(kicker(stepIndex), heading(step.title));
+    if (stepIndex === STEP_COUNT - 1) renderSince(report, payload);
+    else renderStepList(report, step, linesFor(payload, stepIndex));
+    report.append(actions(step.action));
+  }
+  function beginBusy() {
+    const button = el("gig-refresh");
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    el("gig-panel").setAttribute("aria-busy", "true");
+    el("gig-status").textContent = "Checking the library…";
+  }
+  function endBusy() {
+    const button = el("gig-refresh");
+    button.disabled = false;
+    button.setAttribute("aria-busy", "false");
+    el("gig-panel").setAttribute("aria-busy", "false");
+  }
+  function failStatus(message) {
+    el("gig-status").textContent = message;
+  }
+  function focusHeading() {
+    const headingNode = document.getElementById("gig-step-heading");
+    if (headingNode instanceof HTMLElement) headingNode.focus();
+  }
+  function formatCheckedAt(date) {
+    const hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    const suffix = hours >= 12 ? "PM" : "AM";
+    const hour12 = hours % 12 || 12;
+    return `${hour12}:${minutes} ${suffix}`;
+  }
+  function scoreBlock(payload) {
     const score = document.createElement("p");
     score.className = "gig-score";
-    score.textContent = String(payload.score);
-    const verdict = document.createElement("p");
+    const word = payload.ready ? "ready" : "not ready";
+    score.setAttribute("aria-label", `Ready score ${payload.score} out of 100, ${word}`);
+    const value = document.createElement("span");
+    value.className = "gig-score-value";
+    value.textContent = `${payload.score}/100`;
+    const verdict = document.createElement("span");
     verdict.className = payload.ready ? "gig-verdict" : "gig-verdict not-ready";
-    verdict.textContent = payload.ready ? "Ready" : "Not ready";
-    const holdingTitle = document.createElement("h3");
-    holdingTitle.textContent = "Holding it back";
-    report.append(scoreLabel, score, verdict, holdingTitle);
-    const holding = payload.holding_it_back || [];
-    if (!holding.length) {
-      const clear = document.createElement("p");
-      clear.className = "gig-note";
-      clear.textContent = "Nothing is holding it back.";
-      report.append(clear);
-    } else {
-      const list = document.createElement("ul");
-      for (const line of holding) {
-        const item = document.createElement("li");
-        item.textContent = line.summary;
-        list.append(item);
-      }
-      report.append(list);
+    verdict.textContent = payload.ready ? "✓ Ready" : "✕ Not ready";
+    score.append(value, verdict);
+    return score;
+  }
+  function kicker(index) {
+    const step = document.createElement("p");
+    step.className = "gig-kicker";
+    step.textContent = `Step ${index + 1} of ${STEP_COUNT}`;
+    return step;
+  }
+  function heading(text) {
+    const title = document.createElement("h3");
+    title.id = "gig-step-heading";
+    title.tabIndex = -1;
+    title.textContent = text;
+    return title;
+  }
+  function linesFor(payload, index) {
+    if (index === 0) {
+      return (payload.unavailable_drives || []).map((drive) => `${drive.name}: ${drive.track_count} tracks unavailable`);
     }
-    appendGigList(report, "Missing files", (payload.missing_files || []).map((item) => item.path));
-    appendGigList(
-      report,
-      "Unavailable drives",
-      (payload.unavailable_drives || []).map((drive) => `${drive.name}: ${drive.track_count} tracks unavailable`)
-    );
-    appendGigList(
-      report,
-      "Streaming tracks",
-      (payload.streaming_tracks || []).map((item) => `${item.service}: ${item.title}`)
-    );
-    appendGigList(
-      report,
-      "Empty crates",
-      (payload.empty_crates || []).map((item) => `${item.name} — ${item.warning}`)
-    );
-    const since = document.createElement("h3");
-    since.textContent = "Since last gig";
-    const note = document.createElement("p");
-    note.className = "gig-note";
-    note.textContent = payload.snapshot_note || "";
-    report.append(since, note);
+    if (index === 1) return (payload.missing_files || []).map((item2) => item2.path);
+    if (index === 2) return (payload.streaming_tracks || []).map((item2) => `${item2.service}: ${item2.title}`);
+    if (index === 3) return (payload.empty_crates || []).map((item2) => `${item2.name} — ${item2.warning}`);
+    return [];
+  }
+  function renderStepList(parent, step, lines) {
+    if (!lines.length) {
+      const empty = document.createElement("p");
+      empty.className = "gig-note";
+      empty.textContent = step.empty;
+      parent.append(empty);
+      return;
+    }
+    parent.append(detailsGroup(step.title, lines));
+  }
+  function renderSince(parent, payload) {
+    const note = payload.snapshot_note?.trim() ?? "";
+    if (note) {
+      const line = document.createElement("p");
+      line.className = "gig-note";
+      line.textContent = note;
+      parent.append(line);
+    }
     const changes = payload.changes;
-    if (!changes) return;
+    if (!changes) {
+      if (!note) parent.append(noteLine("No snapshot to compare."));
+      return;
+    }
     const groups = [
       ["Crates added", changes.crates_added || []],
       ["Crates removed", changes.crates_removed || []],
@@ -402,14 +479,91 @@
       ["Beatgrids edited", changes.grids_edited || []],
       ["Tags edited", changes.tags_edited || []]
     ];
-    if (!groups.some(([, lines]) => lines.length)) {
-      const same = document.createElement("p");
-      same.className = "gig-note";
-      same.textContent = "Nothing changed since the last snapshot.";
-      report.append(same);
-      return;
+    let any = false;
+    for (const [label, lines] of groups) {
+      if (!lines.length) continue;
+      parent.append(detailsGroup(label, lines));
+      any = true;
     }
-    for (const [heading, lines] of groups) appendGigList(report, heading, lines);
+    if (!any) parent.append(noteLine(STEPS[STEP_COUNT - 1].empty));
+  }
+  function noteLine(text) {
+    const line = document.createElement("p");
+    line.className = "gig-note";
+    line.textContent = text;
+    return line;
+  }
+  function detailsGroup(label, lines) {
+    const details = document.createElement("details");
+    details.className = "gig-group";
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = `${label} (${lines.length})`;
+    const list = document.createElement("ul");
+    const shown = lines.slice(0, LIST_CAP);
+    for (const line of shown) list.append(item(line));
+    details.append(summary, list);
+    if (lines.length > LIST_CAP) {
+      const show = document.createElement("button");
+      show.type = "button";
+      show.className = "gig-show-all";
+      show.textContent = `Show all ${lines.length}`;
+      show.addEventListener("click", () => {
+        list.replaceChildren();
+        for (const line of lines) list.append(item(line));
+        show.remove();
+      });
+      details.append(show);
+    }
+    return details;
+  }
+  function item(text) {
+    const row = document.createElement("li");
+    row.textContent = text;
+    return row;
+  }
+  function actions(primary) {
+    const bar = document.createElement("div");
+    bar.className = "gig-actions";
+    const back = document.createElement("button");
+    back.type = "button";
+    back.dataset.gigAction = "back";
+    back.textContent = "Back";
+    back.disabled = stepIndex === 0;
+    bar.append(back);
+    if (primary) {
+      const next = document.createElement("button");
+      next.type = "button";
+      next.className = "gig-primary";
+      next.dataset.gigAction = "next";
+      next.textContent = primary;
+      bar.append(next);
+    }
+    const exit = document.createElement("button");
+    exit.type = "button";
+    exit.dataset.gigAction = "exit";
+    exit.textContent = "Exit gig check";
+    bar.append(exit);
+    return bar;
+  }
+  function doneScreen(payload) {
+    const fragment = document.createDocumentFragment();
+    fragment.append(heading("Done"));
+    const art = document.createElement("div");
+    art.id = "gig-ready-art";
+    art.className = "gig-art-slot";
+    art.dataset.slot = "gig-ready";
+    art.setAttribute("aria-hidden", "true");
+    const line = document.createElement("p");
+    line.className = "gig-done";
+    const crate = payload.scope?.crate_name || "the whole space";
+    const lead = payload.ready ? "Ready for the gig" : "Not ready for the gig";
+    line.textContent = `${lead}: ${payload.score}/100, checked ${crate} at ${checkedAt}`;
+    fragment.append(art, line);
+    const holding = (payload.holding_it_back || []).map((item2) => item2.summary);
+    if (holding.length) fragment.append(detailsGroup("Holding it back", holding));
+    fragment.append(actions(null));
+    return fragment;
   }
 
   // src/restore.ts
@@ -478,20 +632,20 @@
       list.append(empty);
       return;
     }
-    for (const item of state.snapshots) {
+    for (const item2 of state.snapshots) {
       const card = document.createElement("article");
       card.className = "snapshot-card";
       card.setAttribute("role", "listitem");
       const title = document.createElement("p");
-      title.textContent = `${item.created || "Unknown time"} · ${item.trigger || "snapshot"}`;
+      title.textContent = `${item2.created || "Unknown time"} · ${item2.trigger || "snapshot"}`;
       const detail = document.createElement("p");
-      const version = item.serato_version && item.serato_version !== "unknown" ? `Serato ${item.serato_version} (build ${item.serato_build})` : "Serato version unknown";
-      const drives = (item.unavailable_drives || []).length ? ` Unavailable: ${(item.unavailable_drives || []).join(", ")}.` : "";
-      detail.textContent = `${version}. ${item.reason || ""}${drives}`;
+      const version = item2.serato_version && item2.serato_version !== "unknown" ? `Serato ${item2.serato_version} (build ${item2.serato_build})` : "Serato version unknown";
+      const drives = (item2.unavailable_drives || []).length ? ` Unavailable: ${(item2.unavailable_drives || []).join(", ")}.` : "";
+      detail.textContent = `${version}. ${item2.reason || ""}${drives}`;
       const restore = document.createElement("button");
       restore.type = "button";
       restore.textContent = "Review restore";
-      restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));
+      restore.addEventListener("click", () => openSnapshotPlan(item2.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));
       card.append(title, detail, restore);
       list.append(card);
     }
@@ -544,7 +698,7 @@
     if (!items.length) {
       line.textContent = `${label}: none`;
     } else {
-      const names = items.slice(0, 8).map((item) => item.name || item.path || item.drive_label || "item");
+      const names = items.slice(0, 8).map((item2) => item2.name || item2.path || item2.drive_label || "item");
       const extra = items.length > names.length ? `, and ${items.length - names.length} more` : "";
       line.textContent = `${label}: ${items.length}. ${names.join(", ")}${extra}`;
     }
@@ -560,9 +714,9 @@
     }
     line.textContent = `${label}: ${items.length} file${items.length === 1 ? "" : "s"}`;
     parent.append(line);
-    for (const item of items.slice(0, 12)) {
+    for (const item2 of items.slice(0, 12)) {
       const row = document.createElement("p");
-      row.textContent = fileName(item.path || "");
+      row.textContent = fileName(item2.path || "");
       parent.append(row);
     }
   }
@@ -787,7 +941,7 @@
     for (const crate of state.crates) {
       if (seen.has(crate.id)) continue;
       if (keep && !keep.has(crate.id)) continue;
-      const parentListed = state.crates.some((item) => item.id === crate.parent);
+      const parentListed = state.crates.some((item2) => item2.id === crate.parent);
       if (parentListed) continue;
       seen.add(crate.id);
       crate.depth = 0;
@@ -927,8 +1081,8 @@
   function placeCrateFocus(previousId) {
     const items = [...el("crate-list").querySelectorAll(".crate")];
     if (!items.length) return null;
-    const current = items.find((item) => item.dataset.id === previousId) || items[0];
-    for (const item of items) item.tabIndex = item === current ? 0 : -1;
+    const current = items.find((item2) => item2.dataset.id === previousId) || items[0];
+    for (const item2 of items) item2.tabIndex = item2 === current ? 0 : -1;
     return current;
   }
   function renderCrates() {
@@ -975,7 +1129,7 @@
   function renderRules() {
     document.querySelector(".rules")?.remove();
     document.querySelector(".rule-edit")?.remove();
-    const crate = state.crates.find((item) => item.id === state.activeCrate);
+    const crate = state.crates.find((item2) => item2.id === state.activeCrate);
     if (!crate || !crate.rules || state.mode !== "crates") return;
     const line = document.createElement("p");
     line.className = "rules";
@@ -1042,7 +1196,10 @@
     }
     if (state.mode === "stems") el("mode-note").textContent = "Tracks with a stems analysis state.";
     if (filesMode) el("mode-note").textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
-    if (gigMode) el("mode-note").textContent = "Read-only. This check does not change the library.";
+    if (gigMode) {
+      el("mode-note").textContent = "Read-only. This check does not change the library.";
+      document.querySelector(".rules")?.remove();
+    }
     if (snapshotsMode) {
       el("mode-note").textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
     }
@@ -1068,7 +1225,8 @@
       return;
     }
     if (gigMode) {
-      el("crate-foot").textContent = state.activeCrate === "all" ? "Whole space" : "Selected crate";
+      const crate = state.crates.find((item2) => item2.id === state.activeCrate);
+      el("crate-foot").textContent = state.activeCrate === "all" ? "All tracks" : crate?.name ?? "Selected crate";
       return;
     }
     if (snapshotsMode) {
@@ -1100,7 +1258,6 @@
       return;
     }
     if (state.mode === "gig") {
-      document.querySelector(".rules")?.remove();
       renderCrates();
       return;
     }
@@ -1145,13 +1302,13 @@
     if (id !== "all") expandAncestors(id);
     el("list").scrollTop = 0;
     renderList();
-    if (state.mode === "gig") loadGigCheck().catch((error) => showGigFailure(error));
+    if (state.mode === "gig") loadGigCheck().catch(showGigFailure);
   }
-  function focusCrateItem(item) {
-    if (!item) return;
+  function focusCrateItem(item2) {
+    if (!item2) return;
     for (const button of el("crate-list").querySelectorAll(".crate")) button.tabIndex = -1;
-    item.tabIndex = 0;
-    item.focus();
+    item2.tabIndex = 0;
+    item2.focus();
   }
   async function selectTrack(id) {
     state.selectedId = id;
@@ -1180,7 +1337,7 @@
   function selectEntry(id) {
     state.selectedId = id;
     paintRows();
-    const entry = state.entries.find((item) => item.id === id);
+    const entry = state.entries.find((item2) => item2.id === id);
     if (!entry) return;
     const body = document.createElement("div");
     body.className = "detail-body";
@@ -1238,10 +1395,10 @@
     const body = document.createElement("div");
     body.className = "detail-body";
     if (track.album) {
-      const kicker = document.createElement("p");
-      kicker.className = "detail-kicker";
-      kicker.textContent = track.album;
-      body.append(kicker);
+      const kicker2 = document.createElement("p");
+      kicker2.className = "detail-kicker";
+      kicker2.textContent = track.album;
+      body.append(kicker2);
     }
     const title = document.createElement("h2");
     title.textContent = track.title ?? "";
@@ -1352,8 +1509,8 @@
       saveTrack(track.id, form);
     });
     body.append(form);
-    const actions = document.createElement("div");
-    actions.className = "actions";
+    const actions2 = document.createElement("div");
+    actions2.className = "actions";
     const reveal = document.createElement("button");
     reveal.type = "button";
     const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
@@ -1375,7 +1532,7 @@
     remove.textContent = "Remove from library";
     remove.disabled = !writable;
     remove.addEventListener("click", () => removeTrack(track.id));
-    actions.append(reveal, prepare, relocate, remove);
+    actions2.append(reveal, prepare, relocate, remove);
     if (state.mode === "duplicates" && selectedDuplicateGroup()) {
       const merge = document.createElement("button");
       merge.type = "button";
@@ -1384,9 +1541,9 @@
       merge.addEventListener("click", () => {
         bridge.openMergeDialog().catch((error) => setNotice(failureOf(error).message));
       });
-      actions.append(merge);
+      actions2.append(merge);
     }
-    body.append(actions);
+    body.append(actions2);
     body.append(relatedSection(track, writable));
     body.append(markerSection(track));
     if (track.copies?.length) body.append(copySection(track.copies));
@@ -1394,9 +1551,9 @@
     for (const group of track.groups || []) {
       const section = document.createElement("section");
       section.className = "group";
-      const heading = document.createElement("h3");
-      heading.textContent = group.name ?? "";
-      section.append(heading);
+      const heading2 = document.createElement("h3");
+      heading2.textContent = group.name ?? "";
+      section.append(heading2);
       const open = group.name !== "Search copies";
       if (!open) {
         const toggle = document.createElement("button");
@@ -1445,9 +1602,9 @@
   function markerSection(track) {
     const section = document.createElement("section");
     section.className = "group";
-    const heading = document.createElement("h3");
-    heading.textContent = "Cues, loops, and beatgrid";
-    section.append(heading);
+    const heading2 = document.createElement("h3");
+    heading2.textContent = "Cues, loops, and beatgrid";
+    section.append(heading2);
     const note = document.createElement("p");
     note.className = "detail-kicker";
     if (track.markers_unavailable) note.textContent = "The file is not on disk, so cues cannot be read.";
@@ -1523,9 +1680,9 @@
   function copySection(copies) {
     const section = document.createElement("section");
     section.className = "group";
-    const heading = document.createElement("h3");
-    heading.textContent = "Other copies";
-    section.append(heading);
+    const heading2 = document.createElement("h3");
+    heading2.textContent = "Other copies";
+    section.append(heading2);
     for (const copy of copies) {
       const row = document.createElement("div");
       row.className = "copy-row";
@@ -1549,17 +1706,17 @@
     const section = document.createElement("section");
     section.className = "group";
     section.dataset.trackId = String(track.id);
-    const heading = document.createElement("h3");
-    heading.id = `related-heading-${track.id}`;
-    heading.textContent = "Related tracks";
-    section.setAttribute("aria-labelledby", heading.id);
+    const heading2 = document.createElement("h3");
+    heading2.id = `related-heading-${track.id}`;
+    heading2.textContent = "Related tracks";
+    section.setAttribute("aria-labelledby", heading2.id);
     section.setAttribute("aria-busy", "true");
     const status = document.createElement("p");
     status.className = "detail-kicker";
     status.setAttribute("role", "status");
     const path = track.resolved_path || track.edit?.portable_id || "";
     status.textContent = path ? "Loading related tracks" : "This track has no file path, so it cannot be linked.";
-    section.append(heading, status);
+    section.append(heading2, status);
     if (path) loadRelated(track, section, writable, "");
     return section;
   }
@@ -1581,8 +1738,8 @@
     }
   }
   function renderRelated(track, section, writable, payload, query) {
-    const heading = section.querySelector("h3");
-    section.replaceChildren(heading);
+    const heading2 = section.querySelector("h3");
+    section.replaceChildren(heading2);
     section.setAttribute("aria-busy", "false");
     const saved = Array.isArray(payload.saved) ? payload.saved : [];
     const suggested = Array.isArray(payload.suggested) ? payload.suggested : [];
@@ -1615,8 +1772,8 @@
     const list = document.createElement("ul");
     list.className = "related-list";
     for (const link of saved) {
-      const item = document.createElement("li");
-      item.className = "related-row";
+      const item2 = document.createElement("li");
+      item2.className = "related-row";
       const main = document.createElement("div");
       const other = link.track || {};
       const label = other.title || "Untitled";
@@ -1655,8 +1812,8 @@
       remove.textContent = "Remove";
       remove.setAttribute("aria-label", `Remove link to ${label}`);
       remove.addEventListener("click", () => removeRelated(track, section, link));
-      item.append(main, remove);
-      list.append(item);
+      item2.append(main, remove);
+      list.append(item2);
     }
     return list;
   }
@@ -1689,7 +1846,7 @@
         results.append(hint);
         return;
       }
-      const hits = state.tracks.filter((item) => item.id !== track.id && matchesQuery(item, terms)).slice(0, 8);
+      const hits = state.tracks.filter((item2) => item2.id !== track.id && matchesQuery(item2, terms)).slice(0, 8);
       if (!hits.length) {
         const empty = document.createElement("li");
         empty.className = "related-meta";
@@ -1698,14 +1855,14 @@
         return;
       }
       for (const hit of hits) {
-        const item = document.createElement("li");
+        const item2 = document.createElement("li");
         const choose = document.createElement("button");
         choose.type = "button";
         choose.className = "text-button";
         choose.textContent = hit.artist ? `${hit.name || "Untitled"} · ${hit.artist}` : hit.name || "Untitled";
         choose.addEventListener("click", () => relatedLinkForm(track, section, form, hit, input.value));
-        item.append(choose);
-        results.append(item);
+        item2.append(choose);
+        results.append(item2);
       }
     };
     input.addEventListener("input", paint);
@@ -1762,27 +1919,27 @@
   function relatedSuggestList(track, section, suggested) {
     const list = document.createElement("ul");
     list.className = "related-list";
-    for (const item of suggested) {
+    for (const item2 of suggested) {
       const row = document.createElement("li");
       row.className = "related-row";
       const main = document.createElement("div");
       const name = document.createElement("span");
-      name.textContent = item.artist ? `${item.title || "Untitled"} · ${item.artist}` : item.title || "Untitled";
+      name.textContent = item2.artist ? `${item2.title || "Untitled"} · ${item2.artist}` : item2.title || "Untitled";
       const reasons = document.createElement("p");
       reasons.className = "related-meta";
-      reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
+      reasons.textContent = Array.isArray(item2.reasons) ? item2.reasons.join(" · ") : "";
       main.append(name, reasons);
       const save2 = document.createElement("button");
       save2.type = "button";
       save2.className = "text-button";
       save2.textContent = "Save";
-      save2.setAttribute("aria-label", `Save link to ${item.title || "Untitled"}`);
+      save2.setAttribute("aria-label", `Save link to ${item2.title || "Untitled"}`);
       save2.addEventListener("click", () => {
         save2.disabled = true;
         saveRelated(track, section, {
           action: "add",
           asset: track.id,
-          target: item.asset_id,
+          target: item2.asset_id,
           mutual: true,
           note: "",
           rating: null,
@@ -1840,9 +1997,9 @@
   function membershipSection(track, writable) {
     const section = document.createElement("section");
     section.className = "group";
-    const heading = document.createElement("h3");
-    heading.textContent = "Crates";
-    section.append(heading);
+    const heading2 = document.createElement("h3");
+    heading2.textContent = "Crates";
+    section.append(heading2);
     const holder = document.createElement("div");
     holder.className = "member-list";
     const chosen = new Set(track.crate_ids || []);
@@ -2017,7 +2174,7 @@
     }
   }
   async function renameCrate() {
-    const crate = state.crates.find((item) => item.id === state.activeCrate);
+    const crate = state.crates.find((item2) => item2.id === state.activeCrate);
     if (!crate) return;
     const name = prompt("Rename crate", crate.name);
     if (!name || !name.trim() || name.trim() === crate.name) return;
@@ -2032,7 +2189,7 @@
     }
   }
   async function colorCrate() {
-    const crate = state.crates.find((item) => item.id === state.activeCrate);
+    const crate = state.crates.find((item2) => item2.id === state.activeCrate);
     if (!crate) return;
     const choice = prompt("Crate color: none, red, orange, yellow, green, blue, purple, pink");
     if (choice == null) return;
@@ -2056,7 +2213,7 @@
     }
   }
   async function deleteCrate() {
-    const crate = state.crates.find((item) => item.id === state.activeCrate);
+    const crate = state.crates.find((item2) => item2.id === state.activeCrate);
     if (!crate) return;
     if (!confirm(`Delete “${crate.name}” and the crates inside it? The tracks stay in the library.`)) return;
     try {
@@ -2190,7 +2347,7 @@
     if (mode === "snapshots") {
       loadSnapshots().catch((error) => failSnapshots(error));
     }
-    if (mode === "gig") loadGigCheck().catch((error) => showGigFailure(error));
+    if (mode === "gig") loadGigCheck().catch(showGigFailure);
     renderList();
   }
   function showFailure(error) {
@@ -2320,7 +2477,7 @@
     list.className = "files-crumbs";
     const crumbs = visibleCrumbs();
     crumbs.forEach((crumb, index) => {
-      const item = document.createElement("li");
+      const item2 = document.createElement("li");
       const last = index === crumbs.length - 1;
       if (!last && crumb.path) {
         const button = document.createElement("button");
@@ -2330,22 +2487,22 @@
         button.addEventListener("click", () => {
           loadFolder(crumb.path, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
         });
-        item.append(button);
+        item2.append(button);
       } else {
         const current = document.createElement("span");
         current.className = "files-crumb";
         current.setAttribute("aria-current", "page");
         current.textContent = crumb.name;
-        item.append(current);
+        item2.append(current);
       }
       if (!last) {
         const sep = document.createElement("span");
         sep.className = "files-sep";
         sep.setAttribute("aria-hidden", "true");
         sep.textContent = "/";
-        item.append(sep);
+        item2.append(sep);
       }
-      list.append(item);
+      list.append(item2);
     });
     nav.append(list);
   }
@@ -2447,8 +2604,8 @@
   function rootsEmpty() {
     const box = document.createElement("div");
     box.className = "files-empty-state";
-    const heading = document.createElement("h2");
-    heading.textContent = "No music folders yet";
+    const heading2 = document.createElement("h2");
+    heading2.textContent = "No music folders yet";
     const copy = document.createElement("p");
     copy.textContent = "Setup finds the folders Serato uses for your music.";
     const button = document.createElement("button");
@@ -2457,7 +2614,7 @@
     button.className = "files-primary";
     button.textContent = "Run setup";
     button.addEventListener("click", () => bridge.openSetup());
-    box.append(heading, copy, button);
+    box.append(heading2, copy, button);
     return box;
   }
   function focusFilesIndex(index) {
@@ -2718,11 +2875,11 @@
       renderList();
     });
     el("crate-list").addEventListener("keydown", (event) => {
-      const item = event.target.closest(".crate");
-      if (!item || !el("crate-list").contains(item)) return;
+      const item2 = event.target.closest(".crate");
+      if (!item2 || !el("crate-list").contains(item2)) return;
       const items = [...el("crate-list").querySelectorAll(".crate")];
-      const index = items.indexOf(item);
-      const id = item.dataset.id === "all" ? "all" : Number(item.dataset.id);
+      const index = items.indexOf(item2);
+      const id = item2.dataset.id === "all" ? "all" : Number(item2.dataset.id);
       if (event.key === "ArrowDown") {
         event.preventDefault();
         focusCrateItem(items[Math.min(items.length - 1, index + 1)]);
@@ -2737,13 +2894,13 @@
         focusCrateItem(items[items.length - 1]);
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
-        if (!state.crateQuery && item.getAttribute("aria-expanded") === "false") toggleCrate(id);
-        else if (item.getAttribute("aria-expanded") === "true") focusCrateItem(items[index + 1]);
+        if (!state.crateQuery && item2.getAttribute("aria-expanded") === "false") toggleCrate(id);
+        else if (item2.getAttribute("aria-expanded") === "true") focusCrateItem(items[index + 1]);
       } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-        if (!state.crateQuery && item.getAttribute("aria-expanded") === "true") toggleCrate(id);
-        else if (item.dataset.parent) {
-          focusCrateItem(items.find((button) => button.dataset.id === item.dataset.parent));
+        if (!state.crateQuery && item2.getAttribute("aria-expanded") === "true") toggleCrate(id);
+        else if (item2.dataset.parent) {
+          focusCrateItem(items.find((button) => button.dataset.id === item2.dataset.parent));
         }
       } else if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -2840,9 +2997,9 @@
     const list = el("rekordbox-report");
     list.replaceChildren();
     for (const line of lines) {
-      const item = document.createElement("li");
-      item.textContent = line;
-      list.append(item);
+      const item2 = document.createElement("li");
+      item2.textContent = line;
+      list.append(item2);
     }
   }
   function selectedMergeKeepId() {
@@ -2878,39 +3035,39 @@
     const list = document.createElement("ul");
     list.className = "merge-preview";
     const added = preview.crates_added || [];
-    const item = (text) => {
+    const item2 = (text) => {
       const line = document.createElement("li");
       line.textContent = text;
       list.append(line);
     };
     if (added.length) {
       const names = added.map((crate) => crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name);
-      item(`Add the kept copy to ${names.join(", ")}.`);
+      item2(`Add the kept copy to ${names.join(", ")}.`);
     } else if ((preview.crates_kept || []).length) {
-      item("The kept copy is already in every crate the others use. It stays where it is.");
+      item2("The kept copy is already in every crate the others use. It stays where it is.");
     } else {
-      item("None of the copies are in a crate.");
+      item2("None of the copies are in a crate.");
     }
-    for (const space of preview.spaces_added || []) item(`Add the kept copy to the ${space} space.`);
+    for (const space of preview.spaces_added || []) item2(`Add the kept copy to the ${space} space.`);
     if ((preview.fields || []).length) {
       for (const field of preview.fields || []) {
         const before = previewFieldValue(field.field || "", field.before);
         const after = previewFieldValue(field.field || "", field.after);
-        item(`${field.label} changes from ${before} to ${after}.`);
+        item2(`${field.label} changes from ${before} to ${after}.`);
       }
     } else {
-      item("No empty fields or higher play count to copy.");
+      item2("No empty fields or higher play count to copy.");
     }
     if (preview.history_repointed) {
       const count = Number(preview.history_entries) || 0;
-      item(count ? `Point ${count} history ${count === 1 ? "entry" : "entries"} at the kept copy.` : "No history entries point at the other copies.");
+      item2(count ? `Point ${count} history ${count === 1 ? "entry" : "entries"} at the kept copy.` : "No history entries point at the other copies.");
     } else {
-      item("This library has no history track id to repoint.");
+      item2("This library has no history track id to repoint.");
     }
     const removed = (preview.removed || []).length;
-    item(`Remove ${removed} ${removed === 1 ? "copy" : "copies"} from the library.`);
+    item2(`Remove ${removed} ${removed === 1 ? "copy" : "copies"} from the library.`);
     for (const file of preview.files || []) {
-      if (file.reason) item(`${file.file}: ${file.reason}`);
+      if (file.reason) item2(`${file.file}: ${file.reason}`);
     }
     el("merge-preview").append(list);
     if (preview.cue_warning) {
@@ -3169,11 +3326,11 @@
     const list = el("files-changes");
     list.replaceChildren();
     for (const change of payload.changes || []) {
-      const item = document.createElement("li");
+      const item2 = document.createElement("li");
       const crates = Array.isArray(change.crates) && change.crates.length ? ` Crates: ${change.crates.join(", ")}.` : "";
       const effect = change.effect === "trash" ? "Trash" : change.to;
-      item.textContent = `${change.from} → ${effect}${crates}`;
-      list.append(item);
+      item2.textContent = `${change.from} → ${effect}${crates}`;
+      list.append(item2);
     }
     if (payload.more) {
       const more = document.createElement("li");
@@ -3506,17 +3663,14 @@
       confirmSnapshotRestore().catch((error) => setSnapshotDialogStatus(failureOf(error).message));
     });
   }
-  function wireGig() {
-    el("gig-refresh").addEventListener("click", () => {
-      loadGigCheck().catch((error) => showGigFailure(error));
-    });
-  }
   mountTrackList();
   wireLibrary();
   wireVirtualScroll();
   wireDialogs();
   wireSnapshots();
-  wireGig();
+  wireGigCheck(() => {
+    setMode("crates");
+  });
   wireLayout();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
