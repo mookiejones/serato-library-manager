@@ -653,6 +653,7 @@ class ContrastTests(unittest.TestCase):
             ".list:focus-visible",
             ".crate:focus-visible",
             ".twist:focus-visible",
+            ".splitter:focus-visible",
             '.crate-row:has(.crate[aria-selected="true"])',
             '.row[aria-selected="true"]',
             ".crate-row.holds-selection",

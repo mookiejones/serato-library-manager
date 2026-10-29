@@ -833,15 +833,17 @@ def public_settings() -> dict[str, object]:
     """Return the sharing state the page is allowed to see.
 
     Returns:
-        Consent, whether the first-launch prompt should show, whether
-        this build has a key, the app version, and the Rekordbox export
-        bar. The install id and the telemetry keys are not included.
+        Consent, whether the first-launch prompt should show, the saved
+        pane layout, whether this build has a key, the app version, and the
+        Rekordbox export bar. The install id and the telemetry keys are not
+        included.
     """
     settings = app_config.load_settings()
     return {
         "telemetry_consent": settings.telemetry_consent,
         "needs_consent_prompt": settings.telemetry_consent is None,
         "wizard_complete": settings.wizard_complete is True,
+        "layout": {"track_list_width": settings.track_list_width},
         "telemetry_configured": telemetry_configured(),
         "app_version": app_config.APP_VERSION,
         "rekordbox": settings.rekordbox.as_json(),

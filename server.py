@@ -1811,12 +1811,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def _post_settings(self, payload: dict[str, object]) -> None:
-        """Save the sharing choice, the export bar, or whether setup finished.
+        """Save the sharing choice, the export bar, the layout, or whether setup finished.
 
         Args:
             payload: JSON object. ``{"wizard_complete": bool}`` is accepted
                 alone, and setup can be marked finished only after the
-                sharing choice is already a boolean. Otherwise
+                sharing choice is already a boolean.
+                ``{"layout": {"track_list_width": int | None}}`` is accepted
+                alone. A null width resets the default split. Otherwise
                 ``telemetry_consent`` must be a boolean when it is present,
                 and ``rekordbox`` must be an object whose fields are
                 ``hot_loops``, ``memory_cues``, and ``key_notation``.
@@ -1840,6 +1842,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except OSError:
                 self.send_json({"error": "Setup could not be saved."}, status=500)
+                return
+            self.send_json(telemetry.public_settings())
+            return
+        if keys == {"layout"} and isinstance(payload.get("layout"), dict):
+            layout = payload["layout"]
+            assert isinstance(layout, dict)
+            width = layout.get("track_list_width")
+            if set(layout) != {"track_list_width"} or not (width is None or isinstance(width, int)):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            try:
+                app_config.set_track_list_width(width)
+            except ValueError:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            except OSError:
+                self.send_json({"error": "The layout could not be saved."}, status=500)
                 return
             self.send_json(telemetry.public_settings())
             return

@@ -292,6 +292,40 @@ class SetupApiTests(unittest.TestCase):
             self.assertIn("error", body)
             self.assertFalse(path.exists(), payload)
 
+    def test_layout_width_is_saved_and_reset(self) -> None:
+        """Save the track list width over HTTP, refuse bad shapes, and reset.
+
+        Returns:
+            None. The test fails if a bad body is stored or null keeps a width.
+        """
+        path = self.config / "settings.json"
+        rejected = (
+            {"layout": {"track_list_width": "520"}},
+            {"layout": {"track_list_width": True}},
+            {"layout": {"track_list_width": 520.5}},
+            {"layout": {"track_list_width": 12}},
+            {"layout": {"track_list_width": 520, "detail": 300}},
+            {"layout": {}},
+            {"layout": 520},
+            {"layout": {"track_list_width": 520}, "wizard_complete": True},
+        )
+        for payload in rejected:
+            status, body = _request(self.base, "/api/settings", payload)
+            self.assertEqual(status, 400, payload)
+            self.assertFalse(path.exists(), payload)
+        status, saved = _request(self.base, "/api/settings", {"layout": {"track_list_width": 520}})
+        self.assertEqual(status, 200)
+        assert isinstance(saved, dict)
+        self.assertEqual(saved["layout"], {"track_list_width": 520})
+        self.assertIsNone(saved["telemetry_consent"])
+        status, fetched = _request(self.base, "/api/settings")
+        assert isinstance(fetched, dict)
+        self.assertEqual(fetched["layout"], {"track_list_width": 520})
+        status, reset = _request(self.base, "/api/settings", {"layout": {"track_list_width": None}})
+        self.assertEqual(status, 200)
+        assert isinstance(reset, dict)
+        self.assertEqual(reset["layout"], {"track_list_width": None})
+
     def test_wizard_complete_keeps_the_window_and_a_rerun_keeps_settings(self) -> None:
         """Keep the desktop frame, the install id, and the sharing choice.
 
@@ -305,6 +339,7 @@ class SetupApiTests(unittest.TestCase):
         """
         frame = app_config.WindowGeometry(-12, 0, 1280, 800)
         app_config.save_window_geometry(frame)
+        app_config.set_track_list_width(520)
         status, choice = _request(self.base, "/api/settings", {"telemetry_consent": False})
         self.assertEqual(status, 200)
         assert isinstance(choice, dict)
@@ -343,6 +378,7 @@ class SetupApiTests(unittest.TestCase):
         stored = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(stored["install_id"], install_id)
         self.assertEqual(stored["window"], before["window"])
+        self.assertEqual(stored["layout"], {"track_list_width": 520})
         self.assertIs(stored["telemetry_consent"], False)
         self.assertEqual(set(stored), set(app_config.SETTINGS_KEYS))
 

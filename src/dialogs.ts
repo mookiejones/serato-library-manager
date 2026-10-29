@@ -17,6 +17,7 @@ import type {
 } from "./api-types";
 import { bridge } from "./bridge";
 import { el } from "./dom";
+import { applyLayout } from "./layout";
 import { state } from "./state";
 import {
   applyStatus,
@@ -553,6 +554,7 @@ export async function loadPrivacy() {
   const payload = await readJSONOr<SettingsPayload>(response, {});
   if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
   applyPrivacy(payload);
+  applyLayout(payload);
   if (token === rekordboxToken) applyRekordboxExport(payload);
   if (!state.wizardComplete && openWizard(false, el("search"))) return;
   if (payload.needs_consent_prompt) showConsent();

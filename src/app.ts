@@ -12,6 +12,7 @@
 import { failureOf } from "./api";
 import { wireDialogs } from "./dialogs";
 import { el } from "./dom";
+import { wireLayout } from "./layout";
 import {
   bindLibraryReload,
   confirmSnapshotRestore,
@@ -62,5 +63,6 @@ wireLibrary();
 wireVirtualScroll();
 wireDialogs();
 wireSnapshots();
+wireLayout();
 bindLibraryReload(loadLibrary);
 loadLibrary().catch(showFailure);
