@@ -1044,6 +1044,7 @@ class GuardTests(unittest.TestCase):
             None. The test fails if the link is listed.
         """
         import json
+        import os
         import threading
         import urllib.error
         import urllib.request
@@ -1053,12 +1054,20 @@ class GuardTests(unittest.TestCase):
         import library
         import server
 
-        parent = Path("/tmp") if Path("/tmp").is_dir() else Path(Path.cwd().anchor)
+        if os.name == "nt":
+            parent = Path(Path.cwd().anchor)
+            target = str(parent)
+        else:
+            parent = Path("/tmp")
+            target = "/"
         link = parent / "rl"
+        # ``/`` is the computer root on Linux. On Windows that string does
+        # not resolve, so the link targets the drive root, which is the
+        # same bare root the guard refuses.
         if link.exists() or link.is_symlink():
             link.unlink()
         try:
-            link.symlink_to("/", target_is_directory=True)
+            link.symlink_to(target, target_is_directory=True)
         except OSError:
             self.skipTest("symlinks are not available")
         self.assertLessEqual(files._path_depth(link), 2)
