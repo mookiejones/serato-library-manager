@@ -130,6 +130,13 @@ CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/wor
 | OS | macOS and Windows for the app. Linux runs the test suite and is not a published build. |
 | Serato | Serato DJ Pro. Writes and restores run when the version is a dotted number below 5. Serato 5 can be snapshotted and read. Writes and restores stay off while Lucid and Flexible beatgrid storage is not verified. An unknown version blocks writes. |
 
+## Guides
+
+- [Panic page](docs/panic.md). Red tracks, missing crates, a drive that will not mount, or a library that looks wrong after a Serato update. Restore in the app is **Snapshots**, then **Review restore**.
+- [Is my library safe?](docs/is-my-library-safe.md). Snapshots, restore, undo, and the outside-change watcher. The gig check is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. The pictures are example layouts.
+- [Moving between Serato and Rekordbox](docs/coming-from-rekordbox.md). What the export keeps.
+- [User guide](docs/index.md). The rest of the app.
+
 ## More
 
 The user guide is [docs/index.md](docs/index.md) and [the published site](https://mookiejones.github.io/serato-library-manager/). Contributing is [CONTRIBUTING.md](CONTRIBUTING.md). Security reports are [SECURITY.md](SECURITY.md). Actions and releases are [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3).

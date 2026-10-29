@@ -35,6 +35,10 @@ The recording below is also on the [Duplicates](guide/duplicates.md) page, where
 
 Start with [Troubleshooting](guide/troubleshooting.md).
 
+The [Panic page](panic.md) covers red tracks, empty crates, a drive that will not mount, and a library that looks different after an update. Restore from the app is **Snapshots**, then **Review restore**.
+
+[Is my library safe?](is-my-library-safe.md) describes restore, undo, snapshots, and the outside-change watcher. Those work. The gig check on that page is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app.
+
 ## For developers
 
 The pages above are the user guide. The code reference, the GitHub setup, and the related-tracks file format stay in the repository and are linked from the **For developers** section of this site. They are not part of the DJ guide.
