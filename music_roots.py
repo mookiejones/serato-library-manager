@@ -14,6 +14,7 @@ import os
 import sqlite3
 import sys
 import threading
+import types
 from collections.abc import Callable, Sequence
 from contextlib import closing
 from datetime import datetime, timezone
@@ -224,7 +225,8 @@ def _load_cached(*, refresh: bool) -> tuple[list[dict[str, object]], str]:
         if refresh:
             _cache = None
         if _cache is None:
-            _cache = (_discover(), _computed_at())
+            found = tuple(types.MappingProxyType(dict(item)) for item in _discover())
+            _cache = (found, _computed_at())
         rows, computed = _cache
         return [dict(item) for item in rows], computed
 
@@ -311,7 +313,7 @@ def _computed_at() -> str:
     Returns:
         An ISO-8601 timestamp with a ``Z`` suffix.
     """
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _public_kind(item: dict[str, object]) -> str:

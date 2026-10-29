@@ -916,6 +916,10 @@ class ReviewTests(unittest.TestCase):
         self.assertTrue(music_roots._removable("\\\\server\\share\\Music"))
         self.assertTrue(files._bare_root("\\\\server\\share"))
         self.assertTrue(files._bare_root("//server/share"))
+        self.assertTrue(files._bare_root("\\\\?\\UNC\\server\\share"))
+        self.assertTrue(files._bare_root("\\\\?\\C:\\"))
+        self.assertFalse(files._bare_root("\\\\?\\UNC\\server\\share\\Music"))
+        self.assertFalse(files._bare_root("\\\\?\\C:\\Music"))
         self.assertFalse(files._bare_root("\\\\server\\share\\Music"))
         self.assertTrue(files._bare_root("C:\\"))
         self.assertFalse(files._bare_root("C:\\Music"))
@@ -1025,6 +1029,206 @@ class ReviewTests(unittest.TestCase):
                 exists=lambda _path: True,
             )
             self.assertEqual([item["name"] for item in roots], ["STICK"])
+
+
+class GuardTests(unittest.TestCase):
+    """The three browse guards fail closed when each check is present."""
+
+    def test_a_symlink_to_the_computer_root_is_refused(self) -> None:
+        """Refuse ``ln -s / <tmp>/rl`` with 403, including over HTTP.
+
+        The link is shallow, so the deep-shortcut check allows it. The
+        refusal is the check that the resolved path is ``/``.
+
+        Returns:
+            None. The test fails if the link is listed.
+        """
+        import json
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        import files
+        import library
+        import server
+
+        parent = Path("/tmp") if Path("/tmp").is_dir() else Path(Path.cwd().anchor)
+        link = parent / "rl"
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        try:
+            link.symlink_to("/", target_is_directory=True)
+        except OSError:
+            self.skipTest("symlinks are not available")
+        self.assertLessEqual(files._path_depth(link), 2)
+        try:
+            with self.assertRaises(library.LibraryError) as caught:
+                files._resolve_directory(str(link), elsewhere=True, roots=[])
+            self.assertEqual(caught.exception.status, 403)
+            self.assertEqual(caught.exception.message, "That folder is outside the music folders.")
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            host, port = httpd.server_address
+            quoted = urllib.request.quote(str(link))
+            try:
+                urllib.request.urlopen(
+                    f"http://{host}:{port}/api/files?path={quoted}&elsewhere=1",
+                    timeout=5,
+                )
+                self.fail("the symlink to / was listed")
+            except urllib.error.HTTPError as exc:
+                body = json.loads(exc.read().decode("utf-8"))
+                self.assertEqual(exc.code, 403)
+                self.assertEqual(body["error"], "That folder is outside the music folders.")
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=3)
+        finally:
+            link.unlink(missing_ok=True)
+
+    def test_refresh_recomputes_and_sees_a_new_drive(self) -> None:
+        """Show a drive plugged in after the cache was filled only on refresh.
+
+        Returns:
+            None. The test fails if the cached time or the drive list changes
+            without ``refresh=1``.
+        """
+        import json
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+        from unittest import mock
+
+        import server
+
+        with TempLibrary() as temp:
+            music_roots.invalidate()
+            music = temp.root / "Music"
+            music.mkdir()
+            track = music / "a.mp3"
+            track.write_bytes(b"a")
+            volumes = temp.root / "Volumes"
+            volumes.mkdir()
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 1", (str(track),))
+                conn.execute("DELETE FROM asset WHERE id != 1")
+            real_volumes = music_roots.serato_volumes
+
+            def volumes_fn(platform: str, **kwargs: object) -> list[tuple[Path, str]]:
+                del platform, kwargs
+                return real_volumes("darwin", volumes_root=volumes)
+
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            host, port = httpd.server_address
+            base = f"http://{host}:{port}/api/library-roots"
+
+            def fetch(refresh: bool) -> dict[str, object]:
+                url = base + ("?refresh=1" if refresh else "")
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    self.assertEqual(response.status, 200)
+                    body = json.loads(response.read().decode("utf-8"))
+                assert isinstance(body, dict)
+                return body
+
+            try:
+                with mock.patch.object(music_roots, "serato_volumes", volumes_fn):
+                    music_roots.invalidate()
+                    first = fetch(True)
+                    (volumes / "GIGDRIVE" / "_Serato_").mkdir(parents=True)
+                    cached = fetch(False)
+                    refreshed = fetch(True)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=3)
+        self.assertEqual(cached["computed_at"], first["computed_at"])
+        self.assertEqual(cached["roots"], first["roots"])
+        self.assertFalse(any("GIGDRIVE" in str(item["path"]) for item in first["roots"]))
+        self.assertNotEqual(refreshed["computed_at"], first["computed_at"])
+        self.assertTrue(any(str(item["path"]).replace("\\", "/").endswith("/GIGDRIVE") for item in refreshed["roots"]))
+        self.assertTrue(any(item["kind"] == "serato_drive" for item in refreshed["roots"]))
+
+    def test_a_missing_root_stays_closed_after_the_folder_appears(self) -> None:
+        """Return 404 for a cached missing root even when the folder exists.
+
+        ``elsewhere=1`` does not open it. The folder is created after the
+        cache is filled.
+
+        Returns:
+            None. The test fails if the folder is listed.
+        """
+        import json
+        import threading
+        import urllib.error
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        import files
+        import library
+        import server
+
+        with TempLibrary() as temp:
+            music_roots.invalidate()
+            missing = temp.root / "OLDDRIVE" / "Music"
+            track = missing / "a.mp3"
+            with open_database(temp.db) as conn:
+                conn.execute("UPDATE asset SET portable_id = ? WHERE id = 1", (str(track),))
+                conn.execute("DELETE FROM asset WHERE id != 1")
+            roots = music_roots.music_roots(refresh=True)
+            lost = next(item for item in roots if item["missing"])
+            stored = str(lost["path"])
+            Path(stored).mkdir(parents=True)
+            self.assertTrue(Path(stored).is_dir())
+            with self.assertRaises(library.LibraryError) as caught:
+                files.list_directory(stored, elsewhere=True)
+            self.assertEqual(caught.exception.status, 404)
+            self.assertEqual(caught.exception.message, "That folder could not be read.")
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            host, port = httpd.server_address
+            quoted = urllib.request.quote(stored)
+            try:
+                urllib.request.urlopen(
+                    f"http://{host}:{port}/api/files?path={quoted}&elsewhere=1",
+                    timeout=5,
+                )
+                self.fail("the missing root was listed")
+            except urllib.error.HTTPError as exc:
+                body = json.loads(exc.read().decode("utf-8"))
+                self.assertEqual(exc.code, 404)
+                self.assertEqual(body["error"], "That folder could not be read.")
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=3)
+
+    def test_callers_cannot_change_the_cached_rows(self) -> None:
+        """Keep a mutated return value out of the next read.
+
+        Returns:
+            None. The test fails if the cache stores the caller's dict.
+        """
+        from unittest import mock
+
+        music_roots.invalidate()
+        sample = [{"name": "Music", "path": "/tmp/music-root", "kind": "folder", "missing": False}]
+        with mock.patch.object(music_roots, "_discover", return_value=sample):
+            first = music_roots.music_roots(refresh=True)
+            first[0]["name"] = "changed"
+            first.append({"name": "extra", "path": "/tmp/extra", "kind": "folder", "missing": False})
+            second = music_roots.music_roots()
+        self.assertEqual(second[0]["name"], "Music")
+        self.assertEqual(len(second), 1)
+        public = music_roots.library_roots()
+        public["roots"][0]["label"] = "changed"
+        again = music_roots.library_roots()
+        self.assertEqual(again["roots"][0]["label"], "Music")
 
 
 if __name__ == "__main__":

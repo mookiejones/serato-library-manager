@@ -468,16 +468,40 @@ def _bare_root(path: str) -> bool:
         True for ``/``, ``/Volumes``, a drive root such as ``C:\\``, and
         the root of a UNC share such as ``\\\\server\\share``.
     """
-    if path.startswith("\\\\") or path.startswith("//"):
-        parts = [part for part in path.replace("/", "\\").split("\\") if part]
+    text = _without_extended_prefix(path)
+    if text.startswith("\\\\") or text.startswith("//"):
+        parts = [part for part in text.replace("/", "\\").split("\\") if part]
         return len(parts) <= 2
-    folded = os.path.normpath(path).replace("\\", "/").rstrip("/").casefold()
+    folded = os.path.normpath(text).replace("\\", "/").rstrip("/").casefold()
     if folded in {"", "/"} or folded == "/volumes":
         return True
-    if len(path) >= 2 and path[1] == ":":
-        rest = os.path.normpath(path)[2:].replace("/", "\\").strip("\\")
+    if len(text) >= 2 and text[1] == ":":
+        rest = os.path.normpath(text)[2:].replace("/", "\\").strip("\\")
         return rest == ""
     return False
+
+
+def _without_extended_prefix(path: str) -> str:
+    """Drop a Windows ``\\\\?\\`` prefix so the root check sees the real path.
+
+    Args:
+        path: Requested path, possibly in extended form.
+
+    Returns:
+        ``\\\\server\\share`` for ``\\\\?\\UNC\\server\\share``, the path
+        after ``\\\\?\\`` for a drive, or ``path`` when it has no prefix.
+    """
+    if path.startswith("\\\\?\\"):
+        rest = path[4:]
+        if rest[:4].upper() == "UNC\\":
+            return "\\\\" + rest[4:]
+        return rest
+    if path.startswith("//?/"):
+        rest = path[4:]
+        if rest[:4].upper() == "UNC/":
+            return "//" + rest[4:]
+        return rest
+    return path
 
 
 def _is_missing_root(path: str, roots: list[dict[str, str]]) -> bool:
