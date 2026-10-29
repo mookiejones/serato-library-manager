@@ -31,6 +31,7 @@ import related
 import setup_flow
 import snapshots
 import telemetry
+import version_info
 
 
 def app_root() -> Path:
@@ -1490,6 +1491,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Answer a GET request.
 
+        Health and version are answered before the library is opened.
         Settings and logs are answered before the library routes. Library,
         status, track, history, duplicate, file, related-track, M3U, and
         rekordbox XML paths return data. Every other path is a file under static/.
@@ -1502,13 +1504,17 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Library, status, track, history, duplicate, file, M3U, and rekordbox XML
-        paths return data. Every other path is a file under static/.
+        Health and version do not open the library. Library, status, track,
+        history, duplicate, file, M3U, and rekordbox XML paths return data.
+        Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         if parsed.path == "/api/health":
             self.send_json({"ok": True})
+            return
+        if parsed.path == "/api/version":
+            self.send_json(version_info.payload())
             return
         try:
             if parsed.path == "/api/settings":
