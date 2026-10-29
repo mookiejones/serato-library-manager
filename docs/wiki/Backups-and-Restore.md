@@ -37,6 +37,6 @@ If something else changes the Serato folder, including Lexicon, the app saves a 
 
 The first save in a session also copies `master.sqlite` and `root.sqlite` into `Library/Backups/serato-web-` plus the date and time. That folder is the database only. It does not hold your music. The hash-checked Backups live in `Library/Backups/snapshots`, beside `master.sqlite`.
 
-After a save, the app reads a copy of the database back. If the rows or file hashes do not match, it puts the pre-write snapshot back. Serato 5 stays read-only, and that rollback does not write a Serato 5 library.
+After a save, the app reads a copy of the database back. If the rows or file hashes do not match, it puts the pre-write copy back. That copy is kept in the app's data folder, not in Serato's library folder. Serato 5 stays read-only, and that rollback does not write a Serato 5 library.
 
 On a Mac, external drives need **Files and Folders > Removable Volumes**. The steps are on [Install on a Mac](Install-macOS).

@@ -67,15 +67,31 @@ def _wal(db: Path) -> Path:
 
 
 def _journal(db: Path) -> Path:
-    """Return the write journal path.
+    """Return the write journal in the app data folder.
 
     Args:
-        db: Database file.
+        db: Database file. The journal is not stored beside it.
 
     Returns:
-        ``write-journal.json`` beside the snapshot store.
+        ``write-journal.json`` under the write-check directory for ``db``.
     """
-    return db.resolve().parent / "Backups" / "snapshots" / "write-journal.json"
+    return safe_write.store_dir(db) / "write-journal.json"
+
+
+def _tree(root: Path) -> set[str]:
+    """List every relative path in a library folder.
+
+    Args:
+        root: Serato library directory.
+
+    Returns:
+        POSIX paths of every file and directory under ``root``, plus nothing
+        for a missing directory. The names are what a write is allowed to
+        leave unchanged.
+    """
+    if not root.is_dir():
+        return set()
+    return {path.relative_to(root).as_posix() for path in root.rglob("*")}
 
 
 @contextmanager
@@ -191,9 +207,8 @@ class SafeWriteTests(unittest.TestCase):
             created = library.crate_action({"action": "create", "name": "Warmup"})
             record = safe_write.results(temp.db)[-1]
             blob = json.dumps(record.to_dict())
-            images = temp.db.parent / "Backups" / "snapshots" / "write-images"
+            images = safe_write.store_dir(temp.db) / "write-images"
             finished = [path for path in images.iterdir() if path.is_dir() and is_complete(path)]
-            triggers = [item["trigger"] for item in snapshots.current_store().list_snapshots()]
             self.assertEqual(created["name"], "Warmup")
             self.assertEqual(record.operation, "crate_create")
             self.assertEqual(record.target, "Warmup")
@@ -203,9 +218,60 @@ class SafeWriteTests(unittest.TestCase):
             self.assertIn("master.sqlite", record.files)
             self.assertNotIn(str(temp.root), blob)
             self.assertTrue(finished)
-            self.assertIn("before-write", triggers)
+            self.assertFalse(str(images.resolve()).startswith(str(temp.db.resolve().parent)))
             self.assertEqual(crate.read_bytes(), b"house-crate-v1")
             self.assertFalse(_journal(temp.db).exists())
+            self.assertFalse((temp.db.parent / "Backups").exists())
+
+    def test_successful_write_adds_nothing_in_the_serato_folder(self) -> None:
+        """Leave the library folder's names unchanged after a crate is saved.
+
+        The preimage, journal, and operation log are in the app data folder.
+        They must not show up beside ``master.sqlite``.
+
+        Returns:
+            None. The test fails if ``Backups``, a snapshot directory, a
+            journal, or ``operations.jsonl`` appears.
+        """
+        with TempLibrary() as temp:
+            before = _tree(temp.root)
+            library.crate_action({"action": "create", "name": "Warmup"})
+            after = _tree(temp.root)
+            self.assertEqual(after, before)
+            self.assertFalse((temp.root / "Backups").exists())
+            self.assertNotIn("operations.jsonl", after)
+            self.assertNotIn("write-journal.json", after)
+            self.assertTrue((safe_write.store_dir(temp.db) / "operations.jsonl").is_file())
+            self.assertFalse(str(safe_write.store_dir(temp.db)).startswith(str(temp.root.resolve())))
+
+    def test_rollback_adds_nothing_in_the_serato_folder(self) -> None:
+        """Leave the library folder's names unchanged when a write is put back.
+
+        Returns:
+            None. The test fails if a new file remains beside the database
+            or the crate bytes are not the pre-write bytes.
+        """
+        with TempLibrary() as temp:
+            crate = _drive_crate(temp.root)
+            before_names = _tree(temp.root)
+            before_bytes = _snapshot(temp.db, crate)
+
+            def apply(conn: sqlite3.Connection, session: safe_write.Session) -> None:
+                _rename(conn, session, crate)
+
+            with self.assertRaises(LibraryError):
+                safe_write.run(
+                    "rename_track",
+                    "Renamed",
+                    apply,
+                    extra_files=(crate,),
+                    fault=Fault(after_commit=lambda: _corrupt(temp.db, crate)),
+                )
+            self.assertEqual(_tree(temp.root), before_names)
+            self.assertEqual(_snapshot(temp.db, crate), before_bytes)
+            self.assertFalse((temp.root / "Backups").exists())
+            self.assertFalse(any(name.endswith("operations.jsonl") or name.endswith("write-journal.json") for name in before_names))
+            self.assertTrue((safe_write.store_dir(temp.db) / "operations.jsonl").is_file())
 
     def test_mismatched_write_restores_the_database_and_crate(self) -> None:
         """Roll a corrupt commit back to the pre-write bytes.
@@ -289,7 +355,7 @@ class SafeWriteTests(unittest.TestCase):
                     extra_files=(crate,),
                     fault=Fault(disk_full=True),
                 )
-            partials = list((temp.db.parent / "Backups").rglob("*.partial")) if (temp.db.parent / "Backups").exists() else []
+            partials = list(safe_write.store_dir(temp.db).rglob("*.partial")) if safe_write.store_dir(temp.db).exists() else []
             record = safe_write.results(temp.db)[-1]
             self.assertIn("nothing was written", caught.exception.message)
             self.assertFalse(called["apply"])

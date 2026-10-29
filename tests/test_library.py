@@ -112,25 +112,24 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(stamped, [])
 
     def test_save_track_updates_the_row_and_backs_up(self) -> None:
-        """Save a title and BPM, and copy the database once.
+        """Save a title and BPM without adding files beside the library.
 
-        Writes the asset row and creates ``Library/Backups``. The location
-        database is absent, so the result carries a warning and the audio file
-        is left untouched.
+        Writes the asset row. The safety copy is in the app data folder, not
+        in ``Library/Backups``. The location database is absent, so the result
+        carries a warning and the audio file is left untouched.
 
         Returns:
-            None. The test fails if the row, the warning, or the backup is missing.
+            None. The test fails if the row or the warning is missing, or if
+            ``Backups`` appears beside the database.
         """
         with TempLibrary() as temp:
             result = library.save_track(1, {"name": "Renamed", "bpm": 126})
             with open_database(temp.db) as conn:
                 row = conn.execute("SELECT name, bpm FROM asset WHERE id = 1").fetchone()
-            backups = list((temp.db.resolve().parent / "Backups").glob("serato-web-*"))
             self.assertTrue(result["ok"])
             self.assertIsNotNone(result["warning"])
             self.assertEqual(row, ("Renamed", 126))
-            self.assertEqual(len(backups), 1)
-            self.assertTrue((backups[0] / "master.sqlite").is_file())
+            self.assertFalse((temp.db.resolve().parent / "Backups").exists())
 
     def test_save_rejects_a_bad_bpm_before_writing(self) -> None:
         """Reject a BPM outside Serato's range before any update.
@@ -619,7 +618,7 @@ class MergeTests(unittest.TestCase):
                     "SELECT COUNT(*) FROM asset WHERE id IN (2, 3)"
                 ).fetchone()[0]
                 bystander = conn.execute("SELECT COUNT(*) FROM asset WHERE id = 4").fetchone()[0]
-            backups = list((temp.db.resolve().parent / "Backups").glob("serato-web-*"))
+            self.assertFalse((temp.db.resolve().parent / "Backups").exists())
         changes = {item["field"]: item["after"] for item in cast(list[dict[str, object]], result["fields"])}
         self.assertTrue(result["ok"])
         self.assertFalse(result["preview"])
@@ -657,7 +656,6 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(bystander, 1)
         self.assertEqual(result["history_entries"], 2)
         self.assertTrue(result["history_repointed"])
-        self.assertEqual(len(backups), 1)
         names = {item["name"] for item in cast(list[dict[str, object]], result["crates_added"])}
         self.assertEqual(names, {"Warmup", "Prepare"})
         warning = str(result["warning"])

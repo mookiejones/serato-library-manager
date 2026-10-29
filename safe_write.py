@@ -12,6 +12,12 @@ same gate and does not replace a file when the gate is closed.
 
 The operation record is one JSON object per write. The page that shows it
 is a later change. This module does not build that page.
+
+The preimage, ``write-journal.json``, and ``operations.jsonl`` are stored
+in the app data folder (``app_config.config_dir() / "write-checks"``), not
+under the Serato library. A write does not add a ``Backups`` directory, a
+snapshot directory, a journal, or a log beside ``master.sqlite``. The only
+change in that folder is the library edit itself.
 """
 
 from __future__ import annotations
@@ -447,12 +453,6 @@ class Session:
                 "The snapshot could not be saved, so nothing was written.",
                 409,
             ) from exc
-        try:
-            self._content_id = _content_snapshot()
-            library.ensure_backup()
-        except Exception:
-            self._record("refused", "not_attempted")
-            raise
         _write_journal(self._preimage, self.operation, self.target)
         self._journaled = True
         _SKIP_DEPTH += 1
@@ -658,13 +658,31 @@ def _library_dir() -> Path:
     return Path(library.MASTER).resolve().parent
 
 
-def _store_root() -> Path:
-    """Return the snapshot store directory beside the library.
+def store_dir(master: Path | None = None) -> Path:
+    """Return the app-data directory for one library's write checks.
+
+    Args:
+        master: Database path. None uses the library this process has open.
 
     Returns:
-        ``Library/Backups/snapshots``.
+        A directory under :func:`app_config.config_dir`, named by a hash of
+        the database path. It is not inside the Serato library folder.
     """
-    return _library_dir() / "Backups" / "snapshots"
+    import app_config
+    import library
+
+    source = Path(master or library.MASTER).resolve()
+    key = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:32]
+    return app_config.config_dir() / "write-checks" / key
+
+
+def _store_root() -> Path:
+    """Return the write-check directory for the open library.
+
+    Returns:
+        The same path as :func:`store_dir` for the current master file.
+    """
+    return store_dir()
 
 
 def _store_exists() -> bool:
@@ -751,27 +769,6 @@ def _rollback_blocked() -> bool:
     if snapshots.serato_dj_running():
         return True
     return snapshots.write_block_message() is not None
-
-
-def _content_snapshot() -> str | None:
-    """Save the content-addressed before-write snapshot.
-
-    Returns:
-        The new snapshot id, or None when the list does not show it.
-
-    Raises:
-        LibraryError: If the snapshot cannot be saved.
-    """
-    import snapshots
-
-    store = snapshots.current_store()
-    before = {str(item["id"]) for item in store.list_snapshots()}
-    snapshots.snapshot_before_write()
-    for item in store.list_snapshots():
-        identity = str(item["id"])
-        if identity not in before:
-            return identity
-    return None
 
 
 def _capture(extra_files: Sequence[Path], fault: Fault | None) -> _Preimage:
@@ -1124,7 +1121,10 @@ def _destination_allowed(path: Path, library_dir: Path, live: Path, testing: boo
         return False
     lib = library_dir.resolve()
     store = (lib / "Backups").resolve()
+    checks = _store_root().resolve()
     if resolved == store or store in resolved.parents:
+        return False
+    if resolved == checks or checks in resolved.parents:
         return False
     if testing and (resolved == live or live in resolved.parents):
         return False

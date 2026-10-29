@@ -46,7 +46,7 @@ Protect Library is read from the Mac preferences key `library_protect`. On means
 
 The first time you save anything after you open the app, the app also copies the library database into a backup folder. Later saves in that same session do not make another of these copies. Each save does add a snapshot, described above.
 
-After the save is committed, the app reads a copy of the database, including a `-wal` file when one is present. It does not open the live database for that check. If the rows or the file hashes are not the change you asked for, the app puts the pre-write snapshot back and checks those hashes. Serato 5 stays read-only. That rollback does not write a Serato 5 library. If the snapshot cannot be saved because the disk is full, the save does not run.
+After the save is committed, the app reads a copy of the database, including a `-wal` file when one is present. It does not open the live database for that check. If the rows or the file hashes are not the change you asked for, the app puts the pre-write copy back and checks those hashes. That copy, the write journal, and the operation note are kept in this app's data folder, not in Serato's library folder. Serato 5 stays read-only. That rollback does not write a Serato 5 library. If the copy cannot be saved because the disk is full, the save does not run.
 
 1. Quit Serato DJ Pro.
 2. Open Serato Library.

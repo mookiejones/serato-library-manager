@@ -10,7 +10,7 @@ Restore, undo, snapshots, and the outside-change watcher are in the app. Open **
 - **Read first.** Checks, reports and the Rekordbox export only read your Serato files. The export writes a separate XML file and never writes back (see [Coming from Rekordbox](coming-from-rekordbox.md)).
 - **No write while unsure.** If we can't confirm Protect Library and Lucid Beatgrid status, we won't write at all.
 - **Snapshot first.** Before any change, we save a snapshot and check it against what's on disk.
-- **Check the write.** After a save, the app reads a copy of the database, including a live `-wal` file, and checks the rows and file hashes. If they do not match, it puts that snapshot back and checks the hashes again. Serato 5 stays read-only. Rollback does not write a Serato 5 library. If there is no room for the snapshot, the save does not run.
+- **Check the write.** After a save, the app reads a copy of the database, including a live `-wal` file, and checks the rows and file hashes. If they do not match, it puts that copy back and checks the hashes again. The copy, the journal, and the operation note stay in the app's data folder, not in Serato's library folder. Serato 5 stays read-only. Rollback does not write a Serato 5 library. If there is no room for the copy, the save does not run.
 - **Every restore can be undone.** A restore takes its own snapshot first.
 - **A missing drive is never a deletion.** Its tracks and crates are marked unavailable, never removed.
 - **Empty crates.** Serato deletes empty crates when it closes. The gig check that would flag them first is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app.
