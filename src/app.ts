@@ -12,7 +12,7 @@
 import { failureOf } from "./api";
 import { wireDialogs } from "./dialogs";
 import { el } from "./dom";
-import { loadGigCheck, showGigFailure } from "./gig";
+import { wireGigCheck } from "./gig";
 import { wireLayout } from "./layout";
 import {
   bindLibraryReload,
@@ -24,7 +24,7 @@ import {
   takeSnapshot,
 } from "./restore";
 import { state } from "./state";
-import { loadLibrary, showFailure, wireLibrary } from "./views";
+import { loadLibrary, setMode, showFailure, wireLibrary } from "./views";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
 /**
@@ -59,25 +59,14 @@ function wireSnapshots(): void {
   });
 }
 
-/**
- * Attach the gig check's Check again button.
- *
- * Called once at startup. The check is read-only.
- *
- * @returns {void}
- */
-function wireGig(): void {
-  el("gig-refresh").addEventListener("click", () => {
-    loadGigCheck().catch((error) => showGigFailure(error));
-  });
-}
-
 mountTrackList();
 wireLibrary();
 wireVirtualScroll();
 wireDialogs();
 wireSnapshots();
-wireGig();
+wireGigCheck(() => {
+  setMode("crates");
+});
 wireLayout();
 bindLibraryReload(loadLibrary);
 loadLibrary().catch(showFailure);

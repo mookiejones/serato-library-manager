@@ -947,44 +947,85 @@ dialog .check input {
   margin: 0 0 4px;
 }
 
-#gig-refresh { min-height: 44px; }
+#gig-refresh { min-height: calc(var(--space-6) + var(--space-3)); }
 
 .gig-report {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 4px 20px 28px;
+  padding: var(--space-1) var(--space-5) var(--space-5);
+}
+
+.gig-status {
+  margin: 0 var(--space-5);
+  min-height: var(--space-5);
 }
 
 .gig-score {
-  margin: 8px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
   font-family: var(--display);
-  font-size: 56px;
+  font-size: var(--font-display);
   font-weight: 500;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .gig-verdict {
-  margin: 8px 0 4px;
-  font-size: 18px;
+  margin: 0;
+  font-size: var(--font-title);
   font-weight: 600;
 }
 
 .gig-verdict.not-ready { color: var(--missing); }
 
+.gig-kicker {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: var(--font-caption);
+}
+
 .gig-report h3 {
-  margin: 22px 0 8px;
+  margin: var(--space-2) 0 var(--space-2);
   font-family: var(--display);
-  font-size: 22px;
+  font-size: var(--font-title);
   font-weight: 500;
 }
 
-.gig-report ul { margin: 0; padding-left: 1.2rem; }
+.gig-report ul { margin: 0; padding-left: var(--space-5); }
 
-.gig-report li { margin: 4px 0; overflow-wrap: anywhere; }
+.gig-report li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
 
-.gig-note { margin: 8px 0; }
+.gig-note { margin: var(--space-2) 0; }
+
+.gig-group { margin: var(--space-2) 0; }
+
+.gig-show-all,
+.gig-actions button {
+  min-height: calc(var(--space-6) + var(--space-3));
+}
+
+.gig-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
+.gig-primary {
+  flex: 1 1 100%;
+  font-size: var(--font-title);
+  font-weight: 600;
+}
+
+.gig-art-slot {
+  min-height: var(--space-6);
+  margin: var(--space-3) 0;
+}
+
+.gig-done { margin: var(--space-2) 0; font-size: var(--font-title); }
 
 .files-panel[hidden],
 .gig-panel[hidden],

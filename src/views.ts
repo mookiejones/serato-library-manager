@@ -538,7 +538,10 @@ export function renderShell() {
   }
   if (state.mode === "stems") el("mode-note").textContent = "Tracks with a stems analysis state.";
   if (filesMode) el("mode-note").textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
-  if (gigMode) el("mode-note").textContent = "Read-only. This check does not change the library.";
+  if (gigMode) {
+    el("mode-note").textContent = "Read-only. This check does not change the library.";
+    document.querySelector(".rules")?.remove();
+  }
   if (snapshotsMode) {
     el("mode-note").textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
   }
@@ -560,7 +563,8 @@ export function renderShell() {
     return;
   }
   if (gigMode) {
-    el("crate-foot").textContent = state.activeCrate === "all" ? "Whole space" : "Selected crate";
+    const crate = state.crates.find((item) => item.id === state.activeCrate);
+    el("crate-foot").textContent = state.activeCrate === "all" ? "All tracks" : (crate?.name ?? "Selected crate");
     return;
   }
   if (snapshotsMode) {
@@ -611,7 +615,6 @@ export function renderList() {
     return;
   }
   if (state.mode === "gig") {
-    document.querySelector(".rules")?.remove();
     renderCrates();
     return;
   }
@@ -677,7 +680,7 @@ export function selectCrate(id: number | "all") {
   if (id !== "all") expandAncestors(id);
   el("list").scrollTop = 0;
   renderList();
-  if (state.mode === "gig") loadGigCheck().catch((error) => showGigFailure(error));
+  if (state.mode === "gig") loadGigCheck().catch(showGigFailure);
 }
 
 /**
@@ -2222,7 +2225,7 @@ export function setMode(mode: string) {
   if (mode === "snapshots") {
     loadSnapshots().catch((error) => failSnapshots(error));
   }
-  if (mode === "gig") loadGigCheck().catch((error) => showGigFailure(error));
+  if (mode === "gig") loadGigCheck().catch(showGigFailure);
   renderList();
 }
 

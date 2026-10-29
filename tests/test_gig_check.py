@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -1054,6 +1055,132 @@ class GigCheckApiTests(unittest.TestCase):
                 thread.join(timeout=3)
         finally:
             library_fixture.__exit__(None, None, None)
+
+
+class SavedFrameLookupTests(unittest.TestCase):
+    """Tail matching for saved Serato frames."""
+
+    def test_a_drive_letter_is_not_a_suffix_of_another_path(self) -> None:
+        """Do not match ``C:/Music`` as the tail of a longer path.
+
+        Returns:
+            None. The test fails if the colon check is removed.
+        """
+        frames = gig_check._SavedFrames(
+            {
+                "cues": [{"path": "/Volumes/Tour/C:/Music/a.mp3", "cues": [], "loops": []}],
+                "grids": [],
+                "tags": [],
+            }
+        )
+        self.assertIsNone(frames._find("C:/Music/a.mp3"))
+
+    def test_windows_tail_match_folds_case_on_both_sides(self) -> None:
+        """Fold the stored path and the saved path before the tail compare.
+
+        Returns:
+            None. The test fails if either ``casefold`` is removed.
+        """
+        saved = "/Volumes/Tour/MUSIC/set/opener.MP3"
+        frames = gig_check._SavedFrames(
+            {
+                "cues": [{"path": saved, "cues": [], "loops": []}],
+                "grids": [],
+                "tags": [],
+            }
+        )
+        with mock.patch.object(os, "name", "nt"), mock.patch.object(gig_check, "_candidates", return_value=()):
+            self.assertEqual(frames._find("Music/Set/Opener.mp3"), saved)
+
+
+class ReadyScoreTests(unittest.TestCase):
+    """Point caps, the zero floor, and the ready line at 70."""
+
+    def _classified(
+        self,
+        *,
+        missing: int = 0,
+        drives: int = 0,
+        streaming: int = 0,
+        empty: int = 0,
+    ) -> gig_check._Classified:
+        """Build a classified library with the given counts.
+
+        Args:
+            missing: Missing files.
+            drives: Absent drives.
+            streaming: Streaming tracks.
+            empty: Empty crates.
+
+        Returns:
+            Rows the score function can read.
+        """
+        return gig_check._Classified(
+            tuple(gig_check.MissingFile(f"m{index}", "T", "A", "C") for index in range(missing)),
+            tuple(gig_check.UnavailableDrive(f"D{index}", 1, ()) for index in range(drives)),
+            tuple(gig_check.StreamingTrack("Apple Music", f"s{index}", "T", "A", "C") for index in range(streaming)),
+            tuple(gig_check.EmptyCrate(f"E{index}", gig_check.EMPTY_CRATE_WARNING) for index in range(empty)),
+            {},
+        )
+
+    def _points(self, **counts: int) -> tuple[int, bool, int]:
+        """Score a library and return the total, the ready flag, and the deduction.
+
+        Args:
+            counts: Passed to ``_classified``.
+
+        Returns:
+            Score, ready, and the points on the only deduction when there is one.
+        """
+        score, ready, _hard, lines = gig_check._score(
+            self._classified(**counts),
+            fresh=True,
+            changes=None,
+            scope_crate=None,
+        )
+        spent = lines[0].points if lines else 0
+        return score, ready, spent
+
+    def test_exactly_seventy_is_ready_and_zero_is_the_floor(self) -> None:
+        """Treat 70 as ready, and do not let the score go below zero.
+
+        Two empty crates, six streaming tracks, and a stale snapshot spend
+        30 points. Six absent drives spend more than 100.
+
+        Returns:
+            None. The test fails if 70 is not ready or a negative score is kept.
+        """
+        score, ready, _hard, _lines = gig_check._score(
+            self._classified(empty=2, streaming=6),
+            fresh=False,
+            changes=None,
+            scope_crate=None,
+        )
+        self.assertEqual(score, 70)
+        self.assertTrue(ready)
+        score, ready, _hard, _lines = gig_check._score(
+            self._classified(drives=6),
+            fresh=True,
+            changes=None,
+            scope_crate=None,
+        )
+        self.assertEqual(score, 0)
+        self.assertFalse(ready)
+
+    def test_each_cap_limits_only_that_group(self) -> None:
+        """Stop missing files at 40, streaming at 16, and empty crates at 12.
+
+        A single item in each group still costs its own points, not the cap.
+
+        Returns:
+            None. The test fails if a cap is dropped or applied to a smaller group.
+        """
+        self.assertEqual(self._points(missing=6), (60, False, gig_check.MISSING_CAP))
+        self.assertEqual(self._points(missing=1), (92, False, gig_check.MISSING_POINTS))
+        self.assertEqual(self._points(streaming=9), (84, True, gig_check.STREAM_CAP))
+        self.assertEqual(self._points(streaming=1), (98, True, gig_check.STREAM_POINTS))
+        self.assertEqual(self._points(empty=4), (88, True, gig_check.EMPTY_CAP))
+        self.assertEqual(self._points(empty=1), (96, True, gig_check.EMPTY_POINTS))
 
 
 if __name__ == "__main__":
