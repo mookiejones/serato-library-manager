@@ -2,7 +2,7 @@
 
 <figure>
   <img alt="A diagram of the Serato library folder, the Serato Library app folder, each drive's _Serato_ folder, and the rules for those files." src="images/features/where-serato-data-lives.png">
-  <figcaption>Example data. This is a diagram, not a screenshot. The paths in it are examples. The Rules box uses older wording for restore. The paragraph under the diagram is what restore does.</figcaption>
+  <figcaption>Example data. This is a diagram, not a screenshot. The paths in it are examples.</figcaption>
 </figure>
 
 ```mermaid
