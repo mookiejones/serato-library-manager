@@ -22,7 +22,6 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import closing, contextmanager
 from pathlib import Path
-from urllib.parse import quote
 from typing import cast
 from urllib.parse import quote, unquote, urlparse
 

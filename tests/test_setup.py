@@ -6,6 +6,7 @@ They do not open a live Serato library.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -631,7 +632,14 @@ class ChosenLibraryTests(unittest.TestCase):
 
         Returns:
             None.
+
+        A live WAL writer is closed first. Windows cannot delete the
+        database file while that connection is still open.
         """
+        writer = getattr(self, "_wal_writer", None)
+        if writer is not None:
+            writer.close()
+            self._wal_writer = None
         self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=3)
@@ -840,21 +848,117 @@ class ChosenLibraryTests(unittest.TestCase):
         for name in after:
             self.assertFalse(name.endswith(("-wal", "-shm", "-journal")))
 
+    def test_live_wal_validation_keeps_the_folder_and_the_track_count(self) -> None:
+        """Read uncheckpointed WAL rows without touching the library tree.
 
-def _sidecar_names(folder: Path) -> set[str]:
-    """Return wal, shm, and journal names in one library folder.
+        A writer stays open with 50 tracks that exist only in ``-wal``.
+        The main file already holds 2. The table check, the setup summary,
+        both folder picks, and the remembered-library check all run while
+        that writer is open. The folder's names, hashes, and mtimes stay
+        the same, and the reported count is 52.
+
+        Returns:
+            None. The test fails if a sidecar changes or the count is the
+            checkpointed 2.
+        """
+        folder = self.folder.parent / "Serato" / "Library"
+        folder.mkdir(parents=True)
+        db = folder / "master.sqlite"
+        self._wal_writer = _open_live_wal(db)
+        try:
+            before = _tree_stamp(folder)
+            self.assertEqual(set(before), {"master.sqlite", "master.sqlite-shm", "master.sqlite-wal"})
+            self.assertTrue(library.is_serato_database(db))
+            library.status(db, from_copy=True)
+            library.MASTER = db
+            summary = setup_flow.describe_library()
+            self.assertEqual(summary["track_count"], 52)
+            confirmed = setup_flow.accept_folder(str(folder))
+            self.assertEqual(confirmed["track_count"], 52)
+            library.MASTER = self.missing
+            adopted = setup_flow.accept_folder(str(folder))
+            self.assertEqual(adopted["track_count"], 52)
+            library.MASTER = self.missing
+            app_config.remember_library(db)
+            setup_flow.apply_remembered_library()
+            self.assertEqual(Path(library.MASTER).resolve(), db.resolve())
+            remembered = setup_flow.describe_library()
+            self.assertEqual(remembered["track_count"], 52)
+            status, payload = _request(self.base, "/api/setup")
+            self.assertEqual(status, 200)
+            assert isinstance(payload, dict)
+            self.assertEqual(payload["track_count"], 52)
+            self.assertEqual(_tree_stamp(folder), before)
+        finally:
+            if self._wal_writer is not None:
+                self._wal_writer.close()
+                self._wal_writer = None
+
+
+def _tree_stamp(folder: Path) -> dict[str, tuple[str, int]]:
+    """Hash and mtime every file under a library folder.
 
     Args:
         folder: Directory that holds ``master.sqlite``.
 
     Returns:
-        File names that end with those suffixes.
+        Relative POSIX path to ``(sha256, mtime_ns)``. Shortcuts are skipped.
     """
-    found: set[str] = set()
-    for path in folder.iterdir():
-        if path.name.endswith(("-wal", "-shm", "-journal")):
-            found.add(path.name)
-    return found
+    stamp: dict[str, tuple[str, int]] = {}
+    for path in sorted(folder.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        stamp[path.relative_to(folder).as_posix()] = (digest, path.stat().st_mtime_ns)
+    return stamp
+
+
+def _open_live_wal(db: Path) -> sqlite3.Connection:
+    """Open a WAL library with 2 checkpointed tracks and 50 only in ``-wal``.
+
+    Args:
+        db: Database file to create. Parent directories must exist.
+
+    Returns:
+        The writer connection. It is still open, and it will not checkpoint
+        on close. The caller closes it.
+
+    The checkpointed file is what a reader sees when ``-wal`` is ignored.
+    The open connection is what keeps those extra rows out of the main file.
+    """
+    conn = sqlite3.connect(db)
+    conn.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    conn.executescript(
+        """
+        CREATE TABLE space (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE asset (id INTEGER PRIMARY KEY);
+        CREATE TABLE space_asset (
+            id INTEGER PRIMARY KEY,
+            asset_id INTEGER,
+            space_id INTEGER
+        );
+        CREATE TABLE container (id INTEGER PRIMARY KEY);
+        INSERT INTO space (id, name) VALUES (1, 'Serato Library');
+        """
+    )
+    for asset_id in (1, 2):
+        conn.execute("INSERT INTO asset (id) VALUES (?)", (asset_id,))
+        conn.execute(
+            "INSERT INTO space_asset (id, asset_id, space_id) VALUES (?, ?, 1)",
+            (asset_id, asset_id),
+        )
+    conn.commit()
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    for asset_id in range(3, 53):
+        conn.execute("INSERT INTO asset (id) VALUES (?)", (asset_id,))
+        conn.execute(
+            "INSERT INTO space_asset (id, asset_id, space_id) VALUES (?, ?, 1)",
+            (asset_id, asset_id),
+        )
+    conn.commit()
+    return conn
 
 
 def _write_checkpointed_wal_library(db: Path) -> None:
