@@ -1,0 +1,305 @@
+{
+  "version": "serato4",
+  "status": "spec-derived",
+  "database": {
+    "version": "2.0/Serato Scratch LIVE Database",
+    "tracks": [
+      {
+        "title": "Drop",
+        "artist": "Fixture",
+        "bpm": "128.00",
+        "type": "mp3",
+        "missing": false,
+        "path": "Music/one-grid.mp3"
+      },
+      {
+        "title": "End",
+        "artist": "Fixture",
+        "bpm": "174.00",
+        "type": "aiff",
+        "missing": false,
+        "path": "Music\\several-grid.aiff"
+      },
+      {
+        "title": "Café",
+        "artist": "Fixture",
+        "bpm": "128.00",
+        "type": "flac",
+        "missing": false,
+        "path": "Music/café-loop.flac"
+      },
+      {
+        "title": "Anchor",
+        "artist": "Fixture",
+        "bpm": "140.00",
+        "type": "mp4",
+        "missing": false,
+        "path": "Music/several-grid.m4a"
+      },
+      {
+        "title": "Missing",
+        "artist": "Fixture",
+        "bpm": "0.00",
+        "type": "mp3",
+        "missing": true,
+        "path": "Music/not-on-disk.mp3"
+      },
+      {
+        "title": "No Path",
+        "artist": "Fixture",
+        "bpm": "0.00",
+        "type": "mp3",
+        "missing": false,
+        "path": null
+      }
+    ]
+  },
+  "crates": [
+    {
+      "file": "_Serato_/Subcrates/House.crate",
+      "name": "House",
+      "parents": [],
+      "version": "1.0/Serato ScratchLive Crate",
+      "tracks": [
+        {
+          "path": "Music/one-grid.mp3"
+        },
+        {
+          "path": "Music\\several-grid.aiff"
+        },
+        {
+          "path": "Music/several-grid.m4a"
+        },
+        {
+          "path": "Music/not-on-disk.mp3"
+        },
+        {
+          "path": null
+        }
+      ]
+    },
+    {
+      "file": "_Serato_/Subcrates/House%%Café.crate",
+      "name": "Café",
+      "parents": [
+        "House"
+      ],
+      "version": "1.0/Serato ScratchLive Crate",
+      "tracks": [
+        {
+          "path": "Music/café-loop.flac"
+        }
+      ]
+    },
+    {
+      "file": "_Serato_/Subcrates/Empty.crate",
+      "name": "Empty",
+      "parents": [],
+      "version": "1.0/Serato ScratchLive Crate",
+      "tracks": []
+    }
+  ],
+  "unmounted": {
+    "root": "drives/UNMOUNTED",
+    "crate": "drives/UNMOUNTED/_Serato_/Subcrates/Gig.crate",
+    "version": "1.0/Serato ScratchLive Crate",
+    "tracks": [
+      "Music/gig-opener.mp3",
+      "Music\\gig-closer.aiff"
+    ]
+  },
+  "audio": [
+    {
+      "file": "audio/one-grid.mp3",
+      "container": "mp3",
+      "cues": [
+        {
+          "index": 0,
+          "start_ms": 1500,
+          "color": "#CC0000",
+          "name": "Drop"
+        },
+        {
+          "index": 3,
+          "start_ms": 8000,
+          "color": "#00CC66",
+          "name": "End"
+        }
+      ],
+      "loops": [
+        {
+          "index": 1,
+          "start_ms": 2000,
+          "end_ms": 8500,
+          "color": "#27AAE1",
+          "locked": true,
+          "name": "Break"
+        }
+      ],
+      "flips": [
+        {
+          "index": 2,
+          "enabled": true,
+          "name": "Chop"
+        }
+      ],
+      "track_color": "#99FF99",
+      "beatgrid_locked": false,
+      "beatgrid": [
+        {
+          "position": 0.5,
+          "bpm": 128.0
+        }
+      ],
+      "footer": 0
+    },
+    {
+      "file": "audio/several-grid.aiff",
+      "container": "aiff",
+      "cues": [
+        {
+          "index": 0,
+          "start_ms": 1500,
+          "color": "#CC0000",
+          "name": "Drop"
+        },
+        {
+          "index": 3,
+          "start_ms": 8000,
+          "color": "#00CC66",
+          "name": "End"
+        }
+      ],
+      "loops": [
+        {
+          "index": 1,
+          "start_ms": 2000,
+          "end_ms": 8500,
+          "color": "#27AAE1",
+          "locked": true,
+          "name": "Break"
+        }
+      ],
+      "flips": [
+        {
+          "index": 2,
+          "enabled": true,
+          "name": "Chop"
+        }
+      ],
+      "track_color": "#99FF99",
+      "beatgrid_locked": false,
+      "beatgrid": [
+        {
+          "position": 0.0,
+          "beats": 4
+        },
+        {
+          "position": 2.0,
+          "beats": 8
+        },
+        {
+          "position": 6.0,
+          "bpm": 174.0
+        }
+      ],
+      "footer": 55
+    },
+    {
+      "file": "audio/one-grid.flac",
+      "container": "flac",
+      "cues": [
+        {
+          "index": 0,
+          "start_ms": 1500,
+          "color": "#CC0000",
+          "name": "Drop"
+        },
+        {
+          "index": 3,
+          "start_ms": 8000,
+          "color": "#00CC66",
+          "name": "End"
+        }
+      ],
+      "loops": [
+        {
+          "index": 1,
+          "start_ms": 2000,
+          "end_ms": 8500,
+          "color": "#27AAE1",
+          "locked": true,
+          "name": "Break"
+        }
+      ],
+      "flips": [
+        {
+          "index": 2,
+          "enabled": true,
+          "name": "Chop"
+        }
+      ],
+      "track_color": "#99FF99",
+      "beatgrid_locked": false,
+      "beatgrid": [
+        {
+          "position": 0.5,
+          "bpm": 128.0
+        }
+      ],
+      "footer": 0
+    },
+    {
+      "file": "audio/several-grid.m4a",
+      "container": "m4a",
+      "cues": [
+        {
+          "index": 0,
+          "start_ms": 1500,
+          "color": "#CC0000",
+          "name": "Drop"
+        },
+        {
+          "index": 3,
+          "start_ms": 8000,
+          "color": "#00CC66",
+          "name": "End"
+        }
+      ],
+      "loops": [
+        {
+          "index": 1,
+          "start_ms": 2000,
+          "end_ms": 8500,
+          "color": "#27AAE1",
+          "locked": true,
+          "name": "Break"
+        }
+      ],
+      "flips": [
+        {
+          "index": 2,
+          "enabled": true,
+          "name": "Chop"
+        }
+      ],
+      "track_color": "#99FF99",
+      "beatgrid_locked": false,
+      "beatgrid": [
+        {
+          "position": 0.0,
+          "beats": 4
+        },
+        {
+          "position": 2.0,
+          "beats": 8
+        },
+        {
+          "position": 6.0,
+          "bpm": 174.0
+        }
+      ],
+      "footer": 55
+    }
+  ]
+}

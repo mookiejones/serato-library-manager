@@ -6,3 +6,18 @@
 *.html text eol=lf
 *.md text eol=lf
 *.json text eol=lf
+
+tests/fixtures/serato4/**/*.mp3 binary
+tests/fixtures/serato4/**/*.aiff binary
+tests/fixtures/serato4/**/*.flac binary
+tests/fixtures/serato4/**/*.m4a binary
+tests/fixtures/serato4/**/*.crate binary
+tests/fixtures/serato5/**/*.mp3 binary
+tests/fixtures/serato5/**/*.aiff binary
+tests/fixtures/serato5/**/*.flac binary
+tests/fixtures/serato5/**/*.m4a binary
+tests/fixtures/serato5/**/*.crate binary
+"tests/fixtures/serato4/_Serato_/database V2" binary
+"tests/fixtures/serato5/_Serato_/database V2" binary
+"tests/fixtures/serato4/drives/UNMOUNTED/_Serato_/database V2" binary
+"tests/fixtures/serato5/drives/UNMOUNTED/_Serato_/database V2" binary
