@@ -1,159 +1,74 @@
 ---
 name: auditing-python-security
-description: Audits Python libraries for security vulnerabilities using Bandit, pip-audit, Semgrep, and detect-secrets. Identifies SQL injection, command injection, hardcoded credentials, secrets exposed through tracebacks, weak cryptography, and insecure deserialization. Use when reviewing library security, setting up security scanning in CI, or implementing secure coding patterns.
+description: Reviews this app's dependency pins, Bandit findings, secrets, and path checks. Use when changing requirements, server.py file serving, files.py moves, or anything that reads a path or a secret from the environment. pip-audit already runs in CI.
 ---
 
-# Python Security Auditing
+# Security review
 
-## Quick Start
+The process listens on `127.0.0.1` and reads a Serato library plus audio files on the same machine. The checks that matter are the pinned requirements, Bandit on the Python, secrets staying out of git and out of responses, and paths that cannot climb out of the directory they name.
+
+This is not a library publish. There is no package index token, no Semgrep job, and no detect-secrets baseline. Do not add those to match a generic Python-library scan.
+
+## pip-audit
+
+CI already audits the pins. The `dependency audit` job in `.github/workflows/ci.yml` runs:
 
 ```bash
-# Run all four scanners (gates CI): exit 1 on a blocking finding, exit 2 when a
-# requested scanner could not run, exit 0 only when every scanner ran clean:
-uv run python scripts/security_scan.py .
-
-# Tolerate scanners that are missing or hung (restores exit 0 in that case):
-uv run python scripts/security_scan.py . --allow-scanner-failure
-
-# Or individually:
-uvx bandit -r src/ -ll                       # High-severity static analysis
-uvx pip-audit .                              # This project's dependencies
-uvx semgrep --config auto src/               # Pattern-based SAST
-uvx detect-secrets scan > .secrets.baseline  # Secrets detection
+python -m pip install pip-audit==2.10.1
+pip-audit --requirement requirements.txt --requirement requirements-build.txt --vulnerability-service osv
 ```
 
-## Tool Configuration
+That command does not read `requirements-macos.txt` or `docs/requirements-docs.txt`. A new pin in the two files the job lists is what CI will fail on. Re-run the same command locally before pushing a requirements change.
 
-**Bandit (.bandit):**
-```yaml
-exclude_dirs: [tests/, docs/, .venv/]
-skips: [B101]  # assert_used - OK in tests
-```
+`pip-audit --fix` rewrites pins. Do not use it to silence a finding without reading the advisory. The requirements files are the lock.
 
-**pip-audit:**
+## Bandit
+
+Bandit is the static check for SQL, shell, hardcoded passwords, and a few path and deserialization patterns. It is not installed by `requirements.txt` and it is not a CI job. Run it locally against the application modules when you add a query, a subprocess, or a secret:
+
 ```bash
-uvx pip-audit -r requirements.txt     # Scan requirements
-uvx pip-audit --fix                   # Auto-fix vulnerabilities
+python3 -m pip install bandit
+bandit -r . -ll --exclude .venv,tests,docs,node_modules,static,.grok
 ```
 
-## Common Vulnerabilities
+`-ll` keeps the report to high severity. Triage a finding against the pairs in **[VULNERABILITIES.md](VULNERABILITIES.md)**. A test that deliberately calls `subprocess` is not a production finding; the exclude list leaves `tests/` out.
 
-| Issue | Bandit ID | Fix |
-|-------|-----------|-----|
-| SQL injection | B608 | Use parameterized queries |
-| Command injection | B602 | subprocess without shell=True |
-| Hardcoded secrets | B105, B106 | Environment variables |
-| Weak crypto | B303 | Use SHA-256+, bcrypt for passwords |
-| Pickle untrusted data | B301 | Use JSON instead |
-| Path traversal | B108 | Validate with Path.resolve() |
+CodeQL runs as its own workflow. It does not replace a look at a new SQL string or a new `subprocess` call.
 
-## Secure Patterns
+## Secrets
 
-```python
-# SQL - Parameterized query
-conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+- `_build_config.py` in git is empty. A tag build may write Sentry and PostHog keys into the copy inside the PyInstaller tree. That file in the repository stays empty. An environment variable of the same name overrides the baked file for a source run. Do not commit a DSN or a project key.
+- Do not commit `master.sqlite` or `root.sqlite`.
+- `_report_failure` returns a fixed sentence. The exception text, which can contain a path, stays in the local log. A new error response follows that rule.
+- Telemetry is off until the person opts in. Do not log a library path into a payload that can be sent.
+- A hardcoded password or token (Bandit B105, B106) belongs in the environment or in the empty build-config file, not in source. Rotating a secret that was committed is a separate step from deleting the line.
 
-# Commands - No shell
-subprocess.run(["cat", filename], check=True)
+## Path checks
 
-# Secrets - Environment
-API_KEY = os.environ.get("API_KEY")
+Two different checks, both required when a caller supplies a name:
 
-# Paths - Validate
-base = Path("/data").resolve()
-file_path = (base / filename).resolve()
-if not file_path.is_relative_to(base):
-    raise ValueError("Invalid path")
-```
+1. Reject a name that contains a slash, a backslash, or a null before joining.
+2. Resolve the candidate and require the resolved path to stay inside the resolved base. A prefix compare without a trailing separator treats a sibling (`static-evil`) as inside `static`.
 
-## Tracebacks Must Not Dump Frame Locals
+`LibraryHandler.send_file` realpaths the path and requires `candidate.startswith(root + os.sep)`. `files._contained` refuses a symlink and requires `resolved.parent == base`. Name validation and the resolve check are separate: a name with no slash can still be a symlink that points outside the folder.
 
-Rich exception renderers can print every local variable in every stack frame.
-That turns an ordinary unhandled exception into a credential leak: API tokens,
-authorization headers, request bodies, and decrypted configuration commonly live
-in locals when the traceback is rendered to a terminal or CI log.
+`Path.is_relative_to` is only a containment check after both sides are resolved. Resolving a symlink is the point of the second check. Deleting either check while the other remains is a miss. Test them separately.
 
-Keep local-variable rendering disabled anywhere logs can leave the developer's
-machine:
+SQL identifiers such as a table name in `PRAGMA table_info` cannot be bound as parameters. The name has to be one the program chose, not a string from the request.
 
-```python
-from rich.traceback import install
+Subprocess calls pass an argument list (`["ps", "-p", str(int(pid)), "-o", "comm="]`). They do not use `shell=True`. Interpolating a path or a track title into a shell string is the bug Bandit reports as B602.
 
-install(show_locals=False)
-```
-
-Do not stop at asserting the configuration call. Exercise the installed exception
-hook with a sentinel secret and inspect the rendered output. This catches a later
-refactor that replaces the hook or re-enables locals elsewhere:
-
-```python
-import sys
-
-
-def test_unhandled_traceback_does_not_expose_locals(capsys):
-    sentinel = "sentinel-secret-that-must-not-appear"
-
-    try:
-        raise RuntimeError("boom")
-    except RuntimeError:
-        exc_type, exc, traceback = sys.exc_info()
-        sys.excepthook(exc_type, exc, traceback)
-
-    output = capsys.readouterr()
-    rendered = output.out + output.err
-    assert "RuntimeError: boom" in rendered  # proves the hook rendered
-    assert sentinel not in rendered
-```
-
-Use a unique sentinel, never a real credential. Assert both that the exception was
-rendered and that the sentinel was absent; an empty or bypassed output path must
-not make the security test pass vacuously.
-
-## CI Integration
-
-```yaml
-# .github/workflows/security.yml — full workflow in CI_SECURITY.md
-- uses: astral-sh/setup-uv@v5
-- run: uv run python scripts/security_scan.py . --output security-report.json
-```
-
-For detailed patterns, see:
-- **scripts/security_scan.py** — runs all four scanners and exits non-zero on blocking findings (exit 1) or on a requested scanner that could not run (exit 2, opt out with `--allow-scanner-failure`) (`uv run python scripts/security_scan.py .`)
-- **[VULNERABILITIES.md](VULNERABILITIES.md)** - Vulnerability classes with vulnerable→fixed pairs
-- **[CI_SECURITY.md](CI_SECURITY.md)** - Complete CI workflow, pre-commit, Dependabot, triage
-
-## Audit Checklist
+## Checklist
 
 ```
-Code:
-- [ ] No SQL injection (parameterized queries)
-- [ ] No command injection (no shell=True)
-- [ ] No hardcoded secrets
-- [ ] Exception and logging configuration cannot render frame locals containing secrets
-- [ ] No weak crypto (MD5/SHA1)
-- [ ] Input validation on external data
-- [ ] Path traversal prevention
-- [ ] SSRF fetches connect to the validated IP on every redirect hop (DNS rebinding safe)
-- [ ] SSRF deny policy covers IPv4/IPv6 and CGNAT (`100.64.0.0/10`)
-
 Dependencies:
-- [ ] pip-audit clean
-- [ ] Minimal dependencies
-- [ ] From trusted sources
+- [ ] pip-audit is clean for requirements.txt and requirements-build.txt
+- [ ] A new pin was added to the file the CI job actually reads
 
-CI:
-- [ ] Security scan on every PR
-- [ ] Weekly dependency scan
+Code:
+- [ ] Queries use placeholders; a SQL identifier is not taken from the request
+- [ ] subprocess uses an argument list, not shell=True
+- [ ] No new secret, DSN, or library path in source, in an error JSON body, or in telemetry
+- [ ] A caller-supplied path is name-checked and resolve-checked, including the symlink case
+- [ ] _build_config.py in the diff is still empty
 ```
-
-## Learn More
-
-This skill is based on the [Security](https://mcginniscommawill.com/guides/python-library-development/#security-a-matter-of-trust) section of the [Guide to Developing High-Quality Python Libraries](https://mcginniscommawill.com/guides/python-library-development/) by [Will McGinnis](https://mcginniscommawill.com/). See these posts for deeper coverage:
-
-- [Avoiding Injection Flaws](https://mcginniscommawill.com/posts/2025-01-18-avoiding-injection-flaws/)
-- [Intro to Bandit](https://mcginniscommawill.com/posts/2025-01-25-intro-to-bandit/)
-- [Advanced Bandit Configuration](https://mcginniscommawill.com/posts/2025-08-22-advanced-bandit-configuration/)
-- [SQL Injection Detection](https://mcginniscommawill.com/posts/2025-08-25-sql-injection-detection-b608/)
-- [Dependency Security with pip-audit](https://mcginniscommawill.com/posts/2025-01-27-dependency-security-pip-audit/)
-- [Handling Sensitive Data](https://mcginniscommawill.com/posts/2025-01-29-handling-sensitive-data/)
-- [Secure Coding Practices](https://mcginniscommawill.com/posts/2025-02-02-secure-coding-practices/)

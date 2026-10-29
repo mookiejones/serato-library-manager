@@ -1,375 +1,128 @@
 ---
 name: improving-python-code-quality
-description: Improves Python library code quality through ruff linting, mypy type checking, Pythonic idioms, and refactoring. Use when reviewing code for quality issues, adding type hints, configuring static analysis tools, or refactoring Python library code.
+description: Improves Python in this repo with pyright (pyrightconfig.json), Google-style docstrings, and ordinary Python idioms. Use when reviewing a change, adding type hints, or refactoring server.py, library.py, tags.py, or the unittest suite. This repo does not use ruff or mypy.
 ---
 
-# Python Code Quality
+# Python code quality
 
-## Quick Reference
+Python in this repo has no linter. Type checking is pyright. Docstrings are Google style. Idioms below are the ones that have hidden bugs in this kind of code: mutable defaults, truthiness, silent fallbacks, and unordered serialization.
 
-| Tool | Purpose | Command |
-|------|---------|---------|
-| ruff | Lint + format | `ruff check src && ruff format src` |
-| mypy | Type check | `mypy src` |
+## Pyright
 
-## Ruff Configuration
+`pyrightconfig.json` is the config:
 
-Minimal config in pyproject.toml:
-
-```toml
-[tool.ruff]
-line-length = 88
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP"]
+```json
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.14",
+  "include": ["library.py", "tags.py", "server.py", "tests"]
+}
 ```
 
-For full configuration options, see **[RUFF_CONFIG.md](RUFF_CONFIG.md)**.
+pyright is not in `requirements.txt`, and CI does not run it. The frontend job typechecks `src/` with `npx tsc --noEmit`. When you change a file in the include list, run `pyright` locally if it is installed.
 
-## MyPy Configuration
+A file outside `include` is not checked. `files.py`, `snapshots.py`, `desktop.py`, and the other modules are invisible to this config. A new annotation there does not fail the check. Extending `include` is a separate change; do not assume a green pyright run covered a file it does not list.
 
-```toml
-[tool.mypy]
-python_version = "3.10"
-disallow_untyped_defs = true
-warn_return_any = true
-```
+Do not add ruff or mypy. Do not add a `py.typed` marker or a `src/` package layout. Modules live next to `server.py`.
 
-For strict settings and overrides, see **[MYPY_CONFIG.md](MYPY_CONFIG.md)**.
+## Docstrings
 
-## Type Hints Patterns
+Google style, with `Args`, `Returns`, and `Raises`, on functions you add or edit. The `python-docstring-doctor` skill is the format. Match the docstrings already in `server.py` and `tests/fixture.py`: the summary is one imperative sentence, and a test docstring says what the test writes and what it refuses to write.
+
+## Type hints
+
+Annotate new functions. Prefer `list[str]`, `dict[str, int]`, and `str | None` over `Optional` and `List` aliases. Patterns for `Protocol`, `TypeVar`, overloads, and `TypedDict` are in **[TYPE_PATTERNS.md](TYPE_PATTERNS.md)**.
+
+The page's JSON bodies are checked in TypeScript (`src/api-types.ts`), not by a Python model class. A Python `TypedDict` is useful when a handler reads the same keys in more than one place. It does not replace the TypeScript type.
+
+## Idioms
 
 ```python
-# Basic
-def process(items: list[str]) -> dict[str, int]: ...
-
-# Optional
-def fetch(url: str, timeout: int | None = None) -> bytes: ...
-
-# Callable
-def apply(func: Callable[[int], str], value: int) -> str: ...
-
-# Generic
-T = TypeVar("T")
-def first(items: Sequence[T]) -> T | None: ...
-```
-
-For protocols and advanced patterns, see **[TYPE_PATTERNS.md](TYPE_PATTERNS.md)**.
-
-## Common Anti-Patterns
-
-```python
-# Bad: Mutable default
-def process(items: list = []):  # Bug!
-    ...
-
-# Good: None default
-def process(items: list | None = None):
-    items = items or []
-    ...
-```
-
-```python
-# Bad: Bare except
-try:
-    ...
-except:
-    pass
-
-# Good: Specific exception
-try:
-    ...
-except ValueError as e:
-    logger.error(e)
-```
-
-```python
-# Bad: truthiness guard swallows a legitimate 0 / 0.0 / "" / False
-hour = config.get("start_hour") or 9   # a valid 0 (midnight) silently becomes 9
-if self.max_drawdown:                  # max_drawdown=0 silently disables the limit
-    enforce(self.max_drawdown)
-
-# Good: guard on None, not on truthiness
-hour = config.get("start_hour")
-hour = 9 if hour is None else hour
-if self.max_drawdown is not None:
-    enforce(self.max_drawdown)
-```
-
-`x = x or default` is fine only when no falsy value is a meaningful input — the
-domain is `None`-or-object, or the one falsy case is an empty container (e.g.
-`items = items or []`). For numeric, boolean, or string fields where `0`,
-`False`, or `""` are meaningful inputs, it is a bug — use
-`x if x is not None else default`.
-
-```python
-# Bad: identity comparison against a literal (ruff flags this as F632)
-if name is not "":   # CPython interning makes it *sometimes* work — never rely on it
-
-# Good: value comparison
-if name != "":
-```
-
-## A Rule You Enabled Isn't a Rule That Fires
-
-Linters ship exemptions, and the costly ones are invisible: the rule is in
-`select`, the job is green, and the class of mistake you believed was policed
-walks straight through. Before relying on a check to protect something, write
-the violation on purpose once and confirm it gets reported.
-
-The Ruff default that bites hardest is `dummy-variable-rgx`. It exists so
-`_`-prefixed throwaways don't trip unused-variable checks, but its default
-pattern matches **any** leading-underscore name — so `F811` (redefinition of an
-unused name) ignores every private helper in the codebase.
-
-```python
-# module.py — two module-level definitions. The FIRST one is dead code.
-def _is_rate_limited(response):          # never called; editing it has no effect
-    return response.status_code == 403
-
-def _is_rate_limited(response):          # this is the one that wins
-    return response.status_code == 403 and "rate limit" in response.text.lower()
-```
-
-`ruff check --select F811` passes clean on that file. Rename both to
-`is_rate_limited` and it fires immediately (verified on ruff 0.16). The gate is
-working — the *name* opted out of it.
-
-This shape shows up most often after two branches independently add the same
-module-level helper and a conflict resolution keeps both sides. Nothing goes
-red; the bodies usually agree at first; then someone patches the dead copy and
-cannot work out why the behaviour didn't change.
-
-Prefer fixing it in config, so the check actually covers private names:
-
-```toml
-[tool.ruff.lint]
-dummy-variable-rgx = "^_$"   # only a bare `_` is a throwaway
-```
-
-State the tradeoff honestly before adopting it: `_, keep = pair()` stays silent,
-but `_unused = compute()` now trips `F841`. In a codebase that leans on `_name`
-throwaways that is real noise — delete the assignment or use a bare `_` rather
-than reverting the regex.
-
-Independently, after resolving a conflict in a module both branches edited, look
-for duplicated **module-level** definitions directly — this catches shadowing
-the linter's config can't. The anchored pattern is deliberate: nested `def`/
-`class` inside a class or function is indented and won't match, which is the
-scope where accidental shadowing actually costs you.
-
-```bash
-grep -oE '^(def|class) [A-Za-z_][A-Za-z0-9_]*' module.py | sort | uniq -d
-```
-
-The habit generalizes past Ruff: when a check is load-bearing, introduce the
-mistake once and watch it get caught, the same way a regression test is only
-trustworthy after you've seen it go red.
-
-## Fail Loud: Don't Degrade Silently
-
-The costliest bugs aren't crashes — they're failures that look like success. Code
-that swallows an error and returns something plausible corrupts data downstream
-with no signal that anything went wrong. Prefer raising, or at minimum surfacing
-an explicit error, over a quiet fallback.
-
-**Don't collapse exceptions into a generic string — and don't discard output.**
-
-```python
-# Bad: real parse error becomes a one-line string; traceback and context lost
-try:
-    return parse(path)
-except Exception as e:
-    return {"error": str(e)}     # every distinct failure looks the same
-
-# Bad: a nonzero exit discards stdout — where many CLIs write their real summary
-result = subprocess.run(cmd, capture_output=True, text=True)
-if result.returncode != 0:
-    return f"Error: {result.stderr}"   # tools that exit nonzero *by design*
-                                       # (e.g. "N findings") report empty here
-
-# Good: let it raise (or return stdout+stderr+code so the caller can decide)
-return {"stdout": result.stdout, "stderr": result.stderr, "code": result.returncode}
-```
-
-**Give success and failure distinct sentinels.** If the error path writes the
-same status value the success path uses, failed runs read as complete.
-
-```python
-# Bad: on failure, status is set to the SAME value that means "done"
-try:
-    run_job()
-    status = "READY"
-except Exception:
-    status = "READY"     # failures are now indistinguishable from success
-
-# Good: a terminal error state the UI/caller can branch on
-    status = "ERROR"
-```
-
-**Never substitute fabricated data on failure.** Returning randomized or sample
-data when a fetch fails makes the UI show plausible-but-invented numbers.
-
-```python
-# Bad: a network hiccup silently becomes made-up numbers
-try:
-    return fetch_metrics()
-except RequestError:
-    return generate_sample_data()   # user can't tell real from fake
-
-# Good: propagate the failure (or return an explicit sentinel the UI renders as an error)
-```
-
-**Signal partial results — don't return them as complete.** A paginated fetch
-that aborts mid-stream and returns what it has looks identical to a full result.
-
-```python
-# Bad: caller can't distinguish "12 items" from "12 of 900 before the API died"
-def fetch_all():
-    items = []
-    for page in paginate():
-        try:
-            items.extend(page)
-        except RequestError:
-            break            # silent truncation
+# Mutable default. The list is shared by every call.
+def collect(items: list[str] = []) -> list[str]:
+    items.append("x")
     return items
 
-# Good: return completeness alongside the data (or raise)
-    return items, complete   # caller warns loudly when complete is False
+# New list each call. `items or []` is fine here because the only
+# falsy input is an empty list, which is the same result.
+def collect(items: list[str] | None = None) -> list[str]:
+    items = items or []
+    return items
 ```
-
-**Batch loops: collect per-item errors, don't just `continue`.** Skipping bad
-inputs silently gives no way to know coverage was incomplete — and makes sibling
-operations inconsistent when some report errors and others don't.
 
 ```python
-# Bad: files that fail to load vanish with no trace
-for f in files:
-    try:
-        process(load(f))
-    except Exception:
-        continue                     # how many were skipped? which ones?
+# `0`, `0.0`, `False`, and "" are real values. `or` replaces them.
+hour = config.get("start_hour") or 9
 
-# Good: accumulate skips and return them so callers (and automation) can see them
-errors = []
-for f in files:
-    try:
-        process(load(f))
-    except Exception as e:
-        errors.append({"file": f, "error": str(e)})
-return {"processed": ..., "errors": errors}
+hour = config.get("start_hour")
+hour = 9 if hour is None else hour
 ```
 
-The unifying rule: when you catch an error, either recover meaningfully or make
-the failure **visible** (raise, log at error level, or return a distinguishable
-sentinel). A `return`/`continue`/fallback inside `except` that produces
-normal-looking output is where silent corruption lives.
-
-## Determinism & Reproducibility
-
-Non-deterministic output is a quiet tax: churny, unreviewable diffs; flaky tests;
-and simulations no one can reproduce from a seed. Three sources recur.
-
-**Serializing from an unordered container.** Building a list or JSON payload by
-iterating a `set` (or merging into a dict and ranging it) emits results in an
-order that varies run to run — `str` hashing is randomized per process, so a
-regenerated file is the same data reshuffled, and the real change drowns in noise
-in a repo whose whole point may be a clean diff. Impose a total order before you
-serialize.
+`x = x or default` is safe only when no falsy value is meaningful. For a number, a boolean, or a string, use `is None`.
 
 ```python
-# Bad: set iteration order isn't stable across runs
-tags = [render(t) for t in tag_set]
-json.dump(record, f)                     # nested sets/merges churn the output
+# `is` against a literal depends on interning.
+if name is not "":
+    ...
 
-# Good: sort before writing
-tags = [render(t) for t in sorted(tag_set)]
-json.dump(record, f, sort_keys=True)
+if name != "":
+    ...
 ```
-
-**Multiple RNGs, none injectable.** A library that draws from both `random` and
-`numpy.random` needs *both* seeded to be reproducible — seeding one leaves the
-other free-running, so the run is only half-deterministic. And seeding the global
-RNGs (`random.seed`, `np.random.seed`) clobbers the caller's global state. Accept
-a seed (or an RNG instance) and thread local generators through, so callers get
-reproducibility without you reaching into their globals.
 
 ```python
-# Bad: two independent global RNGs, no way to seed from the outside
-def simulate():
-    x = random.random()              # stdlib global stream
-    y = np.random.normal()           # numpy global — a *separate* stream
-
-# Good: caller-supplied, local generators; one seed reproduces the whole run
-def simulate(seed: int | None = None):
-    rng = random.Random(seed)
-    nprng = np.random.default_rng(seed)
-    x = rng.random()
-    y = nprng.normal()
+try:
+    parse(raw)
+except ValueError as exc:
+    log.error("%s", exc)
 ```
 
-**Unpinned parsing context.** Locale-dependent parsing — `datetime.strptime` with
-`%b`/`%a` (month/day names) — silently changes behavior across machines. Pin the
-format and locale so a test that passes on your box passes in CI too.
-
-Non-determinism also weakens tests: a function that `shuffle`s its output forces
-assertions so loose ("contains any of these words") that they stop catching
-regressions. Make the seam deterministic — inject the RNG — and assert exact
-output.
-
-## Pythonic Idioms
+A bare `except:` or an `except Exception` that returns a normal-looking result hides the failure. Catch the exception you can handle. Let the rest propagate. On a request, `LibraryHandler._report_failure` is the one place that catches everything, and it answers 500 with a fixed sentence rather than the exception text.
 
 ```python
-# Iteration
-for item in items:           # Not: for i in range(len(items))
-for i, item in enumerate(items):  # When index needed
+for item in items:
+    ...
+for index, item in enumerate(items):
+    ...
 
-# Dictionary access
-value = d.get(key, default)  # Not: if key in d: value = d[key]
+value = mapping.get(key, default)
 
-# Context managers
-with open(path) as f:        # Not: f = open(path); try: finally: f.close()
-
-# Comprehensions (simple only)
-squares = [x**2 for x in numbers]
+with open(path, encoding="utf-8") as handle:
+    text = handle.read()
 ```
 
-## Module Organization
+Use a comprehension when it stays a single expression. A loop with a `try` inside is easier to read than a comprehension that hides the error.
 
+## Fail loud
+
+A failure that looks like success is the expensive bug.
+
+- Do not set the success status in the `except` branch.
+- Do not replace a failed read with an empty list and return it as the full result.
+- Do not substitute sample data when a call fails.
+- In a loop over files or tracks, collect the per-item error and return it. A bare `continue` drops the path with no record.
+- A subprocess that exits non-zero may still have written the answer to stdout (`ps`, `tasklist`). Return the code together with stdout and stderr, or treat a timeout as the conservative result the caller already documents. `library._unix_process_is_serato` treats a timeout as "Serato is running" so a write stops.
+
+## Deterministic output
+
+Snapshot hashes and committed files change when iteration order changes. A `set` has no stable order across processes. Sort before you serialize.
+
+```python
+tags = [render(tag) for tag in sorted(tag_set)]
+json.dumps(record, sort_keys=True)
 ```
-src/my_library/
-├── __init__.py      # Public API exports
-├── _internal.py     # Private (underscore prefix)
-├── exceptions.py    # Custom exceptions
-├── types.py         # Type definitions
-└── py.typed         # Type hint marker
-```
+
+`datetime.strptime` with `%b` or `%a` follows the machine locale. Format timestamps with an explicit English label, the way `format_when` does, so a test on a non-English runner matches CI.
 
 ## Checklist
 
 ```
-Code Quality:
-- [ ] ruff check passes
-- [ ] mypy passes (strict mode)
-- [ ] Public API has type hints
-- [ ] Public API has docstrings
-- [ ] No mutable default arguments
-- [ ] Specific exception handling
-- [ ] Failures fail loud — no fabricated fallbacks, colliding success/error sentinels, or silently-truncated results
-- [ ] Batch loops collect per-item errors instead of a bare `continue`
-- [ ] Truthiness guards don't swallow valid 0/False/"" (guard on `is None`)
-- [ ] No `is`/`is not` against literals (use ==/!=)
-- [ ] Load-bearing lint rules verified to fire (F811 skips `_`-prefixed names under the default `dummy-variable-rgx`)
-- [ ] No duplicate module-level `def`/`class` names after a conflict resolution
-- [ ] Deterministic output: sort before serializing; seed/inject all RNGs (both `random` and `numpy`)
-- [ ] py.typed marker present
+- [ ] New annotations on files in pyrightconfig.json include pass pyright strict
+- [ ] A file outside that include list was not described as typechecked
+- [ ] New or edited functions have Google-style docstrings
+- [ ] No mutable default argument
+- [ ] Guards use `is None` where 0, False, or "" is valid
+- [ ] No `is` / `is not` against a literal
+- [ ] Exceptions are specific, or the 500 path uses the fixed sentence
+- [ ] Sets and dict key order are sorted before hashing or writing
+- [ ] No ruff, mypy, or py.typed config added
 ```
-
-## Learn More
-
-This skill is based on the [Code Quality](https://mcginniscommawill.com/guides/python-library-development/#code-quality-the-foundation) section of the [Guide to Developing High-Quality Python Libraries](https://mcginniscommawill.com/guides/python-library-development/) by [Will McGinnis](https://mcginniscommawill.com/). See these posts for deeper coverage:
-
-- [Linting & Formatting with Ruff](https://mcginniscommawill.com/posts/2025-01-30-linting-formatting-ruff/)
-- [Understanding McCabe Complexity](https://mcginniscommawill.com/posts/2025-04-24-understanding-mccabe-complexity/)
-- [Adding Type Hints](https://mcginniscommawill.com/posts/2025-04-03-pygeohash-type-hints/)

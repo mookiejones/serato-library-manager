@@ -1,289 +1,87 @@
 ---
 name: designing-python-apis
-description: Designs intuitive Python library APIs following principles of simplicity, consistency, and discoverability. Handles public re-exports, API evolution, deprecation, breaking changes, and error handling. Use when designing or reviewing a library API, exposing a symbol from a package __init__, or managing API versioning and deprecations.
+description: Keeps the local HTTP routes in server.py consistent — the same JSON shape, the same error contract, and additive changes the page can still read. Use when adding or changing a /api/* route, a status code, or a response field src/api.ts reads.
 ---
 
-# Python API Design
+# Local API routes
 
-## Core Principles
+`server.py` is the API. `src/api.ts` is the client. Both ship in the same commit. There is no installed package, so public re-exports, `__all__`, and deprecation warnings do not apply. Keep three things steady: routes that work the same way, one error contract, and changes the current page can still read.
 
-1. **Simplicity**: Simple things simple, complex things possible
-2. **Consistency**: Similar operations work similarly
-3. **Least Surprise**: Behave as users expect
-4. **Discoverability**: Find via autocomplete and help
+## Consistency
 
-## Progressive Disclosure Pattern
+GET reads. POST edits, reveals a file, saves settings, or asks the desktop process to shut down or focus. A new route picks the verb the existing ones use. Do not add a GET that writes.
 
-```python
-# Level 1: Simple functions
-from mylib import encode, decode
-result = encode(37.7749, -122.4194)
+| Kind | Where the input lives | Examples |
+| --- | --- | --- |
+| Read | Query string | `/api/library?space=`, `/api/track?id=`, `/api/files?path=` |
+| Edit | JSON object body | `/api/track`, `/api/crate`, `/api/files`, `/api/snapshots` |
+| Desktop control | Empty or ignored body, token in the handler | `/api/shutdown`, `/api/focus` |
 
-# Level 2: Configurable classes
-from mylib import Encoder
-encoder = Encoder(precision=15)
+Success and failure are both JSON objects from `send_json`, except a file download (`/api/export.m3u`, `/api/export.rekordbox.xml` without `report=1`) and a static file. `send_file` is only for `static/`. A GET path that matches no route falls through to `send_file` and answers 404 when the file is missing. Do not treat that HTML 404 as the API error. An unknown POST path answers `{"error": "That action is not available."}` with status 404.
 
-# Level 3: Low-level access
-from mylib.internals import BitEncoder
-```
+Use the words the page already uses (`space`, `crate`, `preview`, `confirm`, `id`). A boolean in a JSON body is a JSON boolean (`"confirm": true`). The Rekordbox GET query uses `"1"` and `"0"` for `memory` and `hot_loops`. A new flag on that same query uses that spelling. Do not add a second spelling for one flag.
 
-## Naming Conventions
+The server binds `127.0.0.1` only. A route does not change that.
 
-```python
-# Actions: verbs
-encode(), decode(), validate()
+## Error contract
 
-# Retrieval: get_*
-get_user(), get_config()
+`postJSON` in `src/api.ts` reads `payload.error` as the sentence the UI shows, and `payload.serato` to recognize a 409 lock. Every JSON failure keeps that shape. `ErrorBody` in `src/api-types.ts` is `error?: string` and `serato?: SeratoStatus | null`.
 
-# Boolean: is_*, has_*, can_*
-is_valid(), has_permission()
+| Situation | Status | Body |
+| --- | --- | --- |
+| Track id missing, body not JSON, body not an object, or a value of the wrong type | 400 | `{"error": "..."}` — a specific sentence when one exists (`"Track id is required."`, `"The request body is not JSON."`), otherwise `"That request is not valid."` |
+| Track not in the requested space, or no library file | 404 | `{"error": "Track is not in this space."}` or `{"error": "No Serato library was found on this computer."}` |
+| POST path the handler does not implement | 404 | `{"error": "That action is not available."}` |
+| Serato holds the library, or SQLite reports the database locked | 409 | `{"error": "...", "serato": <status object>}` |
+| Body larger than `BODY_LIMIT` | 413 | `{"error": "That upload is too large."}` |
+| Shutdown route with no desktop token | 404 | The route is absent when `server.py` is run on its own |
+| Shutdown route with the wrong token | 403 | Comparison does not reveal which character differed |
+| Any other exception | 500 | `{"error": "Something went wrong. The details are in the local log."}` |
 
-# Conversion: to_*, from_*
-to_dict(), from_json()
-```
+`library.LibraryError` and `snapshots.SnapshotError` carry their own status and message and are sent as `{"error": exc.message}`. A Serato lock uses `LibraryError` or `SeratoOpen` with the `serato` object and status 409.
 
-## Error Handling
+Rules that keep a failure from looking like success:
 
-```python
-class MyLibError(Exception):
-    """Base exception with helpful messages."""
-    def __init__(self, message: str, *, hint: str = None):
-        super().__init__(message)
-        self.hint = hint
+- Do not answer 200 when the write did not happen. A preview sets `preview: true` and describes the change. `confirm: true` is what performs it.
+- `_report_failure` logs the traceback and returns the fixed 500 sentence. The JSON does not include the exception text. That text can contain a path.
+- Validate the body before the first mutation. A 400 that arrives after a row or a file has changed breaks the contract. See `destructive-operations`.
+- An empty list is a real empty result (no tracks, no snapshots). It is not a stand-in for a failed read. If the read failed, send an error status.
+- Opening the logs folder ignores the body. The response does not include the folder path.
 
-# Usage
-raise ValidationError(
-    f"Latitude must be -90 to 90, got {lat}",
-    hint="Did you swap latitude and longitude?"
-)
-```
+## Evolution
 
-### Fail Loud, Not Silent
+The page and the server move together. There is no external caller to warn, and no deprecation cycle.
 
-The most expensive bugs are the ones where **failure is indistinguishable from
-success**. A caller who gets no error assumes everything worked. These patterns
-all turned a real failure into a silent wrong answer in shipped code — guard
-against every one.
+Safe in one commit, with the TypeScript type updated when the page reads the field:
 
-**Don't write the success sentinel on the failure path.** An `except` block that
-sets the same state a successful run would makes failed jobs look complete.
+- Add a JSON field the current page ignores.
+- Add a query parameter with a default equal to today's behavior (`crate` defaults to `all`, `memory` defaults to on).
+- Add a route that follows the error contract above.
 
-```python
-# BAD — any failure is reported to the user as a finished result.
-try:
-    result = run_job()
-    status = "READY"
-except Exception:
-    status = "READY"        # failure now looks identical to success
+Breaking, and only with the page updated in the same commit:
 
-# GOOD — distinct terminal states; the UI/caller can react.
-try:
-    result = run_job()
-    status = "READY"
-except Exception:
-    log.exception("job failed")
-    status = "ERROR"
-```
+- Rename or remove a field `src/` reads.
+- Change a status the page branches on (409 for the Serato lock, 400 for a bad body, 404 for a missing track).
+- Change `"1"` / `"0"` on an existing GET flag, or the meaning of `preview` and `confirm`.
+- Put a path or an exception string in an error body.
 
-**Don't swallow distinct failures into one generic message.** A broad
-`except Exception` that returns `"error: something went wrong"` (or worse, an
-empty result) collapses parse errors, missing files, and bugs into the same
-opaque string — undebuggable and often mistaken for "no problems found." Catch
-the specific exceptions you can handle; let the rest propagate.
+`docs/architecture.md` describes the routes. Update it in the same change as the route.
 
-**An empty/partial result is not an error signal.** Returning `[]`, an empty
-`DataFrame`, or "what I fetched before the connection dropped" looks like a valid
-answer. Pagination that returns partial pages on a mid-stream `RequestError`, then
-gets aggregated as if complete, produces silently wrong analytics. Either raise,
-or return an explicit "incomplete" marker the caller must check — never let
-truncation masquerade as the full set.
-
-**Meter external work where it actually happens.** A quota or request budget
-charged once around `list_all_items()` undercounts whenever that helper follows
-pagination internally: one budget unit can hide ten HTTP requests. Spend at the
-lowest shared request boundary so every page, retry, and detail fetch is counted.
-
-```python
-# BAD — the helper may issue an unbounded number of requests.
-budget.spend()
-items = client.list_all_items()
-
-# GOOD — pagination cannot bypass the meter.
-def request(method, url, *, budget, **kwargs):
-    budget.spend()
-    return http.request(method, url, **kwargs)
-```
-
-Keep the budget above the raw HTTP call if cache hits should be free, and below
-retry logic if every retry consumes provider quota. Test with a fake paginated
-transport that returns multiple pages and assert both the result values and the
-exact number of budget spends; a one-page fake cannot prove this contract.
-
-**A no-op on unexpected input is a silent corruption.** Code that skips columns
-of the wrong type, ignores a key it doesn't recognize, or `continue`s past a file
-it can't parse — with no error and no report — leaves the caller believing the
-operation applied. If you can't act on an input, say so (raise, warn, or return a
-per-item error list); don't quietly do nothing.
-
-**Validation errors must not leave partial mutations behind.** An `inplace=True`
-API that renames caller-owned columns and only then validates another argument can
-raise the right exception while still corrupting the caller's next operation.
-Validate every parameter and precondition before the first mutation. When work
-cannot be validated up front, stage it on a copy and commit only after success.
-
-```python
-# BAD — invalid max_fraction still changes the caller's dataframe.
-def detect(data, *, max_fraction=0.1, inplace=True):
-    target = data if inplace else data.copy()
-    target.rename(columns={"time": "timestamp"}, inplace=True)
-    if not 0 < max_fraction < 0.5:
-        raise ValueError("max_fraction must be between 0 and 0.5")
-    return analyze(target)
-
-# GOOD — the error path is side-effect free.
-def detect(data, *, max_fraction=0.1, inplace=True):
-    if not 0 < max_fraction < 0.5:
-        raise ValueError("max_fraction must be between 0 and 0.5")
-    target = data if inplace else data.copy()
-    target.rename(columns={"time": "timestamp"}, inplace=True)
-    return analyze(target)
-```
-
-Pin the contract in tests: snapshot caller-owned state, trigger a late validation
-error with `inplace=True`, and assert the object is unchanged. Testing only the
-exception type misses the damaging half of this bug.
-
-```python
-before = frame.copy(deep=True)
-with pytest.raises(ValueError, match="max_fraction"):
-    detect(frame, max_fraction=0.5, inplace=True)
-pd.testing.assert_frame_equal(frame, before)
-```
-
-**Filtering down to empty must never read as "all clear."** When you narrow a rule
-set, check set, or work list and the filter yields nothing, an "evaluate all →
-0 problems" path reports a perfect score while actually checking nothing. Guard
-the empty case explicitly:
-
-```python
-selected = [r for r in rules if r.category in requested]
-if not selected:                       # empty filter ≠ everything passed
-    raise ValueError(f"no rules match {requested!r}")
-```
-
-**Never fabricate a fallback that looks real.** Substituting sample/random data
-when a fetch fails (so the UI "has something to show") presents invented numbers
-as genuine. Surface the failure instead; a visible error beats a plausible lie.
-
-**Don't discard the real output on a non-zero exit.** A subprocess wrapper that
-returns `f"Error: {stderr}"` whenever `returncode != 0` loses the answer for tools
-that exit non-zero by design and write results to **stdout** — reporting a
-successful run as an empty `"Error: "`. Inspect stdout and the actual exit
-semantics before deciding it failed.
-
-## Test the public import path, not only the implementation module
-
-A package can expose two functions with the same name and only one can work:
-
-```python
-# mylib/__init__.py
-def initialize_parser() -> None:
-    pass                         # stale placeholder
-
-# mylib/parser.py
-def initialize_parser() -> None:
-    global _parser
-    _parser = build_parser()     # real implementation
-```
-
-Internal tests that import `mylib.parser.initialize_parser` all pass, while the
-documented `from mylib import initialize_parser` call does nothing. This is an
-API break even though neither definition is individually invalid.
-
-Re-export the canonical object instead of wrapping or copying it:
-
-```python
-# mylib/__init__.py
-from .parser import initialize_parser
-
-__all__ = ["initialize_parser"]
-```
-
-Then test through the path users are told to import. An identity assertion is a
-cheap drift guard, and one behavior assertion proves the public route performs
-the required initialization:
-
-```python
-import mylib
-from mylib import parser
-
-def test_public_initializer_is_canonical():
-    assert mylib.initialize_parser is parser.initialize_parser
-    mylib.initialize_parser()
-    assert parser.is_initialized()
-```
-
-Apply the behavior check to convenience exports, compatibility adapters, console
-entry-point targets, and documented import snippets. Use identity only when the
-public name is intended to be a direct alias. Testing only the leaf module proves
-the implementation; it says nothing about whether the public API reaches it.
-
-## Deprecation
-
-Deprecate gracefully: warn now, document the removal version, and remove only in a
-major release. The warning mechanics (including deprecating parameters, classes,
-and modules) and the migration-guide template are owned by the
-`managing-python-releases` skill — see
-**[../release-management/MIGRATION.md](../release-management/MIGRATION.md)**.
-
-## Anti-Patterns
-
-```python
-# Bad: Boolean trap
-process(data, True, False, True)
-
-# Good: Keyword arguments
-process(data, validate=True, cache=False)
-```
-
-The mutable-default-argument trap (`def f(x: list = [])`) is covered by the
-`improving-python-code-quality` skill.
-
-For detailed patterns, see:
-- **[PATTERNS.md](PATTERNS.md)** - Builder, factory, and advanced patterns
-- **[EVOLUTION.md](EVOLUTION.md)** - API versioning and migration guides
-
-## Review Checklist
+## Checklist
 
 ```
-Naming:
-- [ ] Clear, self-documenting names
-- [ ] Consistent patterns throughout
-- [ ] Boolean params read naturally
-
-Parameters:
-- [ ] Minimal required parameters
-- [ ] Sensible defaults
-- [ ] Keyword-only after positional clarity
-
-Exports:
-- [ ] Direct package exports reference the canonical implementation, not a stale stub
-- [ ] Tests import through the documented public path and assert real behavior
+Consistency:
+- [ ] GET reads, POST writes, matching the routes already in server.py
+- [ ] Input is a query on GET and a JSON object on POST
+- [ ] Field names match src/api-types.ts
 
 Errors:
-- [ ] Custom exceptions with context
-- [ ] Helpful error messages
-- [ ] Documented in docstrings
-- [ ] Failures fail loud — no success sentinel on the error path
-- [ ] Empty/partial results never masquerade as a complete answer
-- [ ] No silent no-ops or fabricated fallback data
-- [ ] Validation failures leave caller-owned inputs unchanged
+- [ ] Failure is {"error": string} and, for a Serato lock, {"error", "serato"} with status 409
+- [ ] 500 text is the fixed sentence, with the traceback only in the local log
+- [ ] Validation happens before the first write
+- [ ] An empty payload is not used to hide a failed read
+
+Evolution:
+- [ ] A removed or renamed field is updated in src/ in the same commit
+- [ ] docs/architecture.md matches the route
 ```
-
-## Learn More
-
-This skill is based on the [Ergonomics](https://mcginniscommawill.com/guides/python-library-development/#ergonomics-the-joy-of-good-design) section of the [Guide to Developing High-Quality Python Libraries](https://mcginniscommawill.com/guides/python-library-development/) by [Will McGinnis](https://mcginniscommawill.com/). See these posts for deeper coverage:
-
-- [The Art of API Design](https://mcginniscommawill.com/posts/2025-02-03-art-of-api-design/)
-- [Designing for Developer Joy](https://mcginniscommawill.com/posts/2025-02-06-designing-for-developer-joy/)
