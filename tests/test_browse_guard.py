@@ -36,20 +36,25 @@ class ShallowShortcutTests(unittest.TestCase):
         Returns:
             None. The test fails if the link is listed or the real folder is refused.
         """
-        with TempLibrary() as temp:
-            secret = temp.root / "secret"
-            secret.mkdir()
-            (secret / "hidden.mp3").write_bytes(b"x")
+        with TempLibrary():
             anchor = _shallow_anchor()
             if anchor is None:
                 self.skipTest("no shallow folder is available")
             token = uuid.uuid4().hex
             link = anchor / f"serato-shallow-{token}"
             real = anchor / f"serato-real-{token}"
+            secret = anchor / f"serato-secret-{token}"
             try:
                 real.mkdir()
+                secret.mkdir()
             except OSError:
+                if real.is_dir():
+                    real.rmdir()
+                if secret.is_dir():
+                    secret.rmdir()
                 self.skipTest("cannot create a shallow folder")
+            hidden = secret / "hidden.mp3"
+            hidden.write_bytes(b"x")
             root_path = str(anchor.resolve())
             roots = [
                 {
@@ -62,6 +67,8 @@ class ShallowShortcutTests(unittest.TestCase):
             try:
                 link.symlink_to(secret, target_is_directory=True)
             except OSError:
+                hidden.unlink(missing_ok=True)
+                secret.rmdir()
                 real.rmdir()
                 self.skipTest("symlinks are not available")
             try:
@@ -77,6 +84,8 @@ class ShallowShortcutTests(unittest.TestCase):
                 self.assertEqual(opened["breadcrumb"][0]["path"], root_path)
             finally:
                 link.unlink(missing_ok=True)
+                hidden.unlink(missing_ok=True)
+                secret.rmdir()
                 real.rmdir()
 
 
