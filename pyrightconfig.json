@@ -1,5 +1,5 @@
 {
   "typeCheckingMode": "strict",
   "pythonVersion": "3.14",
-  "include": ["library.py", "tags.py", "server.py", "gig_check.py", "snapshots.py", "tests"]
+  "include": ["library.py", "tags.py", "server.py", "gig_check.py", "gig_snapshots.py", "snapshots.py", "tests"]
 }

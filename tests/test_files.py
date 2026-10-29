@@ -713,6 +713,24 @@ class FileManagerTests(unittest.TestCase):
         stamped = list(backups.glob("serato-web-*")) if backups.is_dir() else []
         self.assertEqual(stamped, [])
 
+    def test_process_check_error_refuses_the_file_change(self) -> None:
+        """Refuse a confirmed file change when the lock lookup raises.
+
+        Returns:
+            None. The test fails if the file is renamed.
+        """
+        with open_database(self.library.db) as conn:
+            conn.execute(
+                "INSERT INTO lock (owner_process_id, owner_process_name) VALUES (?, ?)",
+                (os.getpid(), "Serato DJ Pro"),
+            )
+        payload = {"action": "rename", "path": str(self.song), "name": "renamed.mp3", "confirm": True}
+        with mock.patch("library._process_is_serato", side_effect=OSError("ps failed")):
+            with self.assertRaises(library.SeratoOpen):
+                files.execute(payload)
+        self.assertEqual(self.song.read_bytes(), b"audio-a")
+        self.assertFalse((self.song.parent / "renamed.mp3").exists())
+
     def test_preview_does_not_copy_the_database(self) -> None:
         """Check a rename without writing a journal or a backup.
 

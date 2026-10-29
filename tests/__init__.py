@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import plistlib
 import shutil
 import tempfile
 from pathlib import Path
@@ -17,6 +18,14 @@ from pathlib import Path
 _ISOLATION = Path(tempfile.mkdtemp(prefix="serato-library-tests-"))
 os.environ["SERATO_LIBRARY_CONFIG_DIR"] = str(_ISOLATION / "config")
 os.environ["SERATO_LIBRARY_LOG_DIR"] = str(_ISOLATION / "logs")
+# A known Serato 4 build so writes are allowed. An unknown version blocks.
+_VERSION_PLIST = _ISOLATION / "SeratoVersion.plist"
+with _VERSION_PLIST.open("wb") as _handle:
+    plistlib.dump(
+        {"CFBundleShortVersionString": "4.1.0", "CFBundleVersion": "4.1.0.1"},
+        _handle,
+    )
+os.environ["SERATO_LIBRARY_APP_INFO"] = str(_VERSION_PLIST)
 
 
 def _cleanup_isolation() -> None:

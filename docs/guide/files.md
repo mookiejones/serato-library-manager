@@ -118,7 +118,7 @@ Delete removes the track from the library and its crates, and moves the audio fi
 3. Read the plan. It says the file will move to the Trash and leave the library and its crates.
 4. Click **Move to Trash**.
 
-On a Mac, the file goes to the Trash. On Windows, it goes to the Recycle Bin. The button still says **Move to Trash**. Open the Trash or the Recycle Bin to put the file back. The library row is already removed. Restore a [backup](safety.md#restore-a-backup) if you need the library row back as well.
+On a Mac, the file goes to the Trash. On Windows, it goes to the Recycle Bin. The button still says **Move to Trash**. Open the Trash or the Recycle Bin to put the file back. The library row is already removed. Restore a [backup](safety.md#restore-an-older-database-copy-by-hand) if you need the library row back as well.
 
 A missing library file can be removed from the library. Nothing is put in the Trash, because the file is not on disk.
 
@@ -141,4 +141,4 @@ Closing the app in the middle of a file change leaves a journal at `Library/Back
 1. Quit Serato DJ Pro.
 2. Open Serato Library again.
 
-The app finishes the change or puts the files back. If the journal and the library do not match, the next save is refused. The message is **An interrupted file change does not match the library. Restore the copy in Library/Backups.** Follow [Restore a backup](safety.md#restore-a-backup). Do not delete the journal by hand before you restore.
+The app finishes the change or puts the files back. If the journal and the library do not match, the next save is refused. The message is **An interrupted file change does not match the library. Restore the copy in Library/Backups.** Follow [Restore a backup](safety.md#restore-an-older-database-copy-by-hand). Do not delete the journal by hand before you restore.

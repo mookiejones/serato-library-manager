@@ -29,10 +29,11 @@ The list under **Holding it back** is each reason the score is not 100.
 | A streaming track | Apple Music tracks play only while you are logged in to Apple Music. They are counted on their own, not as missing files. |
 | An empty crate | The line is **Serato may delete this crate when it closes.** Put a track in the crate if you want to keep it. Serato's own clean-up note describes empty crates disappearing after quit, and that note does not name a version. The Serato DJ 4.0 crate page does not say they are deleted. |
 | **No snapshot in the last 7 days** | The score drops. A snapshot from the last 7 days does not drop it. |
-| **No snapshots yet** | Nothing has been saved to compare with this library, so there is no list of what changed. The score still drops, because there is no snapshot from the last 7 days. |
+| **No snapshots yet** | Nothing has been saved to compare with this library, so there is no list of what changed. The score still drops, because there is no snapshot from the last 7 days. Open **Snapshots** and click **Take a snapshot**. |
+| **Snapshots could not be read.** | The snapshot store beside the library did not open. The score drops as if there were no recent snapshot. Open **Snapshots** to see what is wrong. |
 
 A missing drive, or a missing file in the crate you selected, is **Not ready** even when the number would otherwise pass.
 
 ## What changed
 
-When a snapshot exists, **Since last gig** lists crates, cues, beatgrids, and tags that differ from the latest one. With no snapshot, that section says **No snapshots yet**.
+When a snapshot exists, **Since last gig** lists crates, cues, beatgrids, and tags that differ from the latest one. The snapshots are the ones in the **Snapshots** view. The check compares the library copy and the cues and beatgrids saved in that snapshot with the library now. It does not restore or change the snapshot. With no snapshot, that section says **No snapshots yet**.

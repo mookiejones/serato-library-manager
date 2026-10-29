@@ -15,23 +15,25 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+import gig_snapshots
 import library
 import snapshots
-from snapshots import (
+from gig_snapshots import (
     ChangeReport,
     CueMark,
+    GigSnapshotReader,
     GridMark,
     LoadedSnapshot,
     SnapshotCrate,
-    SnapshotReader,
     SnapshotTrack,
     TrackTags,
     track_key,
@@ -60,6 +62,7 @@ EMPTY_CRATE_WARNING = "Serato may delete this crate when it closes."
 
 NO_SNAPSHOTS = "No snapshots yet"
 STALE_SNAPSHOT = "No snapshot in the last 7 days"
+SNAPSHOTS_UNREADABLE = "Snapshots could not be read."
 
 SCORE_START = 100
 READY_AT = 70
@@ -983,6 +986,62 @@ def _tags_for(asset: _Asset) -> TrackTags:
     )
 
 
+def _marks(
+    cue_rows: Sequence[Mapping[str, object]],
+    loop_rows: Sequence[Mapping[str, object]],
+    grid_rows: Sequence[Mapping[str, object]],
+) -> tuple[tuple[CueMark, ...], tuple[GridMark, ...]]:
+    """Turn parsed Markers2 and BeatGrid rows into marks the diff compares.
+
+    Args:
+        cue_rows: Cue dicts from the Markers2 parser in ``tags.py``.
+        loop_rows: Loop dicts from the same parser.
+        grid_rows: Marker dicts from the BeatGrid parser in ``tags.py``.
+
+    Returns:
+        Cues and loops, and grid markers.
+    """
+    cues = [
+        CueMark("cue", _int(cue.get("index")), _int(cue.get("start_ms")), None, _text(cue.get("name")))
+        for cue in cue_rows
+    ]
+    cues.extend(
+        CueMark(
+            "loop",
+            _int(loop.get("index")),
+            _int(loop.get("start_ms")),
+            _int(loop.get("end_ms")),
+            _text(loop.get("name")),
+        )
+        for loop in loop_rows
+    )
+    grid: list[GridMark] = []
+    for marker in grid_rows:
+        bpm = marker.get("bpm")
+        beats = marker.get("beats")
+        position = marker.get("position")
+        grid.append(
+            GridMark(
+                float(position) if isinstance(position, (int, float)) else 0.0,
+                float(bpm) if isinstance(bpm, (int, float)) else None,
+                int(beats) if isinstance(beats, int) else None,
+            )
+        )
+    return tuple(cues), tuple(grid)
+
+
+def _int(value: object) -> int:
+    """Return a parsed marker number as an int.
+
+    Args:
+        value: Number from a parser dict.
+
+    Returns:
+        The int, or 0 when the value is not a number.
+    """
+    return int(value) if isinstance(value, (int, float)) else 0
+
+
 def _marks_from_file(path: str) -> tuple[tuple[CueMark, ...], tuple[GridMark, ...], bool]:
     """Read cues and the beatgrid from a file that is already on disk.
 
@@ -994,26 +1053,11 @@ def _marks_from_file(path: str) -> tuple[tuple[CueMark, ...], tuple[GridMark, ..
         ``read_serato_tags`` opens the file with rb and does not write it.
     """
     loaded = read_serato_tags(path)
-    cues = [
-        CueMark("cue", int(cue["index"]), int(cue["start_ms"]), None, str(cue["name"]))
-        for cue in loaded["cues"]
-    ]
-    cues.extend(
-        CueMark("loop", int(loop["index"]), int(loop["start_ms"]), int(loop["end_ms"]), str(loop["name"]))
-        for loop in loaded["loops"]
-    )
-    grid: list[GridMark] = []
-    for marker in loaded["beatgrid"]:
-        bpm = marker.get("bpm")
-        beats = marker.get("beats")
-        grid.append(
-            GridMark(
-                float(marker["position"]),
-                float(bpm) if isinstance(bpm, (int, float)) else None,
-                int(beats) if isinstance(beats, int) else None,
-            )
-        )
-    return tuple(cues), tuple(grid), bool(loaded["found"])
+    cues, grid = _marks(loaded["cues"], loaded["loops"], loaded["beatgrid"])
+    return cues, grid, bool(loaded["found"])
+
+
+_Marks = Callable[[_Asset], tuple[str, tuple[CueMark, ...], tuple[GridMark, ...], bool]]
 
 
 def _current_snapshot(library_rows: _Library, classified: _Classified, taken_at: datetime) -> LoadedSnapshot:
@@ -1029,15 +1073,35 @@ def _current_snapshot(library_rows: _Library, classified: _Classified, taken_at:
         unknown when the file was not opened, so a missing file is not also
         reported as every cue being deleted.
     """
+
+    def marks(asset: _Asset) -> tuple[str, tuple[CueMark, ...], tuple[GridMark, ...], bool]:
+        path = classified.present_paths.get(asset.asset_id)
+        if path is None:
+            return asset.portable_id, (), (), False
+        cues, grid, _found = _marks_from_file(path)
+        return path, cues, grid, True
+
+    info = gig_snapshots.SnapshotInfo("current", taken_at, "Library now")
+    return _library_snapshot(library_rows, marks, info)
+
+
+def _library_snapshot(library_rows: _Library, marks: _Marks, info: gig_snapshots.SnapshotInfo) -> LoadedSnapshot:
+    """Build a snapshot from library rows and a source of cues and grids.
+
+    Args:
+        library_rows: Rows read from the live database or a snapshot copy.
+        marks: Returns the path to show, the cues, the grid, and whether
+            they are known for one track.
+        info: Id, time, and label for the result.
+
+    Returns:
+        Crates, cues, grids, and tags for the diff. Both sides of the diff
+        are built here, so a track or a crate has the same key on each side.
+    """
     names = _asset_crates(library_rows)
     tracks: list[SnapshotTrack] = []
     for asset in library_rows.assets:
-        path = classified.present_paths.get(asset.asset_id, asset.portable_id)
-        if asset.asset_id in classified.present_paths:
-            cues, grid, _found = _marks_from_file(path)
-            known = True
-        else:
-            cues, grid, known = (), (), False
+        path, cues, grid, known = marks(asset)
         tracks.append(
             SnapshotTrack(
                 track_key(asset.asset_id, asset.portable_id or path),
@@ -1061,7 +1125,6 @@ def _current_snapshot(library_rows: _Library, classified: _Classified, taken_at:
             if asset_id in keys_for_asset
         )
         crate_rows.append(SnapshotCrate(crate.label, keys))
-    info = snapshots.SnapshotInfo("current", taken_at, "Library now")
     return LoadedSnapshot(info, tuple(crate_rows), tuple(tracks))
 
 
@@ -1081,7 +1144,7 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def _changes(
-    reader: SnapshotReader,
+    reader: GigSnapshotReader,
     library_rows: _Library,
     classified: _Classified,
     now: datetime,
@@ -1097,8 +1160,12 @@ def _changes(
     Returns:
         The snapshot note, the diff, and whether a snapshot is fresh.
         No snapshots yields ``No snapshots yet``, no diff, and not fresh.
+        A store that cannot be listed says so and is also not fresh.
     """
-    listed = list(reader.list_snapshots())
+    try:
+        listed = list(reader.list_snapshots())
+    except OSError:
+        return SNAPSHOTS_UNREADABLE, None, False
     if not listed:
         return NO_SNAPSHOTS, None, False
     latest = max(listed, key=lambda info: (_as_utc(info.taken_at), info.snapshot_id))
@@ -1111,7 +1178,189 @@ def _changes(
     except (KeyError, OSError):
         return f"{note} The latest snapshot could not be read.", None, fresh
     current = _current_snapshot(library_rows, classified, now)
-    return note, snapshots.diff_snapshots(loaded, current), fresh
+    return note, gig_snapshots.diff_snapshots(loaded, current), fresh
+
+
+class StoreSnapshots:
+    """Reads snapshots from ``snapshots.py`` for the gig check, without writing.
+
+    ``load`` opens the snapshot's ``master.sqlite`` copy read-only and reads
+    the same rows the check reads from the live library. Cues and grids come
+    from the Markers2 and BeatGrid frames saved in that snapshot, so the
+    audio files are not opened. A track whose file had no saved Serato frame
+    is marked unknown and its cues and grid are not compared.
+    """
+
+    def __init__(self, store: snapshots.SnapshotStore, space: str = library.LIBRARY_SPACE):
+        """Wrap a store.
+
+        Args:
+            store: Snapshot store for the library being checked.
+            space: Space whose rows are compared.
+        """
+        self.store = store
+        self.space = space
+
+    def list_snapshots(self) -> Sequence[gig_snapshots.SnapshotInfo]:
+        """List snapshots whose database copy passed its integrity check.
+
+        Returns:
+            One row per snapshot. The label is the reason the snapshot was taken.
+
+        Raises:
+            OSError: If the store cannot be listed.
+        """
+        try:
+            stored = self.store.list_snapshots()
+        except snapshots.SnapshotError as exc:
+            raise OSError(exc.message) from exc
+        rows: list[gig_snapshots.SnapshotInfo] = []
+        for info in stored:
+            if info["integrity"] != "ok":
+                continue
+            try:
+                taken_at = datetime.fromisoformat(info["created"])
+            except ValueError:
+                continue
+            label = info["reason"].rstrip(".") or info["trigger"]
+            rows.append(gig_snapshots.SnapshotInfo(info["id"], _as_utc(taken_at), label))
+        return rows
+
+    def load(self, snapshot_id: str) -> LoadedSnapshot:
+        """Load one snapshot in the shape the diff compares.
+
+        Args:
+            snapshot_id: Id from ``list_snapshots``.
+
+        Returns:
+            Crates, cues, grids, and tags from that snapshot.
+
+        Raises:
+            KeyError: If the snapshot, its database copy, or a blob cannot be
+                read, or the copy is not a library this check can read.
+        """
+        try:
+            listed = {info.snapshot_id: info for info in self.list_snapshots()}
+            info = listed[snapshot_id]
+            contents = self.store.load(snapshot_id)
+            data = self.store.database_bytes(snapshot_id)
+        except snapshots.SnapshotError as exc:
+            raise KeyError(snapshot_id) from exc
+        if data is None:
+            raise KeyError(snapshot_id)
+        rows = _snapshot_rows(data, self.space)
+        if rows is None:
+            raise KeyError(snapshot_id)
+        frames = _SavedFrames(contents)
+        return _library_snapshot(rows, frames.marks, info)
+
+
+def _snapshot_rows(data: bytes, space: str) -> _Library | None:
+    """Read library rows from a snapshot's database copy.
+
+    Args:
+        data: ``master.sqlite`` bytes from the snapshot.
+        space: Space name.
+
+    Returns:
+        Detached rows, or None when the copy cannot be read.
+    """
+    fd, name = tempfile.mkstemp(prefix="serato-gigsnap-", suffix=".sqlite")
+    path = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        with closing(open_read_only(path)) as conn:
+            return _read_library(conn, space, None)
+    except (library.LibraryError, sqlite3.Error):
+        return None
+    finally:
+        path.unlink(missing_ok=True)
+
+
+class _SavedFrames:
+    """Cues and grids saved in one snapshot, looked up by track."""
+
+    def __init__(self, contents: snapshots.SnapshotContents):
+        """Index the saved frames by path.
+
+        Args:
+            contents: Result of ``SnapshotStore.load``.
+        """
+        self.cues: dict[str, snapshots.CueTrackView] = {row["path"]: row for row in contents["cues"]}
+        self.grids: dict[str, snapshots.GridTrackView] = {row["path"]: row for row in contents["grids"]}
+        self.seen: set[str] = set(self.cues) | set(self.grids) | {row["path"] for row in contents["tags"]}
+        self.by_name: dict[str, list[str]] = {}
+        for path in self.seen:
+            self.by_name.setdefault(_base_name(path), []).append(path)
+
+    def _find(self, portable_id: str) -> str | None:
+        """Return the saved path for a stored id.
+
+        Args:
+            portable_id: Path Serato stored.
+
+        Returns:
+            The saved path that is that id, or ends with it on some drive.
+            None when the snapshot saved no frame for that track.
+        """
+        if not portable_id:
+            return None
+        for candidate in _candidates(portable_id, None):
+            if str(candidate) in self.seen:
+                return str(candidate)
+        tail = portable_id.replace("\\", "/").lstrip("/")
+        for path in self.by_name.get(_base_name(portable_id), ()):
+            if path.replace("\\", "/").endswith("/" + tail):
+                return path
+        return None
+
+    def marks(self, asset: _Asset) -> tuple[str, tuple[CueMark, ...], tuple[GridMark, ...], bool]:
+        """Return the saved cues and grid for one track.
+
+        Args:
+            asset: Track row from the snapshot's database copy.
+
+        Returns:
+            The path to show, cues, grid, and whether they are known.
+        """
+        path = self._find(asset.portable_id)
+        if path is None:
+            return asset.portable_id, (), (), False
+        cue = self.cues.get(path)
+        grid = self.grids.get(path)
+        cue_rows = [] if cue is None else cue["cues"]
+        loop_rows = [] if cue is None else cue["loops"]
+        grid_rows = [] if grid is None else grid["markers"]
+        cues, markers = _marks(cue_rows, loop_rows, grid_rows)
+        return path, cues, markers, True
+
+
+def _base_name(path: str) -> str:
+    """Return the last path part, for either separator.
+
+    Args:
+        path: File path.
+
+    Returns:
+        The file name, folded to lower case.
+    """
+    return path.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+
+
+def default_reader(database: Path | None, space: str) -> StoreSnapshots:
+    """Return the snapshot reader for a library without writing anything.
+
+    Args:
+        database: master.sqlite. None uses ``library.MASTER``.
+        space: Space whose rows are compared.
+
+    Returns:
+        A reader. An unfinished restore is not rolled back here, because the
+        check must not write.
+    """
+    master = Path(library.MASTER) if database is None else Path(database)
+    return StoreSnapshots(snapshots.SnapshotStore(master, recover=False), space)
 
 
 def _count(count: int, singular: str) -> str:
@@ -1263,7 +1512,7 @@ def run_gig_check(
     database: Path | None = None,
     space: str = library.LIBRARY_SPACE,
     crate_id: int | None = None,
-    snapshots_reader: SnapshotReader | None = None,
+    snapshots_reader: GigSnapshotReader | None = None,
     now: datetime | None = None,
 ) -> GigReport:
     """Check one space, or one crate, without writing.
@@ -1272,8 +1521,8 @@ def run_gig_check(
         database: master.sqlite. None uses ``library.MASTER``.
         space: Space name. The default is Serato Library.
         crate_id: Crate id, including its subcrates. None checks the whole space.
-        snapshots_reader: Where saved snapshots come from. None means there
-            are no snapshots yet.
+        snapshots_reader: Where saved snapshots come from. None reads the
+            snapshot store beside the database, without writing.
         now: Clock for the seven-day window. None uses the current UTC time.
 
     Returns:
@@ -1289,7 +1538,7 @@ def run_gig_check(
     if space not in library.ALLOWED_SPACES:
         raise library.LibraryError("That space is not available here.")
     path = Path(library.MASTER) if database is None else Path(database)
-    reader = snapshots.NoSnapshots() if snapshots_reader is None else snapshots_reader
+    reader = default_reader(path, space) if snapshots_reader is None else snapshots_reader
     with closing(open_read_only(path)) as conn:
         loaded = _read_library(conn, space, crate_id)
     classified = _classify(loaded)

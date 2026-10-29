@@ -252,6 +252,11 @@ def execute(payload: Mapping[str, object]) -> dict[str, object]:
     info = library.status()
     if info.get("open"):
         raise library.SeratoOpen(info)
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    if blocked:
+        raise library.LibraryError(blocked, 409)
     if recover_interrupted() == "blocked":
         raise library.LibraryError(
             "An interrupted file change does not match the library. Restore the copy in Library/Backups."
@@ -259,6 +264,7 @@ def execute(payload: Mapping[str, object]) -> dict[str, object]:
     built = _build(payload)
     if not built.ok:
         raise library.LibraryError(built.error or "That change was not saved.")
+    snapshots.snapshot_before_write()
     library.ensure_backup()
     journal = _journal_for(built)
     _write_journal(journal)
@@ -390,6 +396,47 @@ def _list_root(path: str | None) -> Path:
     return resolved
 
 
+def _is_backup_root(directory: Path) -> bool:
+    """Return whether a listing is the library backup folder.
+
+    Args:
+        directory: Folder being scanned.
+
+    Returns:
+        True when ``directory`` is ``Library/Backups`` beside the master
+        database. An unreadable path is not that folder.
+    """
+    try:
+        return directory.resolve() == _backups().resolve()
+    except OSError:
+        return False
+
+
+def _hide_incomplete_backup(name: str, path: Path, kind: str) -> bool:
+    """Return whether a backup listing must omit this entry.
+
+    Args:
+        name: Directory entry name.
+        path: Path of that entry.
+        kind: ``dir``, ``file``, or ``link`` from the scan.
+
+    Returns:
+        True for a directory under ``Library/Backups`` that
+        :func:`library.is_complete` rejects, when the name is a backup
+        folder or the entry contains the incomplete marker. Other files,
+        including the file-ops journal, stay visible.
+    """
+    if kind != "dir":
+        return False
+    if library._is_staging_name(name) or library._is_failed_name(name):
+        return True
+    if (path / library.BACKUP_INCOMPLETE_NAME).exists():
+        return True
+    if (path / library.BACKUP_COMPLETE_NAME).exists() and not library.is_complete(path):
+        return True
+    return False
+
+
 def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
     """Read one folder without following shortcuts.
 
@@ -404,6 +451,7 @@ def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
     """
     found: list[dict[str, object]] = []
     truncated = False
+    backup_root = _is_backup_root(directory)
     try:
         with os.scandir(directory) as scanner:
             for entry in scanner:
@@ -411,6 +459,9 @@ def _scan(directory: Path) -> tuple[list[dict[str, object]], bool]:
                     truncated = True
                     break
                 kind = "link" if entry.is_symlink() else "dir" if entry.is_dir(follow_symlinks=False) else "file"
+                path = Path(entry.path)
+                if backup_root and _hide_incomplete_backup(entry.name, path, kind):
+                    continue
                 audio = kind == "file" and Path(entry.name).suffix.lower() in _AUDIO
                 found.append(
                     {

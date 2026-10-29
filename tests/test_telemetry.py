@@ -420,8 +420,8 @@ class ScrubTests(TelemetryCase):
         """Initialize Sentry without request hooks or personal data.
 
         ``sentry_sdk.init`` is patched, so no client starts and no request
-        leaves the process. Auto-enabling stays off so Bottle, which the
-        desktop window installs, cannot attach.
+        leaves the process. Auto-enabling stays off so a framework
+        integration cannot attach.
 
         Returns:
             None. The test fails if a privacy flag is left at the SDK default.
@@ -673,6 +673,75 @@ class ApiPrivacyTests(unittest.TestCase):
             urllib.request.urlopen(request)
         self.assertEqual(caught.exception.code, 400)
         caught.exception.close()
+        self.assertIs(payload["rekordbox"]["hot_loops"], False)
+        self.assertIs(payload["rekordbox"]["memory_cues"], True)
+        self.assertEqual(payload["rekordbox"]["key_notation"], "asis")
+
+    def test_rekordbox_settings_round_trip_and_reject_bad_types(self) -> None:
+        """Save the export bar and refuse a value of the wrong type.
+
+        False for memory cues stays false. A later sharing choice keeps
+        that bar. An integer, an unknown field, and a bad notation return
+        400 and leave the file as it was.
+
+        Returns:
+            None. The test fails if a bad body is stored or false is lost.
+        """
+        import urllib.error
+
+        status, saved = self._request(
+            "/api/settings",
+            {
+                "rekordbox": {
+                    "hot_loops": True,
+                    "memory_cues": False,
+                    "key_notation": "camelot",
+                }
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(saved["telemetry_consent"])
+        self.assertIs(saved["rekordbox"]["hot_loops"], True)
+        self.assertIs(saved["rekordbox"]["memory_cues"], False)
+        self.assertEqual(saved["rekordbox"]["key_notation"], "camelot")
+        status, narrowed = self._request(
+            "/api/settings",
+            {"rekordbox": {"hot_loops": False}},
+        )
+        self.assertEqual(status, 200)
+        self.assertIs(narrowed["rekordbox"]["hot_loops"], False)
+        self.assertIs(narrowed["rekordbox"]["memory_cues"], False)
+        self.assertEqual(narrowed["rekordbox"]["key_notation"], "camelot")
+        bad_bodies = (
+            {"rekordbox": {"hot_loops": 1}},
+            {"rekordbox": {"memory_cues": 0}},
+            {"rekordbox": {"key_notation": "open"}},
+            {"rekordbox": {"key_notation": True}},
+            {"rekordbox": {"nope": True}},
+            {"rekordbox": {}},
+            {"rekordbox": "yes"},
+            {"library_path": "/tmp"},
+            {},
+        )
+        for body in bad_bodies:
+            request = urllib.request.Request(
+                self.base + "/api/settings",
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(caught.exception.code, 400, body)
+            caught.exception.close()
+        status, still = self._request("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertIs(still["rekordbox"]["memory_cues"], False)
+        self.assertEqual(still["rekordbox"]["key_notation"], "camelot")
+        status, consented = self._request("/api/settings", {"telemetry_consent": False})
+        self.assertEqual(status, 200)
+        self.assertIs(consented["telemetry_consent"], False)
+        self.assertIs(consented["rekordbox"]["memory_cues"], False)
+        self.assertEqual(consented["rekordbox"]["key_notation"], "camelot")
 
     def test_crate_create_does_not_send_the_name_without_consent(self) -> None:
         """Create a crate without an analytics event when sharing is off.

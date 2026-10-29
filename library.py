@@ -12,6 +12,7 @@ import errno
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import quote, unquote, urlparse
 
+import app_log
 import telemetry
 from tags import SeratoTags, read_serato_tags
 
@@ -168,7 +170,10 @@ def _as_float(value: object) -> float:
     )
 
 
-class LibraryError(Exception):
+from serato_web.completeness import CompletenessError
+
+
+class LibraryError(CompletenessError):
     """Raised when a library request cannot be completed.
 
     Attributes:
@@ -298,7 +303,8 @@ def _unix_process_is_serato(pid: int) -> bool:
         pid: Process id from the lock table.
 
     Returns:
-        True when ps reports a command name that contains serato.
+        True when ps reports a command name that contains serato. An error,
+        a timeout, or a non-zero exit counts as running, so a write stops.
     """
     try:
         result = subprocess.run(
@@ -309,9 +315,9 @@ def _unix_process_is_serato(pid: int) -> bool:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return True
     if result.returncode != 0:
-        return False
+        return True
     return "serato" in result.stdout.lower()
 
 
@@ -322,7 +328,8 @@ def _windows_process_is_serato(pid: int) -> bool:
         pid: Process id from the lock table.
 
     Returns:
-        True when the tasklist image name contains serato.
+        True when the tasklist image name contains serato. An error, a
+        timeout, or a non-zero exit counts as running, so a write stops.
     """
     try:
         result = subprocess.run(
@@ -333,9 +340,9 @@ def _windows_process_is_serato(pid: int) -> bool:
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return False
+        return True
     if result.returncode != 0:
-        return False
+        return True
     return "serato" in result.stdout.lower()
 
 
@@ -363,7 +370,13 @@ def _status_rows(conn: sqlite3.Connection) -> dict[str, object]:
     for row in rows:
         pid = int(row["owner_process_id"] or 0)
         name = row["owner_process_name"] or "Serato DJ Pro"
-        if _process_is_serato(pid):
+        try:
+            running = _process_is_serato(pid)
+        except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+            running = True
+        except Exception:
+            running = True
+        if running:
             return {
                 "open": True,
                 "writable": False,
@@ -408,6 +421,21 @@ def status(path: Path | None = None) -> dict[str, object]:
             "message": "Serato DJ Pro has the library open. Edits stay off until it quits.",
         }
     info["file_manager"] = file_manager_name()
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    info["write_block"] = blocked
+    info["serato_running"] = snapshots.serato_dj_running()
+    # The sidebar and the setup wizard share this flag. A running Serato DJ
+    # process blocks edits even when the database lock row has not been written yet.
+    if info["serato_running"] and not info.get("open"):
+        info["open"] = True
+        info["writable"] = False
+        info["process"] = "Serato DJ"
+        info["message"] = "Serato DJ is open. Edits stay off until it quits."
+    if blocked and not info.get("open"):
+        info["writable"] = False
+        info["message"] = blocked
     return info
 
 
@@ -501,35 +529,532 @@ def _backup_database(source: Path, dest: Path) -> None:
             src.backup(dst)
 
 
+# File change counter, schema cookie, and version-valid-for. The backup API
+# resets these three big-endian fields in the 100-byte SQLite header.
+_SQLITE_HEADER_COUNTERS = (24, 40, 92)
+
+
+def _match_quiescent_header(source: Path, dest: Path) -> None:
+    """Copy SQLite header counters so a quiescent backup matches the source.
+
+    The backup API resets the file change counter, the schema cookie, and
+    the version-valid-for number. When the source has no WAL or rollback
+    journal, those twelve bytes are the only difference, so copying them
+    back makes the backup file identical to the source. A sidecar means
+    the snapshot includes pages that are not in the main file, and the
+    counters the backup API wrote stay in place.
+
+    Args:
+        source: Database that was read.
+        dest: Backup file just written by the backup API.
+
+    Raises:
+        OSError: If a header field cannot be read or written.
+    """
+    for suffix in ("-wal", "-shm", "-journal"):
+        if Path(str(source) + suffix).is_file():
+            return
+    if source.stat().st_size != dest.stat().st_size:
+        return
+    with source.open("rb") as handle:
+        header = handle.read(100)
+    if len(header) < 100 or not header.startswith(b"SQLite format 3\x00"):
+        return
+    with dest.open("r+b") as handle:
+        current = handle.read(100)
+        if len(current) < 100:
+            return
+        updated = bytearray(current)
+        # Patching these counters assumes writes happen only after Serato quits.
+        # ensure_backup runs before this process writes, so a quiescent file
+        # differs from the backup API output only in these fields. A live
+        # writer can change pages the snapshot includes and the main file does not.
+        for offset in _SQLITE_HEADER_COUNTERS:
+            updated[offset : offset + 4] = header[offset : offset + 4]
+        if updated == current:
+            return
+        handle.seek(0)
+        handle.write(updated)
+
+
+from serato_web.completeness import (
+    COMPLETE_NAME as BACKUP_COMPLETE_NAME,
+    FAILED_SUFFIX as BACKUP_FAILED_SUFFIX,
+    INCOMPLETE_NAME as BACKUP_INCOMPLETE_NAME,
+    LEGACY_STATUS as LEGACY_BACKUP_STATUS,
+    LOCK_NAME as PARTIAL_LOCK_NAME,
+    backup_status,
+    is_complete,
+    is_failed_name as _is_failed_name,
+    is_staging_name as _is_staging_name,
+    verify_legacy_backup as _verify_legacy_backup,
+    write_complete_marker as _write_complete_marker,
+)
+
+
+def verify_legacy_backup(backup_dir: Path) -> None:
+    """Check a legacy backup and report a library error.
+
+    Args:
+        backup_dir: Folder the user picked.
+
+    Raises:
+        LibraryError: When the folder is not an unverified legacy backup
+            or the integrity check fails. The cause is the
+            :class:`serato_web.completeness.CompletenessError`. The status
+            is 400, so a request handler returns that status instead of a
+            server error.
+    """
+    try:
+        _verify_legacy_backup(backup_dir)
+    except CompletenessError as exc:
+        raise LibraryError(exc.message) from exc
+
+def list_backups(directory: Path | None = None) -> list[Path]:
+    """Return backup folders that are safe to restore.
+
+    Uses :func:`is_complete`. A legacy folder, a ``-failed`` folder, and a
+    hidden ``.partial`` folder are omitted. No restore calls this yet.
+    The snapshot work in #62 will call :func:`is_complete` on its store
+    directory. The file browser hides staging and failed folders when it
+    lists ``Library/Backups``.
+
+    Args:
+        directory: Folder that holds the backups. When omitted, this is
+            ``Backups`` beside the current master database.
+
+    Returns:
+        Complete backup directories, sorted by name. A missing directory
+        yields an empty list.
+    """
+    root = Path(MASTER).resolve().parent / "Backups" if directory is None else directory
+    try:
+        if root.is_symlink() or not root.is_dir():
+            return []
+        found = [
+            child
+            for child in root.iterdir()
+            if not child.is_symlink() and child.is_dir() and is_complete(child)
+        ]
+    except OSError:
+        return []
+    return sorted(found, key=lambda path: path.name)
+
+
+def _discard_failed_backup(folder: Path, backups: Path) -> None:
+    """Quarantine a backup folder this call created, then try to remove it.
+
+    Args:
+        folder: Directory claimed for this backup.
+        backups: The ``Backups`` directory that must contain ``folder``.
+
+    The folder must be a real directory strictly inside ``backups``. A
+    symlink is left in place so the removal cannot follow a link out of
+    that directory. ``backups`` itself is not removed. The folder is
+    renamed to end with :data:`BACKUP_FAILED_SUFFIX` before it is deleted,
+    because a rename can succeed when a delete is blocked by a file lock.
+    If the rename fails, :data:`BACKUP_INCOMPLETE_NAME` is written inside
+    the folder. An ``OSError`` during this cleanup is logged and not
+    raised. The caller still re-raises the copy error.
+    """
+    try:
+        if folder.is_symlink() or not folder.is_dir():
+            return
+        resolved = folder.resolve()
+        root = backups.resolve()
+        if root not in resolved.parents:
+            return
+        _quarantine_failed_backup(folder)
+    except OSError as exc:
+        app_log.logger.warning(
+            "Could not remove the failed backup folder %s: %s",
+            folder,
+            exc,
+        )
+
+
+def _failed_names(name: str) -> list[str]:
+    """Return the failed-folder names to try, in order.
+
+    Args:
+        name: Current directory name.
+
+    Returns:
+        ``<name>-failed``, then ``<name>-failed-02`` through
+        ``<name>-failed-99``.
+    """
+    base = f"{name}{BACKUP_FAILED_SUFFIX}"
+    return [base, *[f"{base}-{suffix:02d}" for suffix in range(2, 100)]]
+
+
+def _quarantine_failed_backup(folder: Path) -> None:
+    """Rename a failed backup, then delete that renamed folder.
+
+    Args:
+        folder: Real directory this call created inside ``Backups``.
+
+    The first free name is ``-failed``, then ``-failed-02`` and so on.
+    A delete error leaves the renamed folder. When every rename fails,
+    the original folder gets an ``INCOMPLETE`` marker. A staging name
+    and a failed name both make :func:`is_complete` return false.
+    """
+    rename_error: OSError | None = None
+    for name in _failed_names(folder.name):
+        destination = folder.with_name(name)
+        try:
+            folder.rename(destination)
+        except FileExistsError as exc:
+            rename_error = exc
+            continue
+        except OSError as exc:
+            # Linux reports ENOTEMPTY when the target name is an existing
+            # directory. That is a collision, so try the next suffix.
+            if exc.errno == errno.ENOTEMPTY:
+                rename_error = exc
+                continue
+            _write_incomplete_marker(folder, exc)
+            return
+        try:
+            shutil.rmtree(destination)
+        except OSError as exc:
+            app_log.logger.warning(
+                "Could not remove the failed backup folder %s: %s",
+                destination,
+                exc,
+            )
+        return
+    _write_incomplete_marker(
+        folder,
+        rename_error or OSError("Every failed backup name is already taken."),
+    )
+
+
+def _write_incomplete_marker(folder: Path, rename_error: OSError) -> None:
+    """Mark a failed backup that could not be renamed.
+
+    Args:
+        folder: Directory that is still at its original name.
+        rename_error: Error from the rename attempt.
+    """
+    marker = folder / BACKUP_INCOMPLETE_NAME
+    try:
+        marker.write_text("This backup did not finish.\n", encoding="utf-8")
+    except OSError as exc:
+        app_log.logger.warning(
+            "Could not mark the failed backup folder %s: %s",
+            folder,
+            exc,
+        )
+        return
+    app_log.logger.warning(
+        "Could not rename the failed backup folder %s: %s",
+        folder,
+        rename_error,
+    )
+
+
 def ensure_backup() -> Path | None:
     """Copy the master database once per process before the first write.
 
+    Files are copied into a hidden ``.serato-web-<stamp>.partial`` directory.
+    When that name exists, the next free name is ``-02`` through ``-99``.
+    ``mkdir(parents=True, exist_ok=False)`` claims it. After every copy
+    succeeds, a ``COMPLETE`` marker is written last, with a SHA-256 for
+    every file, and the directory is renamed to ``serato-web-<stamp>``.
+    A leftover ``.partial`` directory is removed on a later backup only when
+    its newest mtime is at least an hour old and its lock file can be taken.
+    A directory another process is still writing is left in place. If this copy fails, the staging directory
+    is renamed so the name ends with ``-failed`` (or ``-failed-02`` when
+    that name is taken) and then removed. If the rename fails, an
+    ``INCOMPLETE`` file is written in the staging directory. A failure to
+    rename or remove it is logged and does not replace the copy error.
+    :func:`is_complete` is false for a staging directory, a failed name,
+    and a folder with no verified ``COMPLETE`` marker.
+
     Returns:
-        The new backup directory, or None when this process already backed up that path.
+        The new backup directory, or None when this process already backed
+        up that path.
 
     Raises:
-        FileExistsError: If the timestamped backup directory already exists.
+        FileExistsError: If ``serato-web-<stamp>`` and every suffix from
+            ``-02`` through ``-99`` already exist. Nothing was copied.
+        OSError: If a claimed backup file cannot be written.
     """
     master = Path(MASTER)
     key = str(master.resolve())
     if key in _backed_up:
         return None
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    folder = master.resolve().parent / "Backups" / f"serato-web-{stamp}"
-    folder.mkdir(parents=True, exist_ok=False)
-    _backup_database(master, folder / "master.sqlite")
-    root = master.resolve().parent / "root.sqlite"
-    if root.is_file() and _mirror_allowed(root):
-        _backup_database(root, folder / "root.sqlite")
+    parent = master.resolve().parent / "Backups"
+    _cleanup_partial_backups(parent)
+    staging, final_name = _claim_staging(parent, stamp)
+    lock: int | None = None
+    try:
+        try:
+            lock = _lock_partial(staging)
+            _backup_database(master, staging / "master.sqlite")
+            _match_quiescent_header(master, staging / "master.sqlite")
+            _fsync_file(staging / "master.sqlite")
+            root = master.resolve().parent / "root.sqlite"
+            if root.is_file() and _mirror_allowed(root):
+                _backup_database(root, staging / "root.sqlite")
+                _match_quiescent_header(root, staging / "root.sqlite")
+                _fsync_file(staging / "root.sqlite")
+            _write_complete_marker(staging)
+            _fsync_directory(staging)
+            # Windows refuses to rename a directory that still has an open file.
+            # Close the lock once, then delete it, before publish or cleanup.
+            _release_staging_lock(staging, lock)
+            lock = None
+            folder = staging.with_name(final_name)
+            # os.replace is atomic on the same directory. File moves use
+            # os.rename so a cross-device fallback does not publish this folder.
+            os.replace(staging, folder)
+            _fsync_directory(parent)
+        finally:
+            if lock is not None:
+                _release_staging_lock(staging, lock)
+                lock = None
+    except Exception:
+        _discard_failed_backup(staging, parent)
+        raise
     _backed_up.add(key)
     telemetry.capture(telemetry.EVENT_BACKUP_MADE)
     return folder
+
+
+def _backup_name_choices(stamp: str) -> list[str]:
+    """Return the public backup names for one second, in order.
+
+    Args:
+        stamp: ``%Y%m%d-%H%M%S`` text.
+
+    Returns:
+        ``serato-web-<stamp>``, then ``-02`` through ``-99``.
+    """
+    base = f"serato-web-{stamp}"
+    return [base, *[f"{base}-{suffix:02d}" for suffix in range(2, 100)]]
+
+
+def _claim_staging(parent: Path, stamp: str) -> tuple[Path, str]:
+    """Create the hidden directory that receives this backup.
+
+    Args:
+        parent: ``Library/Backups``.
+        stamp: ``%Y%m%d-%H%M%S`` text.
+
+    Returns:
+        The staging directory and the public name it will be renamed to.
+
+    Raises:
+        FileExistsError: If every staging name for this second exists.
+            Nothing is copied.
+    """
+    for name in _backup_name_choices(stamp):
+        final = parent / name
+        staging = parent / f".{name}.partial"
+        if final.exists():
+            continue
+        try:
+            staging.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            continue
+        return staging, name
+    base = f"serato-web-{stamp}"
+    raise FileExistsError(
+        f"Every backup folder for this second already exists: "
+        f"{base} through {base}-99. Nothing was copied."
+    )
+
+
+def _fsync_file(path: Path) -> None:
+    """Flush a file's bytes to disk.
+
+    Args:
+        path: File to flush.
+
+    Raises:
+        OSError: If the file cannot be opened or flushed.
+
+    The handle is opened for writing. Windows rejects ``fsync`` on a
+    read-only handle.
+    """
+    fd = os.open(path, os.O_RDWR | getattr(os, "O_BINARY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+# The real operating system, captured before a test replaces
+# ``sys.platform`` to exercise another product path. File locks and
+# directory flushes follow the host, not that stand-in.
+_HOST_PLATFORM = sys.platform
+
+
+def _fsync_directory(path: Path) -> None:
+    """Flush a directory entry on POSIX.
+
+    Args:
+        path: Directory to flush. Windows skips this. A directory cannot
+            be opened for ``fsync`` there.
+    """
+    if _HOST_PLATFORM == "win32":
+        return
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _lock_partial(folder: Path) -> int | None:
+    """Take the exclusive lock inside a staging directory.
+
+    Args:
+        folder: Staging directory.
+
+    Returns:
+        An open file descriptor, or None when another process holds the lock.
+    """
+    path = folder / PARTIAL_LOCK_NAME
+    fd: int | None = None
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+        _acquire_lock(fd)
+        held = fd
+        fd = None
+        return held
+    except OSError:
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _acquire_lock(fd: int) -> None:
+    """Lock an open descriptor with the host's file lock.
+
+    Args:
+        fd: Open descriptor for ``.write-lock``.
+
+    Raises:
+        OSError: If another process already holds the lock.
+    """
+    if _HOST_PLATFORM == "win32":
+        import msvcrt
+
+        if os.fstat(fd).st_size < 1:
+            os.write(fd, b"\0")
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_partial(fd: int | None) -> None:
+    """Release a staging lock exactly once.
+
+    Args:
+        fd: Descriptor from :func:`_lock_partial`, or None. A second close
+            is ignored so a cleanup path cannot raise ``EBADF``.
+    """
+    if fd is None:
+        return
+    try:
+        if _HOST_PLATFORM == "win32":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _release_staging_lock(folder: Path, fd: int | None) -> None:
+    """Close the staging lock and delete the lock file.
+
+    Args:
+        folder: Directory that currently holds ``.write-lock``.
+        fd: Open descriptor, or None when it was already closed.
+    """
+    _unlock_partial(fd)
+    try:
+        (folder / PARTIAL_LOCK_NAME).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _newest_mtime(folder: Path) -> float:
+    """Return the newest mtime in a directory, including the directory.
+
+    Args:
+        folder: Directory to inspect.
+
+    Returns:
+        The largest ``st_mtime`` that can be read. A missing child is skipped.
+    """
+    newest = folder.stat().st_mtime
+    for path in folder.rglob("*"):
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+# A staging directory younger than this is left alone. Its newest mtime
+# is what counts, so a file still being written keeps the directory.
+PARTIAL_STALE_SECONDS = 60 * 60
+
+
+def _cleanup_partial_backups(parent: Path) -> None:
+    """Remove staging directories that are stale and not being written.
+
+    Args:
+        parent: ``Library/Backups``. A missing directory is left missing.
+
+    A ``.partial`` directory is removed only when its newest mtime is at
+    least :data:`PARTIAL_STALE_SECONDS` old and :func:`_lock_partial` can
+    take its lock. A fresh directory, or one whose lock is held, stays.
+    """
+    if not parent.is_dir() or parent.is_symlink():
+        return
+    now = time.time()
+    for child in list(parent.iterdir()):
+        if child.is_symlink() or not child.is_dir() or not _is_staging_name(child.name):
+            continue
+        try:
+            if now - _newest_mtime(child) < PARTIAL_STALE_SECONDS:
+                continue
+        except OSError:
+            continue
+        held = _lock_partial(child)
+        if held is None:
+            continue
+        _unlock_partial(held)
+        try:
+            shutil.rmtree(child)
+        except OSError:
+            _discard_failed_backup(child, parent)
 
 
 def begin_write() -> sqlite3.Connection:
     """Open a write transaction after Serato has quit.
 
     The first call in a process also copies the databases into Library/Backups.
+    Every call first saves a content-addressed snapshot, after Serato 5 has
+    been allowed to proceed.
 
     Returns:
         A connection inside BEGIN IMMEDIATE. The caller commits and closes it.
@@ -541,6 +1066,12 @@ def begin_write() -> sqlite3.Connection:
     info = status()
     if info["open"]:
         raise SeratoOpen(info)
+    import snapshots
+
+    blocked = snapshots.write_block_message()
+    if blocked:
+        raise LibraryError(blocked, 409)
+    snapshots.snapshot_before_write()
     ensure_backup()
     conn = sqlite3.connect(Path(MASTER), timeout=1)
     conn.row_factory = sqlite3.Row
@@ -3795,6 +4326,10 @@ def merge_duplicates(payload: Mapping[str, object]) -> dict[str, object]:
 def _resolved(portable_id: str | None) -> str | None:
     """Resolve a portable id to a path string.
 
+    An embedded NUL makes ``Path.is_file`` raise ``ValueError`` on some
+    Python versions and return false on others. That candidate is not a
+    file. The stored spelling is returned so the caller can warn.
+
     Args:
         portable_id: Stored path, or None.
 
@@ -3811,13 +4346,16 @@ def _resolved(portable_id: str | None) -> str | None:
         try:
             if candidate.is_file():
                 return str(candidate)
-        except OSError:
+        except (OSError, ValueError):
             continue
     return str(candidates[0])
 
 
 def resolved_path(portable_id: str | None) -> str | None:
     """Resolve a portable id to a path string.
+
+    An embedded NUL is not treated as a file that exists. The stored
+    spelling is returned so the caller can warn instead of crashing.
 
     Args:
         portable_id: Stored path, or None.

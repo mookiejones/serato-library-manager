@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 import zipfile
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,60 @@ import release_bundle  # noqa: E402
 import static_assets  # noqa: E402
 
 
+def _pe(machine: int) -> bytes:
+    """Return a tiny PE whose machine field is ``machine``.
+
+    Args:
+        machine: 16-bit PE machine id, such as ``0x14C`` or ``0x8664``.
+
+    Returns:
+        DOS and PE headers only. The body is not a runnable program.
+    """
+    data = bytearray(70)
+    data[0:2] = b"MZ"
+    data[0x3C:0x40] = (64).to_bytes(4, "little")
+    data[64:68] = b"PE\0\0"
+    data[68:70] = machine.to_bytes(2, "little")
+    return bytes(data)
+
+
+def _zip_windows_exes(archive: Path, members: dict[str, bytes]) -> None:
+    """Write a zip of named Windows executables and nothing else.
+
+    Args:
+        archive: Zip path to create.
+        members: Zip member name to file bytes.
+
+    Returns:
+        None.
+
+    Writes ``archive``. The page files are omitted so a PE failure is
+    reached before the page comparison.
+    """
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for name, payload in members.items():
+            zipped.writestr(name, payload)
+
+
+def _zip_tree(root: Path, archive: Path) -> None:
+    """Zip ``root`` with paths relative to its parent.
+
+    Args:
+        root: Directory to pack, including its own name.
+        archive: Zip path to create.
+
+    Returns:
+        None.
+
+    Writes ``archive``.
+    """
+    parent = root.parent
+    with zipfile.ZipFile(archive, "w") as zipped:
+        for path in root.rglob("*"):
+            if path.is_file():
+                zipped.write(path, path.relative_to(parent).as_posix())
+
+
 class AssetTests(unittest.TestCase):
     """Check the static-file list the spec and the zip check share.
 
@@ -27,16 +82,17 @@ class AssetTests(unittest.TestCase):
     build an app.
     """
     def test_library_page_assets(self) -> None:
-        """List the local stylesheet and script on the library page.
+        """List the local stylesheets and script on the library page.
 
         Remote font links must not count as bundled files. The order is the
-        order of the tags.
+        order of the tags. tokens.css comes before app.css.
 
         Returns:
             None. The test fails if the page names a different local file.
         """
         names = static_assets.local_asset_names(ROOT / "static" / "index.html")
-        self.assertEqual(names, ["app.css", "app.js"])
+        self.assertEqual(names, ["tokens.css", "app.css", "wizard.js", "app.js"])
+        self.assertEqual(static_assets.missing_static_files(ROOT / "static"), [])
 
     def test_remote_links_are_not_assets(self) -> None:
         """Skip an https link and keep a local script with a query string.
@@ -86,23 +142,45 @@ class PinTests(unittest.TestCase):
     The case reads the two requirements files. It does not install them.
     """
     def test_build_requirements_match_the_app_pin(self) -> None:
-        """Keep pywebview on one pin and require a pinned PyInstaller.
+        """Repeat every app pin in the build file and pin PyInstaller.
 
-        ``requirements-build.txt`` must repeat the pywebview line from
-        ``requirements.txt`` and pin ``pyinstaller`` with ``==``. Neither file
-        is passed to pip.
+        ``requirements-build.txt`` must contain each ``requirements.txt``
+        line and pin ``pyinstaller`` with ``==``. ``requirements-macos.txt``
+        pins the WKWebView frameworks the same way. Neither file is passed
+        to pip.
 
         Returns:
-            None. The test fails if the pins drift apart.
+            None. The test fails if a pin drifts or pystray returns.
         """
-        app = (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        app = [
+            line
+            for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+            if line and not line.startswith("#")
+        ]
         build = (ROOT / "requirements-build.txt").read_text(encoding="utf-8").splitlines()
-        webview = [line for line in app if line.startswith("pywebview==")]
-        self.assertEqual(webview, [line for line in build if line.startswith("pywebview==")])
-        self.assertEqual(len(webview), 1)
-        pinned = [line for line in build if line.startswith("pyinstaller==")]
-        self.assertEqual(len(pinned), 1)
-        self.assertIn("==", pinned[0])
+        for line in app:
+            self.assertIn(line, build)
+            self.assertIn("==", line)
+        self.assertTrue(any(line.startswith("pyinstaller==") for line in build))
+        self.assertTrue(any(line.startswith("pywebview==") for line in app))
+        self.assertFalse(any(line.startswith("pystray==") or line.startswith("pillow==") for line in app + build))
+        self.assertFalse(any(line.startswith("cefpython3") for line in app + build))
+        macos = [
+            line
+            for line in (ROOT / "requirements-macos.txt").read_text(encoding="utf-8").splitlines()
+            if line and not line.startswith("#")
+        ]
+        self.assertEqual(
+            macos,
+            [
+                "pyobjc-core==12.2.2",
+                "pyobjc-framework-Cocoa==12.2.2",
+                "pyobjc-framework-Quartz==12.2.2",
+                "pyobjc-framework-WebKit==12.2.2",
+                "pyobjc-framework-Security==12.2.2",
+                "pyobjc-framework-UniformTypeIdentifiers==12.2.2",
+            ],
+        )
 
 
 class TagAndFooterTests(unittest.TestCase):
@@ -111,21 +189,57 @@ class TagAndFooterTests(unittest.TestCase):
     The cases call ``release_bundle`` helpers. They do not publish a release.
     """
     def test_tag_shape(self) -> None:
-        """Accept ``vMAJOR.MINOR.PATCH`` and reject shorter or pre-release tags.
+        """Accept a final tag and an ``-rcN`` or ``-betaN`` prerelease.
 
-        A tag without the leading ``v``, a missing component, or a suffix such
-        as ``-rc.1`` raises ``SystemExit``. No git command is run.
+        A tag without the leading ``v``, a missing component, a dotted
+        suffix such as ``-rc.1``, or a full ref raises ``SystemExit``.
+        No git command is run.
 
         Returns:
             None. The test fails if a rejected shape is accepted.
         """
         release_bundle.check_tag("v1.2.3")
+        release_bundle.check_tag("v1.2.3-rc1")
+        release_bundle.check_tag("v1.2.3-rc12")
+        release_bundle.check_tag("v1.2.3-beta1")
+        release_bundle.check_tag("v0.0.0-beta10")
         with self.assertRaises(SystemExit):
             release_bundle.check_tag("v1.2")
         with self.assertRaises(SystemExit):
             release_bundle.check_tag("1.2.3")
         with self.assertRaises(SystemExit):
             release_bundle.check_tag("v1.2.3-rc.1")
+        with self.assertRaises(SystemExit):
+            release_bundle.check_tag("v1.2.3-rc")
+        with self.assertRaises(SystemExit):
+            release_bundle.check_tag("v1.2.3-beta")
+        with self.assertRaises(SystemExit):
+            release_bundle.check_tag("v1.2.3-alpha1")
+        with self.assertRaises(SystemExit):
+            release_bundle.main(["check-tag", "refs/tags/v1.2.3"])
+
+    def test_prerelease_flags_are_not_latest(self) -> None:
+        """Publish prereleases without marking them latest.
+
+        ``-rcN`` and ``-betaN`` take ``--prerelease`` and ``--latest=false``.
+        A final tag takes ``--latest``. The command prints one flag per line.
+
+        Returns:
+            None. The test fails if a final tag is marked as a prerelease.
+        """
+        self.assertEqual(release_bundle.release_create_flags("v1.2.3"), ["--latest"])
+        self.assertFalse(release_bundle.is_prerelease("v1.2.3"))
+        for tag in ("v1.2.3-rc1", "v1.2.3-rc12", "v1.2.3-beta1", "v0.0.0-beta10"):
+            self.assertTrue(release_bundle.is_prerelease(tag))
+            self.assertEqual(
+                release_bundle.release_create_flags(tag),
+                ["--prerelease", "--latest=false"],
+            )
+        with mock.patch.dict(os.environ, {"RELEASE_TAG": "v1.2.3-rc2"}, clear=False):
+            with mock.patch("sys.stdout") as stdout:
+                release_bundle.main(["release-flags"])
+        printed = "".join(call.args[0] for call in stdout.write.call_args_list)
+        self.assertEqual(printed, "--prerelease\n--latest=false\n")
 
     def test_footer_fills_in_the_repository(self) -> None:
         """Substitute the repository name into the release-notes footer.
@@ -269,30 +383,64 @@ class ZipTests(unittest.TestCase):
                 release_bundle.assert_zip(archive, Path(tmp), min_bytes=1, max_bytes=5_000_000)
 
     def test_run_smoke_accepts_the_marker(self) -> None:
-        """Run a stand-in executable that writes the smoke marker.
+        """Run a stand-in that serves health and exits on shutdown.
 
-        On Windows the stand-in is a ``.cmd`` file. Elsewhere it is a shell
-        script. The process must see ``SERATO_LIBRARY_SMOKE`` and write ``ok``.
+        On Windows the stand-in is a ``.cmd`` file. Elsewhere it is a
+        Python script with a shebang. The harness must read the marker,
+        GET ``/api/health``, POST shutdown, and see exit 0.
 
         Returns:
-            None. The test fails if the smoke helper rejects that marker.
+            None. The test fails if the smoke helper rejects that process.
         """
+        standin = textwrap.dedent(
+            """\
+            import os
+            import threading
+            from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+            from pathlib import Path
+
+            TOKEN = "smoke-token"
+
+            class Handler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    body = b'{"ok": true}'
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+                def do_POST(self):
+                    if self.headers.get("X-Serato-Library-Shutdown") != TOKEN:
+                        self.send_error(403)
+                        return
+                    body = b'{"ok": true}'
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+                def log_message(self, fmt, *args):
+                    return
+
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            port = httpd.server_address[1]
+            Path(os.environ["SERATO_LIBRARY_SMOKE"]).write_text(
+                f"http://127.0.0.1:{port}\\n{TOKEN}\\n", encoding="utf-8"
+            )
+            httpd.serve_forever()
+            """
+        )
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             if sys.platform == "win32":
+                script = base / "standin.py"
+                script.write_text(standin, encoding="utf-8")
                 exe = base / "smoke.cmd"
-                exe.write_text(
-                    textwrap.dedent(
-                        """\
-                        @echo off
-                        python -c "from pathlib import Path; import os; Path(os.environ['SERATO_LIBRARY_SMOKE']).write_text('ok\\n', encoding='utf-8')"
-                        """
-                    ),
-                    encoding="utf-8",
-                )
+                exe.write_text(f'@echo off\r\n"{sys.executable}" "{script}"\r\n', encoding="utf-8")
             else:
                 exe = base / "smoke"
-                exe.write_text("#!/bin/sh\nprintf 'ok\\n' > \"$SERATO_LIBRARY_SMOKE\"\n", encoding="utf-8")
+                exe.write_text(f"#!{sys.executable}\n{standin}", encoding="utf-8")
                 exe.chmod(0o755)
             release_bundle.run_smoke(exe, base)
 
@@ -353,6 +501,10 @@ class WorkflowTests(unittest.TestCase):
         text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("python -m pip install -r requirements.txt", text)
         self.assertIn("python -m unittest discover -s tests -t . -v", text)
+        self.assertIn("matrix.os == 'windows-latest'", text)
+        self.assertIn("RELEASE_TAG: v0.0.0", text)
+        self.assertIn("run: python scripts/release_bundle.py check-tag\n", text)
+        self.assertNotIn("check-tag v0.0.0", text)
         self.assertIn("branches: [main]", text)
         self.assertIn("pull_request:", text)
         self.assertIn("pip-audit==2.10.1", text)
@@ -363,9 +515,10 @@ class WorkflowTests(unittest.TestCase):
         """Keep a release running, and check the zip without launching it on Linux.
 
         The release workflow must not cancel in progress, must pack on the
-        build runners, and must run ``check-zips`` plus ``gh attestation verify``.
+        build runners, and must run ``check-binaries`` plus ``gh attestation verify``.
         Steps that use bash syntax must set ``shell: bash`` so Windows runners
-        do not parse them with PowerShell.
+        do not parse them with PowerShell. The tag is passed in ``RELEASE_TAG``,
+        not by shell expansion.
 
         Returns:
             None. The test fails if the publish job starts launching apps.
@@ -374,20 +527,96 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", text)
         self.assertIn("requirements-build.txt", text)
         self.assertIn("run: python scripts/write_build_config.py", text)
-        self.assertIn("secrets.SENTRY_DSN", text)
-        self.assertIn("secrets.POSTHOG_KEY", text)
-        self.assertIn("secrets.POSTHOG_HOST", text)
+        bake = text.split("- name: Bake telemetry keys", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("github.event_name == 'push'", bake)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", bake)
+        self.assertIn("secrets.SENTRY_DSN", bake)
+        self.assertIn("secrets.POSTHOG_KEY", bake)
+        self.assertIn("secrets.POSTHOG_HOST", bake)
+        self.assertNotIn("workflow_dispatch", bake)
+        mac_sign = text.split("- name: Sign the macOS app when secrets are present", 1)[1].split(
+            "\n      - ", 1
+        )[0]
+        self.assertIn("runner.os == 'macOS'", mac_sign)
+        self.assertIn("APPLE_CERTIFICATE_P12_BASE64", mac_sign)
+        self.assertNotIn("WINDOWS_", mac_sign)
+        win_sign = text.split("- name: Sign the Windows app when secrets are present", 1)[1].split(
+            "\n      - ", 1
+        )[0]
+        self.assertIn("runner.os == 'Windows'", win_sign)
+        self.assertIn("WINDOWS_CERTIFICATE_PFX_BASE64", win_sign)
+        self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", win_sign)
+        self.assertNotIn("APPLE_", win_sign)
+        build = text.split("\n  build:\n", 1)[1].split("\n  release-build:", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", build)
+        build_perms = build.split("permissions:", 1)[1].split("strategy:", 1)[0]
+        self.assertEqual(build_perms.strip(), "contents: read")
+        self.assertEqual(build.count("uses: actions/upload-artifact@"), 3)
+        self.assertIn("name: Serato-Library-windows.zip", build)
+        self.assertIn("name: Serato-Library-windows-setup.exe", build)
+        self.assertNotIn("secrets.", build)
+        self.assertNotIn("id-token", build)
+        self.assertNotIn("attestations", build)
+        skipped = build.split("- name: Skip signing on a pull request", 1)[1].split("\n      - ", 1)[0]
+        self.assertNotIn("secrets.", skipped)
+        release_build = text.split("\n  release-build:\n", 1)[1].split("\n  attest:", 1)[0]
+        self.assertIn("github.event_name != 'pull_request'", release_build)
+        self.assertIn("actions: write", release_build.split("strategy:", 1)[0])
+        self.assertNotIn("id-token", release_build.split("strategy:", 1)[0])
+        attest = text.split("\n  attest:\n", 1)[1].split("\n  publish:", 1)[0]
+        self.assertIn("id-token: write", attest)
+        self.assertIn("attestations: write", attest)
+        self.assertIn("actions: read", attest)
+        self.assertNotIn("actions: write", attest)
+        self.assertIn("workflow_dispatch", attest)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", attest)
+        self.assertNotIn("pull_request", attest)
+        header = text.split("jobs:", 1)[0]
+        self.assertIn("pull_request:", header)
+        self.assertIn("packaging/**", header)
+        self.assertIn("serato-library.spec", header)
+        self.assertIn("scripts/release_*", header)
+        self.assertIn(".github/workflows/release.yml", header)
+        self.assertIn("desktop.py", header)
+        self.assertIn("requirements.txt", header)
+        self.assertIn("requirements-build.txt", header)
+        self.assertIn("requirements-macos.txt", header)
         self.assertIn("scripts/release_bundle.py pack", text)
-        self.assertIn("scripts/release_bundle.py check-zips", text)
+        self.assertIn("scripts/release_bundle.py pack-dmg", text)
+        self.assertIn("scripts/release_bundle.py check-binaries", text)
+        self.assertIn("scripts/release_bundle.py check-checksums", text)
+        self.assertIn("macos-15-intel", text)
+        self.assertIn("Serato-Library-macos-arm64.dmg", text)
+        self.assertIn("Serato-Library-macos-x64.dmg", text)
+        self.assertIn("Serato-Library-windows-setup.exe", text)
+        self.assertIn("SHA256SUMS", text)
         self.assertIn("gh attestation verify", text)
         self.assertIn("contents: write", text)
-        self.assertNotIn("pull_request:", text)
+        self.assertIn("RELEASE_TAG:", text)
+        self.assertIn("release-flags", text)
+        publish = text.split("name: publish GitHub release", 1)[1].split("steps:", 1)[0]
+        self.assertIn("github.event_name == 'push'", publish)
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", publish)
+        self.assertIn("&&", publish)
+        self.assertNotIn("pull_request", publish)
+        installer = text.split("Sign the installer when secrets are present", 1)[1].split(
+            "\n      - ", 1
+        )[0]
+        self.assertNotIn("APPLE_", installer)
+        self.assertIn("WINDOWS_CERTIFICATE_PFX_BASE64", installer)
+        self.assertIn("WINDOWS_CERTIFICATE_PASSWORD", installer)
         self.assertNotIn("pull_request_target:", text)
+        self.assertNotIn("${GITHUB_REF_NAME}", text)
         self.assertIn("shell: bash", text)
         for step in text.split("\n      - "):
             if "run:" not in step:
                 continue
-            uses_bash = "${GITHUB_" in step or ">/dev/null" in step or "printf " in step
+            uses_bash = (
+                "${GITHUB_" in step
+                or ">/dev/null" in step
+                or "printf " in step
+                or "$RELEASE_" in step
+            )
             if uses_bash:
                 self.assertIn("shell: bash", step)
 
@@ -427,6 +656,7 @@ class OutsideLaunchTests(unittest.TestCase):
         """
         source = (ROOT / "scripts" / "release_bundle.py").read_text(encoding="utf-8")
         self.assertIn("launch_unzipped", source)
+        self.assertIn("/api/health", source)
         self.assertNotIn("PYTHONPATH", release_bundle._KEPT_ENV)
         proc = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "release_bundle.py"), "check-tag", "v0.0.0"],
@@ -435,6 +665,313 @@ class OutsideLaunchTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(proc.returncode, 0)
+
+
+class PackageTests(unittest.TestCase):
+    """Check disk images, checksums, signing decisions, and the install page.
+
+    The cases use temporary files. They do not build an app or call a
+    signing tool.
+    """
+
+    def test_dmg_trailer_and_checksum_roundtrip(self) -> None:
+        """Accept a UDIF trailer and a matching SHA256SUMS file.
+
+        Writes a 512-byte image whose trailer starts with ``koly``, plus a
+        tiny zip stand-in is not required. The checksum helper must refuse
+        a changed byte.
+
+        Returns:
+            None. The test fails if a truncated image or a wrong hash is accepted.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            image = folder / "sample.dmg"
+            image.write_bytes(b"koly" + b"\0" * 508)
+            release_bundle.assert_dmg(image, min_bytes=512, max_bytes=600)
+            image.write_bytes(b"\0" * 512)
+            with self.assertRaises(SystemExit):
+                release_bundle.assert_dmg(image, min_bytes=512, max_bytes=600)
+
+    def test_checksums_match_the_release_names(self) -> None:
+        """Write SHA256SUMS for stand-in release files and detect a mismatch.
+
+        The four release names are required. An altered byte must fail
+        ``check_checksums``. No archive is built.
+
+        Returns:
+            None. The test fails if a tampered file still matches.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for name in release_bundle.RELEASE_FILES:
+                (folder / name).write_bytes(name.encode("utf-8"))
+            release_bundle.write_checksums(folder)
+            release_bundle.check_checksums(folder)
+            (folder / release_bundle.WINDOWS_ZIP).write_bytes(b"changed")
+            with self.assertRaises(SystemExit):
+                release_bundle.check_checksums(folder)
+
+    def test_signing_skips_when_secrets_are_absent(self) -> None:
+        """Skip signing when every secret is empty, and refuse a partial set.
+
+        The command must not start ``codesign`` or ``signtool``. A single
+        secret without the rest is a configuration error.
+
+        Returns:
+            None. The test fails if a skip invokes a signing tool.
+        """
+        import release_sign
+
+        empty = {name: "" for name in release_sign.APPLE_SECRETS + release_sign.WINDOWS_SECRETS}
+        self.assertEqual(release_sign.signing_plan("darwin", empty), "skip")
+        self.assertEqual(release_sign.signing_plan("win32", empty), "skip")
+        partial = dict(empty)
+        partial["APPLE_CERTIFICATE_PASSWORD"] = "secret-value"
+        with self.assertRaises(SystemExit):
+            release_sign.signing_plan("darwin", partial)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "dist"
+            target.mkdir()
+            with mock.patch.dict(os.environ, empty, clear=False):
+                with mock.patch("release_sign.subprocess.run") as run:
+                    release_sign.main([str(target), "--platform", "darwin"])
+            run.assert_not_called()
+
+    def test_check_tag_reads_release_tag_from_the_environment(self) -> None:
+        """Accept RELEASE_TAG when the command is given no argument.
+
+        This is the path the Windows release job uses, so the shell does
+        not expand the tag. A full ref still fails.
+
+        Returns:
+            None. The test fails if the environment value is ignored.
+        """
+        with mock.patch.dict(os.environ, {"RELEASE_TAG": "v1.2.3"}, clear=False):
+            release_bundle.main(["check-tag"])
+        with mock.patch.dict(os.environ, {"RELEASE_TAG": ""}, clear=False):
+            with self.assertRaises(SystemExit):
+                release_bundle.main(["check-tag"])
+
+    def test_installer_script_does_not_hardcode_the_version(self) -> None:
+        """Require the Inno script to take AppVersion from the build.
+
+        The script must fail closed without ``/DAppVersion`` and must name
+        the portable installer. The version constant is read from
+        ``app_config``, not from the script.
+
+        Returns:
+            None. The test fails if the script bakes a version of its own.
+        """
+        text = (ROOT / "packaging" / "serato-library.iss").read_text(encoding="utf-8")
+        self.assertIn("#ifndef AppVersion", text)
+        self.assertIn("Serato-Library-windows-setup", text)
+        self.assertIn("PrivilegesRequired=lowest", text)
+        self.assertNotIn("SignTool=", text)
+        self.assertEqual(release_bundle.app_version(), "1.1.0")
+        self.assertIn(release_bundle.INNO_VERSION, release_bundle.INNO_URL)
+        self.assertEqual(len(release_bundle.INNO_SHA256), 64)
+        self.assertIn("ArchitecturesInstallIn64BitMode=x64compatible", text)
+        self.assertIn("ArchitecturesAllowed=x64compatible", text)
+
+    def test_installer_stub_may_be_32_bit(self) -> None:
+        """Accept Inno's 32-bit setup stub and still require a PE.
+
+        Inno Setup 6.7.3 writes ``Setup.e32`` (machine ``0x14c``) even
+        when the script installs a 64-bit app. A stand-in of that shape
+        must pass. Bytes that are not a PE must fail. The real script
+        supplies the 64-bit directives.
+
+        Returns:
+            None. The test fails if a 32-bit stub is rejected as not x64.
+        """
+        stub = _pe(0x14C)
+        with tempfile.TemporaryDirectory() as tmp:
+            setup = Path(tmp) / "Serato-Library-windows-setup.exe"
+            setup.write_bytes(stub)
+            release_bundle.assert_setup(setup, min_bytes=len(stub), max_bytes=len(stub))
+            setup.write_bytes(b"not a pe")
+            with self.assertRaises(SystemExit):
+                release_bundle.assert_setup(setup, min_bytes=1, max_bytes=20)
+
+    def test_installer_script_must_select_64_bit_mode(self) -> None:
+        """Refuse an Inno script that does not install in 64-bit mode.
+
+        A copy of the script with the architecture lines removed must
+        fail. The shipped script must pass.
+
+        Returns:
+            None. The test fails if a script without those lines is accepted.
+        """
+        release_bundle.assert_installer_script()
+        text = release_bundle.ISS_PATH.read_text(encoding="utf-8")
+        stripped = text.replace("ArchitecturesInstallIn64BitMode=x64compatible", "")
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "serato-library.iss"
+            script.write_text(stripped, encoding="utf-8")
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_installer_script(script)
+        self.assertIn("ArchitecturesInstallIn64BitMode=x64compatible", str(caught.exception))
+
+    def test_windows_zip_executable_must_be_x64(self) -> None:
+        """Require the portable zip's application executable to be x64.
+
+        A 32-bit PE in ``Serato Library.exe`` must fail. The same zip
+        with machine ``0x8664`` must pass. The page files are the real
+        ``static`` directory. No installer is built.
+
+        Returns:
+            None. The test fails if a 32-bit application executable is accepted.
+        """
+        static = release_bundle.source_static()
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "Serato Library"
+            for path in static.rglob("*"):
+                if not path.is_file() or path.is_symlink():
+                    continue
+                dest = root / "static" / path.relative_to(static)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(path.read_bytes())
+            exe = root / "Serato Library.exe"
+            exe.write_bytes(_pe(0x14C))
+            narrow = base / "narrow.zip"
+            _zip_tree(root, narrow)
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(narrow, static, min_bytes=20, max_bytes=5_000_000)
+            self.assertIn("is not x64", str(caught.exception))
+            exe.write_bytes(_pe(0x8664))
+            wide = base / "wide.zip"
+            _zip_tree(root, wide)
+            kind = release_bundle.assert_zip(wide, static, min_bytes=20, max_bytes=5_000_000)
+        self.assertEqual(kind, "windows")
+
+    def test_windows_zip_requires_the_app_executable(self) -> None:
+        """Refuse a portable zip that has no ``Serato Library.exe``.
+
+        A page file alone is not a Windows bundle. The check must fail
+        before it compares page bytes.
+
+        Returns:
+            None. The test fails if a zip without the application executable passes.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "missing.zip"
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("Serato Library/static/index.html", b"<p>missing</p>")
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("no Serato Library executable", str(caught.exception))
+
+    def test_windows_zip_rejects_a_corrupt_pe(self) -> None:
+        """Refuse an application executable that is not a PE.
+
+        The member is named ``Serato Library.exe`` and starts with ``MZ``,
+        but it has no PE signature. No installer is built.
+
+        Returns:
+            None. The test fails if a corrupt header is treated as x64.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "corrupt.zip"
+            _zip_windows_exes(archive, {"Serato Library/Serato Library.exe": b"MZ" + b"\0" * 62})
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("has no PE header", str(caught.exception))
+
+    def test_windows_zip_rejects_arm64(self) -> None:
+        """Refuse an Arm64 application executable.
+
+        Machine ``0xaa64`` is a PE, and it is not the x64 build this
+        release ships. The portable zip must still fail.
+
+        Returns:
+            None. The test fails if Arm64 is accepted as x64.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "arm.zip"
+            _zip_windows_exes(archive, {"Serato Library/Serato Library.exe": _pe(0xAA64)})
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("machine 0xaa64 is not x64", str(caught.exception))
+
+    def test_windows_zip_rejects_a_32_bit_helper(self) -> None:
+        """Refuse a 32-bit helper next to a 64-bit application executable.
+
+        ``Serato Library.exe`` is machine ``0x8664``. ``helper.exe`` is
+        machine ``0x14c``. Every ``.exe`` in the zip has to be x64.
+
+        Returns:
+            None. The test fails if the helper is ignored.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "helper.zip"
+            _zip_windows_exes(
+                archive,
+                {
+                    "Serato Library/Serato Library.exe": _pe(0x8664),
+                    "Serato Library/helper.exe": _pe(0x14C),
+                },
+            )
+            with self.assertRaises(SystemExit) as caught:
+                release_bundle.assert_zip(
+                    archive,
+                    release_bundle.source_static(),
+                    min_bytes=1,
+                    max_bytes=5_000_000,
+                )
+        self.assertIn("helper.exe machine 0x14c is not x64", str(caught.exception))
+
+    def test_first_install_names_the_files_and_the_volume_permission(self) -> None:
+        """Document the release files and Removable Volumes beside Open Anyway.
+
+        Reads ``docs/first-install.md``. The page must name each download,
+        say the Serato Library window opens, and tell a Mac user to allow
+        Removable Volumes rather than Full Disk Access. It must not link
+        a missing panic page.
+
+        Returns:
+            None. The test fails if a shipped name or the permission is absent.
+        """
+        text = (ROOT / "docs" / "first-install.md").read_text(encoding="utf-8")
+        for name in release_bundle.RELEASE_FILES + (release_bundle.CHECKSUMS_NAME,):
+            self.assertIn(name, text)
+        self.assertIn("Open Anyway", text)
+        self.assertIn("Removable Volumes", text)
+        self.assertIn("Full Disk Access", text)
+        self.assertIn("Privacy & Security", text)
+        self.assertIn("Files and Folders", text)
+        self.assertIn("Close the window", text)
+        self.assertIn("WebView2", text)
+        self.assertNotIn("menu-bar", text)
+        self.assertNotIn("notification area", text)
+        self.assertIn("127.0.0.1", text)
+        self.assertNotIn("panic.md", text)
+        self.assertNotIn("PREVIEW", text)
+        spec = (ROOT / "serato-library.spec").read_text(encoding="utf-8")
+        self.assertIn("NSRemovableVolumesUsageDescription", spec)
+        self.assertIn("webview.platforms.edgechromium", spec)
+        self.assertIn("webview.platforms.cocoa", spec)
+        self.assertIn("webview.platforms.gtk", spec)
+        self.assertIn('"cefpython3"', spec)
+        self.assertIn('"pystray"', spec)
+        self.assertNotIn("pystray._", spec)
+        self.assertNotIn("LSUIElement", spec)
 
 
 if __name__ == "__main__":

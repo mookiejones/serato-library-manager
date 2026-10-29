@@ -29,11 +29,15 @@ from urllib.parse import quote
 from xml.etree import ElementTree
 
 import app_config
+import app_log
 import library
 import tags
 
 
-_ILLEGAL_XML = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]")
+# XML 1.0 allows tab, newline, and carriage return. The other C0 controls,
+# unpaired surrogates, and the two noncharacters at the end of the BMP
+# cannot appear in a document.
+_ILLEGAL_XML = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]")
 # Cases B and C of the LAME/Xing header (pestrela). Serato's stored time
 # sits this far later than the time Rekordbox uses for the same MP3.
 # Cases A and D, and every file that is not an MP3, stay put.
@@ -110,7 +114,7 @@ _KINDS = {
     ".flac": "FLAC File",
     ".m4a": "M4A File",
     ".mp4": "M4A File",
-    ".aac": "M4A File",
+    ".aac": "AAC File",
     ".ogg": "OGG File",
 }
 
@@ -235,29 +239,47 @@ def tempo_entries(
     marker stores BPM directly. Metro is 4/4. Battito is the beat in the
     bar, counting from the first marker as a downbeat, so a marker every
     beat walks 1, 2, 3, 4. ``shift_ms`` is subtracted from Inizio only.
-    The BPM still uses the stored positions. A time before 0 is written
-    at 0. A BPM that is not positive is left out.
+    The BPM still uses the stored positions. Those positions are not
+    rounded for display before the division. A time before 0 is written
+    at 0. A BPM that is not positive is left out. A marker whose position
+    is not a finite number is left out, and the markers around it are
+    still written. A last marker whose BPM is ``NaN`` or infinite is left
+    out and counted with those markers.
 
     Args:
         beatgrid: Markers from tags.read_serato_tags. An empty list writes nothing.
         shift_ms: Milliseconds to subtract from each Inizio.
-        stats: When set, ``clamped`` counts times written at 0, and
-            ``grid_markers`` counts TEMPO entries.
+        stats: When set, ``clamped`` counts times written at 0,
+            ``grid_markers`` counts TEMPO entries, and ``grid_nonfinite``
+            counts markers that were left out.
 
     Returns:
         Attribute dicts with Inizio, Bpm, Metro, and Battito.
     """
     if not beatgrid:
         return []
-    terminal = _terminal_bpm(beatgrid)
+    kept: list[tags.BeatMarker] = []
+    skipped = 0
+    for marker in beatgrid:
+        if _finite_position(marker) is None:
+            skipped += 1
+            continue
+        kept.append(marker)
+    _note(stats, "grid_nonfinite", skipped)
+    if not kept:
+        return []
+    terminal = _terminal_bpm(kept)
     entries: list[dict[str, str]] = []
-    last = len(beatgrid) - 1
+    last = len(kept) - 1
     beats_before = 0
-    for index, marker in enumerate(beatgrid):
+    for index, marker in enumerate(kept):
         if index == last and "bpm" in marker:
-            bpm: float | None = float(marker["bpm"])
+            bpm = _stored_bpm(marker.get("bpm"))
+            if bpm is not None and not math.isfinite(bpm):
+                _note(stats, "grid_nonfinite")
+                bpm = None
         elif index < last:
-            bpm = _segment_bpm(marker, beatgrid[index + 1], terminal)
+            bpm = _segment_bpm(marker, kept[index + 1], terminal)
         else:
             bpm = terminal
         if bpm is not None and math.isfinite(bpm) and bpm > 0:
@@ -338,6 +360,7 @@ def export_rekordbox(
     stats: dict[str, int] = {}
     unicode_names: list[str] = []
     unreadable_names: list[str] = []
+    invalid_names: list[str] = []
     folder_cache: dict[str, dict[str, str]] = {}
     for row in tracks:
         element = _track_element(
@@ -348,6 +371,7 @@ def export_rekordbox(
             stats=stats,
             unicode_names=unicode_names,
             unreadable_names=unreadable_names,
+            invalid_names=invalid_names,
             folder_cache=folder_cache,
         )
         if element is None:
@@ -378,7 +402,13 @@ def export_rekordbox(
     body = ElementTree.tostring(document, encoding="unicode")
     xml_text = '<?xml version="1.0" encoding="UTF-8"?>\n' + body + "\n"
     return xml_text, _loss_report(
-        stats, memory_cues, hot_loops, key_notation, unicode_names, unreadable_names
+        stats,
+        memory_cues,
+        hot_loops,
+        key_notation,
+        unicode_names,
+        unreadable_names,
+        invalid_names,
     )
 
 
@@ -723,7 +753,9 @@ def _inspect_audio(path: str, on_disk: bool) -> tuple[tags.SeratoTags, tuple[str
 
     Returns:
         Parsed tags, and the MP3 timing pair. A file that is not an MP3
-        is ``skip`` with a shift of 0.
+        is ``skip`` with a shift of 0. A file that cannot be opened,
+        including a path ``Path.stat`` rejects with ``ValueError``, is
+        ``unreadable`` with a shift of 0.
     """
     if not on_disk:
         return tags.serato_tags_from_regions(b""), ("skip", 0)
@@ -739,7 +771,7 @@ def _inspect_audio(path: str, on_disk: bool) -> tuple[tags.SeratoTags, tuple[str
             timing = ("skip", 0)
             if file.suffix.lower() == ".mp3":
                 timing = _mp3_timing_handle(handle)
-    except OSError:
+    except (OSError, ValueError):
         return tags.serato_tags_from_regions(b""), ("unreadable", 0)
     return tags.serato_tags_from_regions(head, tail), timing
 
@@ -748,12 +780,13 @@ def _file_label(portable: str) -> str:
     """Return a file name that can be printed when the path will not encode.
 
     Args:
-        portable: Stored path, which may contain a lone surrogate.
+        portable: Stored path, which may contain a lone surrogate or a NUL.
 
     Returns:
-        The last path segment, with characters that cannot be encoded replaced.
+        The last path segment. A NUL is replaced so the rest of the name
+        stays visible. Characters that cannot be encoded are replaced too.
     """
-    text = portable.replace("\\", "/")
+    text = portable.replace("\x00", "\ufffd").replace("\\", "/")
     name = text.rsplit("/", 1)[-1]
     safe = name.encode("utf-8", "replace").decode("utf-8")
     return safe or "a track"
@@ -990,6 +1023,7 @@ def _loss_report(
     key_notation: str,
     unicode_names: Sequence[str] = (),
     unreadable_names: Sequence[str] = (),
+    invalid_names: Sequence[str] = (),
 ) -> list[str]:
     """Build the lines that say what this export cannot carry into Rekordbox.
 
@@ -1000,6 +1034,7 @@ def _loss_report(
         key_notation: The key notation that was requested.
         unicode_names: File names whose paths could not be encoded.
         unreadable_names: File names that were on disk but could not be opened.
+        invalid_names: File names whose paths contain a null character.
 
     Returns:
         One sentence per line. The import warning is always first.
@@ -1058,6 +1093,10 @@ def _loss_report(
         )
     if stats.get("grid_unsupported"):
         lines.append(f"{stats['grid_unsupported']} beatgrids could not be read and were left out.")
+    if stats.get("grid_nonfinite"):
+        lines.append(
+            f"{stats['grid_nonfinite']} beatgrid markers had a time or a BPM that is not a real number and were left out."
+        )
     if stats.get("grid_dynamic"):
         lines.append(
             f"{stats['grid_dynamic']} tracks have a beatgrid with more than one marker. "
@@ -1077,6 +1116,13 @@ def _loss_report(
         extra = f" and {len(unreadable_names) - 20} more" if len(unreadable_names) > 20 else ""
         lines.append(
             f"{len(unreadable_names)} tracks could not be read and were exported without their cue points: {shown}{extra}."
+        )
+    if invalid_names:
+        shown = ", ".join(invalid_names[:20])
+        extra = f" and {len(invalid_names) - 20} more" if len(invalid_names) > 20 else ""
+        lines.append(
+            f"{len(invalid_names)} tracks had a path containing a null character "
+            f"and were exported as missing files, without cue points: {shown}{extra}."
         )
     lines.append(
         "Track color is written as Colour in the form 0xRRGGBB. "
@@ -1100,10 +1146,11 @@ def _xml_text(value: str) -> str:
     """Remove characters XML 1.0 cannot store in a document.
 
     Args:
-        value: Text that may contain control characters.
+        value: Text that may contain control characters or unpaired surrogates.
 
     Returns:
-        The same text without characters XML 1.0 forbids.
+        The same text without C0 controls other than tab, newline, and
+        carriage return, and without unpaired surrogates.
     """
     return _ILLEGAL_XML.sub("", value)
 
@@ -1180,6 +1227,40 @@ def _rgb(color: str | None) -> tuple[str, str, str]:
         return "255", "255", "255"
 
 
+def _finite_position(marker: tags.BeatMarker) -> float | None:
+    """Return a beatgrid position that can be written as a time.
+
+    Args:
+        marker: One marker from the BeatGrid parser.
+
+    Returns:
+        The position in seconds, or None when it is missing or not finite.
+        ``NaN`` and infinities are None. The export skips those markers.
+    """
+    raw = marker.get("position")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = float(raw)
+    if not math.isfinite(value):
+        return None
+    return value
+
+
+def _stored_bpm(value: object) -> float | None:
+    """Read a BPM stored on one beatgrid marker.
+
+    Args:
+        value: The marker's ``bpm`` field.
+
+    Returns:
+        The number, including ``NaN`` and infinities, or None when the
+        field is not a number. The caller counts a non-finite value.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _terminal_bpm(beatgrid: Sequence[tags.BeatMarker]) -> float | None:
     """Return the BPM stored on the last beatgrid marker.
 
@@ -1187,12 +1268,14 @@ def _terminal_bpm(beatgrid: Sequence[tags.BeatMarker]) -> float | None:
         beatgrid: Markers from the BeatGrid parser.
 
     Returns:
-        A positive BPM, or None when the last marker has none.
+        A positive finite BPM, or None when the last marker has none.
+        ``NaN`` and infinities are skipped so they are not copied onto
+        an earlier marker.
     """
     for marker in reversed(beatgrid):
-        bpm = marker.get("bpm")
-        if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) and bpm > 0:
-            return float(bpm)
+        bpm = _stored_bpm(marker.get("bpm"))
+        if bpm is not None and math.isfinite(bpm) and bpm > 0:
+            return bpm
     return None
 
 
@@ -1320,9 +1403,14 @@ def _kind(path: str, row: Mapping[str, object]) -> str:
         row: Asset columns. ``format`` is used when the extension is unknown.
 
     Returns:
-        A label such as ``MP3 File``, the stored format, or ``Unknown``.
+        A label such as ``MP3 File``. A raw ``.aac`` file is ``AAC File``.
+        An ``.m4a`` file is ``M4A File``. The stored format is used when
+        the extension is unknown, or ``Unknown`` when that is empty too.
     """
-    suffix = Path(path.replace("\\", "/")).suffix.lower()
+    try:
+        suffix = Path(path.replace("\\", "/")).suffix.lower()
+    except ValueError:
+        suffix = ""
     if suffix in _KINDS:
         return _KINDS[suffix]
     stored = _text(row, "format") or _text(row, "type")
@@ -1540,6 +1628,7 @@ def _track_element(
     stats: MutableMapping[str, int],
     unicode_names: list[str],
     unreadable_names: list[str],
+    invalid_names: list[str],
     folder_cache: dict[str, dict[str, str]],
 ) -> ElementTree.Element | None:
     """Build one TRACK element, including tempo and position marks.
@@ -1552,11 +1641,13 @@ def _track_element(
         stats: Loss-report counters for this export.
         unicode_names: File names whose paths could not be encoded.
         unreadable_names: File names that were on disk but could not be opened.
+        invalid_names: File names whose paths contain a null character.
         folder_cache: Directory listings shared by every track in this export.
 
     Returns:
         The element, or None when the track has no path or the path cannot be encoded.
         A file that cannot be opened is still exported, without cue points.
+        A path containing a null character is exported as a missing file.
     """
     portable = _cell(row, "portable_id")
     if not isinstance(portable, str) or not portable.strip():
@@ -1567,21 +1658,49 @@ def _track_element(
     except UnicodeError:
         unicode_names.append(_file_label(portable))
         return None
+    except ValueError:
+        # Path.is_file inside resolved_path rejects an embedded NUL on
+        # some Python versions. Keep the stored spelling and continue.
+        resolved = portable
     if not resolved:
         _note(stats, "omitted")
         return None
+    # An embedded NUL makes Path.is_file raise ValueError on some
+    # interpreters and return False on others. Either way the file
+    # cannot be opened. Treat it as missing and name it. Do not let
+    # one crate row abort the export.
+    null_path = "\x00" in resolved
     try:
-        on_disk = Path(resolved).is_file()
+        on_disk = False if null_path else Path(resolved).is_file()
     except UnicodeError:
         unicode_names.append(_file_label(portable))
         return None
+    except ValueError:
+        on_disk = False
+        null_path = True
     try:
-        spelled = filesystem_path(resolved, folder_cache) if on_disk else resolved
+        spelled = resolved if null_path or not on_disk else filesystem_path(resolved, folder_cache)
         location = location_uri(spelled)
     except UnicodeError:
         unicode_names.append(_file_label(portable))
         return None
-    if not on_disk:
+    except ValueError:
+        on_disk = False
+        null_path = True
+        spelled = resolved.replace("\x00", "") or "missing"
+        try:
+            location = location_uri(spelled)
+        except (UnicodeError, library.LibraryError):
+            unicode_names.append(_file_label(portable))
+            return None
+    if null_path:
+        label = _file_label(portable)
+        invalid_names.append(label)
+        app_log.logger.warning(
+            "Rekordbox export is treating %s as a missing file because the path contains a null character.",
+            label,
+        )
+    elif not on_disk:
         _note(stats, "missing_file")
     parsed, timing = _inspect_audio(spelled if on_disk else resolved, on_disk)
     if timing[0] == "unreadable":

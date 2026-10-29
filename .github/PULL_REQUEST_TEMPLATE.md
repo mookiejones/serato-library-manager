@@ -3,6 +3,9 @@
 ## Checklist
 
 - [ ] `python3 -m unittest discover -s tests -t . -v` passes
+- [ ] CI is green, including `tests (windows-latest, Python 3.12)`
+- [ ] Docs for this change are in this pull request
+- [ ] Anything not merged is marked PREVIEW
 - [ ] `docs/architecture.md` is updated when behavior, the API, the layout, or the run path changes
 - [ ] `CLAUDE.md` is updated when the run command or the layout summary changes
 - [ ] `docs/github.md` is updated when a workflow, release step, or GitHub setting changes

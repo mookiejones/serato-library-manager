@@ -17,44 +17,50 @@ The line you want is **Serato is quit. Edits save to the library.**
 
 A save that hits a lock shows the error in the bar above the list. The merge dialog says **Quit Serato before merging. The preview shows the plan.** The file dialog shows the same status line and leaves **Confirm** off.
 
-## The app closes as soon as it opens
+## No Serato library was found
 
-`master.sqlite` is not where the app looks. The message is **Serato library not found at** and then a path.
+Setup says **No Serato library was found on this computer.** The app stays open.
 
 1. Install Serato DJ Pro if it is not installed.
 2. Open Serato DJ Pro once, then quit it.
-3. Open the folder in [Install](install.md#where-serato-keeps-the-library).
-4. Confirm `master.sqlite` is there.
-5. Open Serato Library again.
+3. Return to Serato Library and choose **Check again**.
+
+The usual folder is in [Install](install.md#where-serato-keeps-the-library). **Choose a folder** confirms that folder. It does not switch the app to a different library.
 
 ## macOS says the app is damaged or cannot be opened
 
-The download is unsigned. Gatekeeper shows a warning.
+The download is unsigned. Gatekeeper shows a warning. macOS 15 and later uses **System Settings › Privacy & Security › Open Anyway**. Earlier macOS uses a right-click **Open**. The steps are in [First install](../first-install.md#why-youll-see-a-warning).
 
-1. Open the folder that contains `Serato Library.app`.
-2. Right-click the app.
-3. Choose Open.
-4. Choose Open in the next dialog.
+On a Mac, drag **Serato Library** from the disk image into Applications before you open it.
 
-Do not move only the app out of a half-unpacked download. Unpack the zip first.
+## macOS cannot see an external drive
+
+Reading music on an external drive needs **Removable Volumes**. That is not Full Disk Access.
+
+1. Open **System Settings**.
+2. Go to **Privacy & Security**.
+3. Go to **Files and Folders**.
+4. Select **Serato Library**.
+5. Turn on **Removable Volumes**.
+
+These builds are unsigned, so macOS may ask again after an update, or the switch may be off. Turn it back on for the new copy. The same steps are next to Open Anyway in [First install](../first-install.md#mac-external-drives).
 
 ## Windows SmartScreen stops the app
 
-1. Open the extracted `Serato Library` folder.
-2. Double-click `Serato Library.exe`.
-3. Choose More info.
-4. Choose Run anyway.
+1. Double-click `Serato-Library-windows-setup.exe`, or `Serato Library.exe` from the unzipped portable folder.
+2. Choose More info.
+3. Choose Run anyway.
 
-Run the exe from the extracted folder. Do not run it from inside the zip.
+If you used the portable zip, run the exe from the extracted folder. Do not run it from inside the zip.
 
-## The window never appears, and no error is obvious
+## The page never appears, and no error is obvious
 
-Another copy may already be listening.
+Another copy may already be running.
 
-1. Quit every Serato Library window.
+1. Find the **Serato Library** window and close it.
 2. Open the app again.
 
-If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy.
+A second double-click focuses the window that is already open. If you started it from a terminal, the message is **http://127.0.0.1:8765 is already in use.** Quit the other copy. The desktop app uses a free port and does not show that message.
 
 ## Serato put my edit back
 
@@ -65,7 +71,7 @@ The main library was saved, and a drive database was not. The bar includes **Sav
 3. Open Serato DJ Pro so it can read both databases.
 4. Check the crate again.
 
-Use one backup folder when you [restore](safety.md#restore-a-backup). `master.sqlite` and `root.sqlite` from different times can disagree.
+Use one backup folder when you [restore](safety.md#restore-an-older-database-copy-by-hand). `master.sqlite` and `root.sqlite` from different times can disagree.
 
 ## Merge warns about cue points
 
@@ -91,7 +97,7 @@ A Files action stopped halfway, and the journal does not match the database. The
 
 1. Quit Serato DJ Pro.
 2. Quit Serato Library.
-3. Follow [Restore a backup](safety.md#restore-a-backup). Pick the newest `serato-web-` folder from before the interrupted change.
+3. Follow [Restore a backup](safety.md#restore-an-older-database-copy-by-hand). Pick the newest `serato-web-` folder from before the interrupted change that contains `COMPLETE`. A name ending in `-02` through `-99` is another copy from that same second, and a later number is a later copy. Skip a name that ends with `-failed` or `-failed-` and digits (any capitalization), a hidden name that ends with `.partial`, and a folder that contains `INCOMPLETE`. A folder with no `COMPLETE` file is legacy, unverified.
 4. Open Serato Library again.
 
 Do not delete `file-ops-journal.json` by hand before the restore.

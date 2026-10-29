@@ -6,6 +6,7 @@ not opened. File hashes are taken with rb before and after the check.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import sqlite3
@@ -24,10 +25,11 @@ from io import StringIO
 from pathlib import Path, PureWindowsPath
 
 import gig_check
+import gig_snapshots
 import library
 import server
 import snapshots
-from snapshots import (
+from gig_snapshots import (
     ChangeReport,
     CueMark,
     GridMark,
@@ -39,6 +41,7 @@ from snapshots import (
     track_key,
 )
 from tests.fixture import SCHEMA, TempLibrary, open_database
+from tests.test_snapshots import _audio_file, _autotags, _geob, _grid, _id3, _markers, _quiet
 
 NOW = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
 ROOT = Path(__file__).resolve().parents[1]
@@ -206,7 +209,7 @@ def _tags(title: str = "Song", artist: str = "Artist") -> TrackTags:
 
 
 class FakeSnapshots:
-    """In-memory SnapshotReader. It does not touch the disk."""
+    """In-memory GigSnapshotReader. It does not touch the disk."""
 
     def __init__(self, loaded: tuple[LoadedSnapshot, ...]) -> None:
         """Store snapshots.
@@ -471,7 +474,7 @@ class GigCheckTests(unittest.TestCase):
                 SnapshotTrack("t4", "/music/d.mp3", ("Peak",), (), (), tags),
             ),
         )
-        diff = snapshots.diff_snapshots(before, after)
+        diff = gig_snapshots.diff_snapshots(before, after)
         self.assertEqual(diff.crates_added, ("Peak",))
         self.assertEqual(diff.crates_removed, ("Warmup",))
         self.assertEqual(diff.crates_edited, ("Friday",))
@@ -673,15 +676,15 @@ class GigCheckTests(unittest.TestCase):
             self.assertIn(str(missing), text)
             self.assertIn(gig_check.NO_SNAPSHOTS, text)
 
-    def test_ten_thousand_tracks_finish_within_thirty_seconds(self) -> None:
-        """A 10,000-track crate is classified in under 30 seconds.
+    def test_ten_thousand_tracks_finish_within_ten_seconds(self) -> None:
+        """A 10,000-track crate is classified in under 10 seconds.
 
         The timer starts after the database is built and stops when the
         report returns. The printed line is the measurement recorded for
         the pull request.
 
         Returns:
-            None. The test fails if the check takes 30 seconds or longer,
+            None. The test fails if the check takes 10 seconds or longer,
             or if the tracks are not all reported as missing files.
         """
         with tempfile.TemporaryDirectory() as name:
@@ -725,7 +728,106 @@ class GigCheckTests(unittest.TestCase):
             print(f"gig-check 10k: {elapsed:.3f}s", flush=True)
             self.assertEqual(len(report.missing_files), 10000)
             self.assertEqual(report.unavailable_drives, ())
-            self.assertLess(elapsed, 30.0, f"10k gig check took {elapsed:.3f}s")
+            self.assertLess(elapsed, 10.0, f"10k gig check took {elapsed:.3f}s")
+
+    def test_saved_snapshot_store_feeds_the_change_report(self) -> None:
+        """A snapshot from ``snapshots.py`` is compared with the library now.
+
+        The snapshot is taken by ``SnapshotStore.take``. After it, one cue is
+        moved, a crate is added, and a title is edited. The check reads the
+        store beside the database on its own, reports exactly those changes,
+        and leaves the database, the audio, and the store's files unchanged.
+
+        Returns:
+            None. The test fails if a change is missed, an extra change is
+            reported, or a file hash changes.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            music = root / "music"
+            track = music / "set" / "opener.mp3"
+            track.parent.mkdir(parents=True)
+            _audio_file(track)
+
+            def setup(conn: sqlite3.Connection) -> None:
+                _add_crate(conn, 5, "Friday")
+                _add_track(conn, 1, str(track), title="Opener", crate_id=5)
+
+            database = _write_db(root, setup)
+            store = _quiet(
+                snapshots.SnapshotStore(
+                    database,
+                    [
+                        snapshots.DriveSpec(
+                            drive_id="tour",
+                            label="Tour",
+                            serato_root=music / "_Serato_",
+                            # The stored path is absolute, so the drive's
+                            # music root is the filesystem root.
+                            music_root=Path(track.anchor),
+                            role="external",
+                            present=True,
+                        )
+                    ],
+                )
+            )
+            (music / "_Serato_").mkdir()
+            saved = store.take("manual", "Before Friday.")
+
+            cue = bytearray(16)
+            cue[1] = 3
+            cue[2:6] = (3000).to_bytes(4, "big")
+            cue[12:16] = b"Drop"
+            moved = b"\x01\x01" + base64.b64encode(b"CUE\x00" + len(cue).to_bytes(4, "big") + bytes(cue))
+            self.assertNotEqual(moved, _markers())
+            frames = [
+                _geob("Serato Markers2", moved),
+                _geob("Serato BeatGrid", _grid()),
+                _geob("Serato Autotags", _autotags()),
+            ]
+            track.write_bytes(_id3(frames, b"AUDIOFRAME" * 8))
+            with open_database(database) as conn:
+                _add_crate(conn, 6, "Saturday")
+                conn.execute("UPDATE asset SET name = 'Opener (edit)' WHERE id = 1")
+
+            watched = [database, track, *sorted(store.root.rglob("*"))]
+            before = {str(path): _digest(path) for path in watched if path.is_file()}
+            listing = _names(store.root)
+            report = gig_check.run_gig_check(database)
+            after = {str(path): _digest(path) for path in watched if path.is_file()}
+
+            self.assertEqual(after, before)
+            self.assertEqual(_names(store.root), listing)
+            self.assertIn("Before Friday", report.snapshot_note)
+            changes = report.changes
+            assert changes is not None
+            self.assertEqual(changes.crates_added, ("Saturday",))
+            self.assertEqual(changes.crates_removed, ())
+            self.assertEqual(changes.crates_edited, ())
+            self.assertEqual(changes.tracks_added, ())
+            self.assertEqual(changes.tracks_removed, ())
+            self.assertEqual(len(changes.cues_edited), 1)
+            self.assertEqual(Path(changes.cues_edited[0]).name, "opener.mp3")
+            self.assertEqual(changes.grids_edited, ())
+            self.assertEqual(len(changes.tags_edited), 1)
+            self.assertNotIn("snapshot_stale", {line.code for line in report.holding_it_back})
+            self.assertTrue(saved["id"])
+
+    def test_unreadable_snapshot_store_is_reported(self) -> None:
+        """A store whose manifest key is broken says so and counts as stale.
+
+        Returns:
+            None. The test fails if the check raises or reports no snapshots.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            database = _write_db(root, lambda conn: None)
+            store = _quiet(snapshots.SnapshotStore(database, []))
+            store.take("manual", "Kept.")
+            (store.root / "manifest.key").write_bytes(b"short")
+            report = gig_check.run_gig_check(database, now=NOW)
+            self.assertEqual(report.snapshot_note, gig_check.SNAPSHOTS_UNREADABLE)
+            self.assertIn("snapshot_stale", {line.code for line in report.holding_it_back})
 
     def test_page_reads_the_gig_report_fields(self) -> None:
         """The Gig view requests /api/gig-check and reads the report fields.

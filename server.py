@@ -8,7 +8,9 @@ and the first write in a process is backed up first.
 from __future__ import annotations
 
 import errno
+import hmac
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -20,12 +22,15 @@ from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 from urllib.parse import parse_qs, urlparse
 
+import app_config
 import app_log
 import files
 import gig_check
 import library
 import rekordbox
 import related
+import setup_flow
+import snapshots
 import telemetry
 
 
@@ -47,6 +52,11 @@ ROOT = app_root()
 STATIC = ROOT / "static"
 HOST = "127.0.0.1"
 PORT = 8765
+# Required on POST /api/shutdown and POST /api/focus. A page on another
+# origin cannot set these headers without a preflight, and this server
+# does not allow one. Neither token is placed in the page.
+SHUTDOWN_HEADER = "X-Serato-Library-Shutdown"
+FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
@@ -475,6 +485,48 @@ def crate_query(raw: str) -> int | None:
     return crate_id
 
 
+def export_option(value: str, *, default: bool, name: str) -> bool:
+    """Read one Rekordbox export switch from a query value.
+
+    Args:
+        value: The query text. The caller passes the default word when the
+            parameter is absent.
+        default: Value used when the text is not a known on or off word.
+        name: Parameter name included in the warning.
+
+    Returns:
+        True for ``1``, ``true``, and ``yes``. False for ``0``, ``false``,
+        and ``no``. Any other text logs a warning and returns ``default``.
+    """
+    token = value.lower()
+    if token in {"1", "true", "yes"}:
+        return True
+    if token in {"0", "false", "no"}:
+        return False
+    app_log.logger.warning(
+        "Rekordbox option %s=%r is not recognized. Using %s.",
+        name,
+        value,
+        "on" if default else "off",
+    )
+    return default
+
+
+def _safe_folder_error(message: str) -> str:
+    """Return a folder error that does not include a path.
+
+    Args:
+        message: Text from a library error.
+
+    Returns:
+        The message when it is one of the short folder sentences.
+        A generic sentence when the text contains a path.
+    """
+    if message in {"That folder could not be read.", "Shortcuts are left alone.", "That request is not valid."}:
+        return message
+    return "That folder could not be read."
+
+
 def query_text(
     query: dict[str, list[str]], key: str, default: str | None = None
 ) -> str | None:
@@ -747,6 +799,109 @@ def format_bits(value: object) -> str:
         return "0"
     bits = [str(index) for index in range(32) if number & (1 << index)]
     return f"{number} (bits {', '.join(bits)})"
+
+
+def format_beat_position(value: object) -> str:
+    """Format a beatgrid position for the track panel.
+
+    Serato stores the position as a binary float. Printed in full it looks
+    like ``1.2300000190734863``. The panel shows milliseconds. The Rekordbox
+    export does not use this string. It divides by the stored float.
+
+    Args:
+        value: Position in seconds.
+
+    Returns:
+        Three decimal places, or an empty string when the value is not a
+        finite number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    number = float(value)
+    if not math.isfinite(number):
+        return ""
+    return f"{number:.3f}"
+
+
+def display_bpm(value: object) -> float | None:
+    """Return a beatgrid BPM the track panel can show.
+
+    Args:
+        value: BPM from a beatgrid marker, or a missing value.
+
+    Returns:
+        The number when it is finite. ``None`` when it is missing, ``NaN``,
+        or infinite. The panel JSON then contains ``null`` instead of ``NaN``.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def display_beatgrid(markers: object) -> list[dict[str, object]]:
+    """Copy beatgrid markers for the track panel.
+
+    Args:
+        markers: Beatgrid list from ``markers_for``.
+
+    Returns:
+        Marker dicts whose ``position`` is a three-decimal seconds string.
+        A non-finite ``bpm`` is ``None``. The export reads the audio file
+        itself and does not use this copy.
+    """
+    shown: list[dict[str, object]] = []
+    for marker in as_dicts(markers):
+        copy = dict(marker)
+        copy["position"] = format_beat_position(marker.get("position"))
+        if "bpm" in copy:
+            copy["bpm"] = display_bpm(marker.get("bpm"))
+        shown.append(copy)
+    return shown
+
+
+def json_ready(value: object) -> object:
+    """Replace non-finite floats so the value can be encoded as JSON.
+
+    Args:
+        value: A response payload, or a value nested inside one.
+
+    Returns:
+        The same structure with ``NaN`` and infinities replaced by ``None``.
+        Other values are left as they are.
+    """
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return value
+    if isinstance(value, dict):
+        ready: dict[str, object] = {}
+        items = cast("dict[object, object]", value)
+        for key, item in items.items():
+            ready[str(key)] = json_ready(item)
+        return ready
+    if isinstance(value, (list, tuple)):
+        return [json_ready(item) for item in value]
+    return value
+
+
+def encode_json(payload: object) -> bytes:
+    """Encode one API payload as UTF-8 JSON.
+
+    Args:
+        payload: Object to send. Non-finite floats become ``null``.
+
+    Returns:
+        UTF-8 JSON. ``allow_nan`` is false, so a non-finite number cannot
+        be written as the tokens ``NaN`` or ``Infinity``.
+
+    Raises:
+        TypeError: If a value cannot be encoded as JSON.
+        ValueError: If a non-finite float remains after cleaning.
+    """
+    return json.dumps(json_ready(payload), ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
 def format_bpm(value: object) -> str:
@@ -1098,6 +1253,8 @@ def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | N
 
     Returns:
         The detail payload, or None when the track is not in the space.
+        Beatgrid positions in that payload are three-decimal strings for
+        the panel. The export does not read them.
 
     Raises:
         LibraryError: If the space name is not allowed.
@@ -1287,7 +1444,7 @@ def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | N
         "cues": markers["cues"],
         "loops": markers["loops"],
         "flips": markers["flips"],
-        "beatgrid": markers["beatgrid"],
+        "beatgrid": display_beatgrid(markers["beatgrid"]),
         "markers_found": markers["found"],
         "markers_unavailable": markers["unavailable"],
         "serato": as_dict(_library_call("status")),
@@ -1352,9 +1509,15 @@ class Handler(BaseHTTPRequestHandler):
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        if parsed.path == "/api/health":
+            self.send_json({"ok": True})
+            return
         try:
             if parsed.path == "/api/settings":
                 self.send_json(telemetry.public_settings())
+                return
+            if parsed.path == "/api/setup":
+                self._get_setup(query)
                 return
             if parsed.path == "/api/logs":
                 text, truncated = app_log.read_logs()
@@ -1399,6 +1562,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/files":
                 self.send_json(files.list_directory(query_text(query, "path", "") or ""))
                 return
+            if parsed.path == "/api/snapshots":
+                self._get_snapshots(query)
+                return
             if parsed.path == "/api/export.m3u":
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
@@ -1424,8 +1590,10 @@ class Handler(BaseHTTPRequestHandler):
                 space = require_space(query_text(query, "space"))
                 raw_crate = query_text(query, "crate", "all") or "all"
                 crate_id = crate_query(raw_crate)
-                memory = (query_text(query, "memory", "1") or "1").lower() not in {"0", "false", "no"}
-                hot_loops = (query_text(query, "hot_loops", "0") or "0").lower() in {"1", "true", "yes"}
+                memory = export_option(query_text(query, "memory", "1") or "1", default=True, name="memory")
+                hot_loops = export_option(
+                    query_text(query, "hot_loops", "0") or "0", default=False, name="hot_loops"
+                )
                 key_notation = query_text(query, "key", "asis") or "asis"
                 xml_text, report = rekordbox.export_rekordbox(
                     space,
@@ -1448,8 +1616,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+        except snapshots.SnapshotError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+            return
         except library.LibraryError as exc:
             self.send_json({"error": exc.message}, status=exc.status)
+            return
+        except FileNotFoundError as exc:
+            if "Serato library not found" not in str(exc):
+                raise
+            self.send_json(
+                {"error": "No Serato library was found on this computer."},
+                status=404,
+            )
             return
         except (TypeError, ValueError, OverflowError):
             self.send_json({"error": "That request is not valid."}, status=400)
@@ -1480,6 +1659,16 @@ class Handler(BaseHTTPRequestHandler):
         if length > BODY_LIMIT:
             self.send_json({"error": "That upload is too large."}, status=413)
             return
+        if parsed.path == "/api/shutdown":
+            if length:
+                self.rfile.read(length)
+            self._post_shutdown()
+            return
+        if parsed.path == "/api/focus":
+            if length:
+                self.rfile.read(length)
+            self._post_focus()
+            return
         try:
             parsed_body: object = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
@@ -1493,6 +1682,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/settings":
             self._post_settings(payload)
             return
+        if parsed.path == "/api/setup":
+            self._post_setup(payload)
+            return
         if parsed.path == "/api/logs/open":
             self._post_open_logs()
             return
@@ -1505,50 +1697,60 @@ class Handler(BaseHTTPRequestHandler):
                     as_dict(_library_call("reveal", required_int(payload["id"])))
                 )
                 return
+            if parsed.path == "/api/snapshots":
+                with _lock:
+                    with snapshots.own_writes():
+                        self._post_snapshots(payload)
+                return
             with _lock:
-                merging = parsed.path == "/api/duplicates/merge"
-                preview = merging and payload.get("preview") is True
-                if not preview:
-                    invalidate()
-                if parsed.path == "/api/track":
-                    result = as_dict(
-                        _library_call(
-                            "save_track",
-                            required_int(payload["id"]),
-                            payload.get("fields") or {},
-                            require_space(optional_text(payload.get("space"))),
-                        )
-                    )
-                elif parsed.path == "/api/crate":
-                    result = as_dict(_library_call("crate_action", payload))
-                    if payload.get("action") == "create":
-                        telemetry.capture(telemetry.EVENT_CRATE_CREATED)
-                elif parsed.path == "/api/import.m3u":
-                    result = as_dict(
-                        _library_call(
-                            "import_m3u",
-                            require_space(optional_text(payload.get("space"))),
-                            optional_int(payload.get("parent")),
-                            text_or_empty(payload.get("name")),
-                            text_or_empty(payload.get("text")),
-                        )
-                    )
-                    telemetry.capture(telemetry.EVENT_CRATE_CREATED)
-                elif merging:
-                    result = as_dict(_library_call("merge_duplicates", payload))
+                with snapshots.own_writes():
+                    merging = parsed.path == "/api/duplicates/merge"
+                    preview = merging and payload.get("preview") is True
                     if not preview:
-                        telemetry.capture(telemetry.EVENT_DUPLICATES_MERGED)
-                elif parsed.path == "/api/files":
-                    if payload.get("confirm") is True:
-                        result = files.execute(payload)
+                        invalidate()
+                    if parsed.path == "/api/track":
+                        result = as_dict(
+                            _library_call(
+                                "save_track",
+                                required_int(payload["id"]),
+                                payload.get("fields") or {},
+                                require_space(optional_text(payload.get("space"))),
+                            )
+                        )
+                    elif parsed.path == "/api/crate":
+                        result = as_dict(_library_call("crate_action", payload))
+                        if payload.get("action") == "create":
+                            telemetry.capture(telemetry.EVENT_CRATE_CREATED)
+                    elif parsed.path == "/api/import.m3u":
+                        result = as_dict(
+                            _library_call(
+                                "import_m3u",
+                                require_space(optional_text(payload.get("space"))),
+                                optional_int(payload.get("parent")),
+                                text_or_empty(payload.get("name")),
+                                text_or_empty(payload.get("text")),
+                            )
+                        )
+                        telemetry.capture(telemetry.EVENT_CRATE_CREATED)
+                    elif merging:
+                        result = as_dict(_library_call("merge_duplicates", payload))
+                        if not preview:
+                            telemetry.capture(telemetry.EVENT_DUPLICATES_MERGED)
+                    elif parsed.path == "/api/files":
+                        if payload.get("confirm") is True:
+                            result = files.execute(payload)
+                        else:
+                            result = files.plan(payload)
                     else:
-                        result = files.plan(payload)
-                else:
-                    self.send_json(
-                        {"error": "That action is not available."}, status=404
-                    )
-                    return
+                        self.send_json(
+                            {"error": "That action is not available."}, status=404
+                        )
+                        return
             self.send_json(result)
+        except snapshots.SnapshotBlocked as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+        except snapshots.SnapshotError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
         except library.SeratoOpen as exc:
             detail: object = getattr(exc, "info")
             self.send_json({"error": exc.message, "serato": detail}, status=409)
@@ -1567,31 +1769,183 @@ class Handler(BaseHTTPRequestHandler):
         except (TypeError, ValueError, KeyError):
             self.send_json({"error": "That request is not valid."}, status=400)
 
+    def _post_shutdown(self) -> None:
+        """Stop the server when the caller presents the desktop token.
+
+        The token is set only by the desktop app and the release smoke
+        check. ``server.py`` leaves it unset, and this route then answers
+        404. A wrong token answers 403. The comparison does not branch on
+        the character that differed.
+
+        The listening thread is shut down from another thread so this
+        response can finish first.
+        """
+        expected = getattr(self.server, "shutdown_token", None)
+        if not isinstance(expected, str) or not expected:
+            self.send_json({"error": "That action is not available."}, status=404)
+            return
+        provided = self.headers.get(SHUTDOWN_HEADER, "")
+        if not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
+            self.send_json({"error": "That action is not available."}, status=403)
+            return
+        self.send_json({"ok": True})
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def _post_focus(self) -> None:
+        """Bring the desktop window forward when the caller presents its token.
+
+        The token is set only by the desktop app. ``server.py`` leaves it
+        unset, and this route then answers 404. A wrong token answers 403.
+        The comparison does not branch on the character that differed.
+        The callback runs on this thread. pywebview moves that call onto
+        the GUI thread.
+        """
+        expected = getattr(self.server, "focus_token", None)
+        if not isinstance(expected, str) or not expected:
+            self.send_json({"error": "That action is not available."}, status=404)
+            return
+        provided = self.headers.get(FOCUS_HEADER, "")
+        if not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
+            self.send_json({"error": "That action is not available."}, status=403)
+            return
+        callback = getattr(self.server, "focus_window", None)
+        if callable(callback):
+            try:
+                callback()
+            except Exception:
+                app_log.logger.exception("The window could not be focused")
+                self.send_json({"error": "The window could not be focused."}, status=500)
+                return
+        self.send_json({"ok": True})
+
     def _post_settings(self, payload: dict[str, object]) -> None:
-        """Save the sharing choice.
+        """Save the sharing choice, the export bar, the layout, or whether setup finished.
 
         Args:
-            payload: JSON object. The only accepted field is
-                ``telemetry_consent``, and it must be a boolean. ``False``
-                is a real choice. Any other shape is a 400 so a misspelled
-                field is not stored as the default.
+            payload: JSON object. ``{"wizard_complete": bool}`` is accepted
+                alone, and setup can be marked finished only after the
+                sharing choice is already a boolean.
+                ``{"layout": {"track_list_width": int | None}}`` is accepted
+                alone. A null width resets the default split. Otherwise
+                ``telemetry_consent`` must be a boolean when it is present,
+                and ``rekordbox`` must be an object whose fields are
+                ``hot_loops``, ``memory_cues``, and ``key_notation``.
+                Booleans reject integers. ``key_notation`` must be
+                ``asis``, ``camelot``, or ``classical``. Any other shape is
+                a 400, and the file is left unchanged.
         """
-        if set(payload) != {"telemetry_consent"} or not isinstance(
-            payload.get("telemetry_consent"), bool
-        ):
+        keys = set(payload)
+        if keys == {"wizard_complete"} and isinstance(payload.get("wizard_complete"), bool):
+            done = payload["wizard_complete"]
+            if not isinstance(done, bool):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            try:
+                app_config.set_wizard_complete(done)
+            except ValueError:
+                self.send_json(
+                    {"error": "Choose whether to share stats before finishing setup."},
+                    status=400,
+                )
+                return
+            except OSError:
+                self.send_json({"error": "Setup could not be saved."}, status=500)
+                return
+            self.send_json(telemetry.public_settings())
+            return
+        if keys == {"layout"} and isinstance(payload.get("layout"), dict):
+            layout = payload["layout"]
+            assert isinstance(layout, dict)
+            width = layout.get("track_list_width")
+            if set(layout) != {"track_list_width"} or not (width is None or isinstance(width, int)):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            try:
+                app_config.set_track_list_width(width)
+            except ValueError:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            except OSError:
+                self.send_json({"error": "The layout could not be saved."}, status=500)
+                return
+            self.send_json(telemetry.public_settings())
+            return
+        allowed = {"telemetry_consent", "rekordbox"}
+        if not keys or not keys <= allowed:
             self.send_json({"error": "That request is not valid."}, status=400)
             return
-        choice = payload["telemetry_consent"]
-        if not isinstance(choice, bool):
+        consent: bool | None = None
+        if "telemetry_consent" in payload:
+            raw_consent = payload.get("telemetry_consent")
+            if not isinstance(raw_consent, bool):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            consent = raw_consent
+        changes: dict[str, bool | str] | None = None
+        if "rekordbox" in payload:
+            try:
+                changes = app_config.rekordbox_changes(payload.get("rekordbox"))
+            except ValueError:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+        if consent is None and changes is None:
             self.send_json({"error": "That request is not valid."}, status=400)
             return
         try:
-            self.send_json(telemetry.set_consent(choice))
+            if changes is not None:
+                hot_loops = changes["hot_loops"] if "hot_loops" in changes else None
+                memory_cues = changes["memory_cues"] if "memory_cues" in changes else None
+                key_notation = changes["key_notation"] if "key_notation" in changes else None
+                app_config.update_rekordbox(
+                    hot_loops=hot_loops if isinstance(hot_loops, bool) else None,
+                    memory_cues=memory_cues if isinstance(memory_cues, bool) else None,
+                    key_notation=key_notation if isinstance(key_notation, str) else None,
+                )
+            if isinstance(consent, bool):
+                self.send_json(telemetry.set_consent(consent))
+                return
+            self.send_json(telemetry.public_settings())
         except OSError:
             self.send_json(
                 {"error": "The sharing choice could not be saved."},
                 status=500,
             )
+        except ValueError:
+            self.send_json({"error": "That request is not valid."}, status=400)
+
+    def _get_setup(self, query: dict[str, list[str]]) -> None:
+        """Return the library summary, or one folder listing.
+
+        Args:
+            query: Parsed query. ``browse`` lists folders. Without it,
+                the response describes the library in plain words.
+
+        A missing library is a normal response, not an error. The page
+        stays up so the wizard can say what to do next.
+        """
+        if "browse" in query:
+            raw = query_text(query, "browse", "") or ""
+            try:
+                self.send_json(setup_flow.browse_folders(raw))
+            except library.LibraryError as exc:
+                self.send_json({"error": _safe_folder_error(exc.message)}, status=exc.status)
+            return
+        self.send_json(setup_flow.describe_library())
+
+    def _post_setup(self, payload: dict[str, object]) -> None:
+        """Check a folder the person picked in the wizard.
+
+        Args:
+            payload: JSON object whose only field is ``folder``.
+        """
+        folder = payload.get("folder")
+        if set(payload) != {"folder"} or not isinstance(folder, str):
+            self.send_json({"error": "That request is not valid."}, status=400)
+            return
+        try:
+            self.send_json(setup_flow.accept_folder(folder))
+        except library.LibraryError as exc:
+            self.send_json({"error": _safe_folder_error(exc.message)}, status=exc.status)
 
     def _get_related(self, query: dict[str, list[str]]) -> None:
         """Return saved links and suggestions for one track path.
@@ -1718,14 +2072,71 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json({"ok": True})
 
+    def _get_snapshots(self, query: dict[str, list[str]]) -> None:
+        """Return the snapshot list, or one restore plan.
+
+        Args:
+            query: Parsed query. ``id`` asks for a dry-run plan of that snapshot.
+        """
+        store = snapshots.current_store()
+        snapshot_id = query_text(query, "id", "") or ""
+        if snapshot_id:
+            self.send_json(store.plan(snapshot_id))
+            return
+        pending = store.pending_undo()
+        self.send_json({
+            "snapshots": store.list_snapshots(),
+            "pending_undo": pending,
+            "write_block": snapshots.write_block_message(),
+            "serato_running": store.serato_running(),
+        })
+
+    def _post_snapshots(self, payload: dict[str, object]) -> None:
+        """Create a snapshot, plan a restore, restore, or undo an outside change.
+
+        Args:
+            payload: JSON body with ``action`` of ``create``, ``plan``,
+                ``restore``, or ``undo``. ``restore`` also needs ``id`` and
+                ``confirm`` true. ``plan`` changes nothing.
+        """
+        store = snapshots.current_store()
+        action = payload.get("action")
+        if action == "create":
+            info = store.take("manual", "Snapshot taken in the app.")
+            self.send_json({"ok": True, "snapshot": info})
+            return
+        if action == "plan":
+            self.send_json(store.plan(str(payload.get("id") or "")))
+            return
+        if action == "undo":
+            if payload.get("confirm") is not True:
+                pending = store.pending_undo()
+                self.send_json({
+                    "ok": False,
+                    "preview": True,
+                    "pending_undo": pending,
+                    "error": "Confirm undo before it is saved." if pending else "There is no outside change to undo.",
+                })
+                return
+            self.send_json(store.undo_outside())
+            return
+        if action == "restore":
+            snapshot_id = str(payload.get("id") or "")
+            if payload.get("confirm") is not True:
+                self.send_json(store.plan(snapshot_id))
+                return
+            self.send_json(store.restore(snapshot_id))
+            return
+        self.send_json({"error": "That action is not available."}, status=404)
+
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.
 
         Args:
-            payload: Object encoded as UTF-8 JSON.
+            payload: Object encoded as UTF-8 JSON. A non-finite float becomes null.
             status: HTTP status code. Defaults to 200.
         """
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        body = encode_json(payload)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -1768,35 +2179,58 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(404)
 
 
-def serve() -> ThreadingHTTPServer:
-    """Bind the library server on 127.0.0.1 port 8765.
+def serve(port: int | None = None, *, require_library: bool = True) -> ThreadingHTTPServer:
+    """Bind the library server on 127.0.0.1.
+
+    Args:
+        port: TCP port. None uses 8765. ``0`` asks the operating system
+            for a free port. The desktop app uses ``0``.
+        require_library: When true, telemetry and the snapshot watch start
+            after the bind if the master database exists. A missing
+            database still serves the page, so the first-run wizard can
+            explain what to do. The release smoke check passes false so a
+            runner without Serato does not start telemetry either.
 
     Returns:
-        A server that is listening and not yet serving.
+        A server that is listening and not yet serving. ``shutdown_token``
+        and ``focus_token`` are None until the desktop app sets them.
 
     Raises:
-        SystemExit: If the master database is missing or the port is already taken.
+        SystemExit: If the port is already taken.
     """
-    if not db_path().exists():
-        raise SystemExit(f"Serato library not found at {db_path()}")
+    library_present = db_path().exists()
     app_log.configure()
-    app_log.logger.info("Library file: %s", db_path())
+    if require_library and library_present:
+        app_log.logger.info("Library file: %s", db_path())
+        try:
+            files.recover_interrupted()
+        except Exception:
+            app_log.logger.exception("An interrupted file change could not be finished.")
+    elif require_library:
+        app_log.logger.info("No Serato library file yet. The setup wizard will explain the next step.")
+    bind_port = PORT if port is None else port
     try:
-        files.recover_interrupted()
-    except Exception:
-        app_log.logger.exception("An interrupted file change could not be finished.")
-    try:
-        httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+        httpd = ThreadingHTTPServer((HOST, bind_port), Handler)
     except OSError as exc:
         if exc.errno != errno.EADDRINUSE:
             raise
+        shown = PORT if port is None else bind_port
         raise SystemExit(
-            f"http://{HOST}:{PORT} is already in use. "
-            "Quit the other Serato library server (server.py or the desktop window) and try again."
+            f"http://{HOST}:{shown} is already in use. "
+            "Quit the other Serato library server (server.py or the desktop app) and try again."
         ) from exc
-    app_log.logger.info("Server listening on %s:%s", HOST, PORT)
-    telemetry.activate()
-    telemetry.note_app_opened()
+    httpd.shutdown_token = None
+    httpd.focus_token = None
+    httpd.focus_window = None
+    app_log.logger.info("Server listening on %s:%s", HOST, httpd.server_address[1])
+    if require_library and library_present:
+        telemetry.activate()
+        telemetry.note_app_opened()
+        try:
+            snapshots.current_store().check_version()
+        except snapshots.SnapshotError:
+            app_log.logger.exception("A version snapshot could not be saved.")
+        snapshots.start_watch()
     return httpd
 
 
@@ -1804,7 +2238,8 @@ def main() -> None:
     """Start the library server on 127.0.0.1 port 8765.
 
     Raises:
-        SystemExit: If the master database does not exist or the port is taken.
+        SystemExit: If the port is taken. A missing library still serves
+            the page.
     """
     httpd = serve()
     print(f"Serato library  http://{HOST}:{PORT}")
@@ -1814,6 +2249,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
+        snapshots.stop_watch()
         telemetry.shutdown()
         httpd.server_close()
 

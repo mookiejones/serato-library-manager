@@ -2,7 +2,10 @@
 """Build a windowed Serato Library app for the machine running PyInstaller.
 
 The static files are the directory server.py serves. The spec fails when
-index.html points at a local file that is not in that directory.
+index.html points at a local file that is not in that directory, or when
+pywebview is not installed. On macOS it also fails when the WebKit
+frameworks are not installed. The window uses the system web view.
+CEF and Qt WebEngine are excluded so the bundle does not contain Chromium.
 """
 
 import importlib.util
@@ -12,11 +15,16 @@ from pathlib import Path
 root = Path(SPECPATH)
 sys.path.insert(0, str(root))
 
+import app_config
 from static_assets import missing_static_files
 
 missing = missing_static_files(root / "static")
 if missing:
     raise SystemExit("Missing build inputs: " + ", ".join(missing))
+
+if importlib.util.find_spec("webview") is None:
+    raise SystemExit("Missing build inputs: pywebview")
+
 
 def telemetry_hiddenimports():
     """Return telemetry modules PyInstaller would otherwise miss.
@@ -51,27 +59,93 @@ def telemetry_hiddenimports():
     return names
 
 
-# pywebview picks its backend at runtime. The windowed build must still
-# bundle the one this OS imports: WKWebView on macOS, WebView2 through
-# WinForms on Windows, and GTK elsewhere.
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
+hidden = [
+    "webview",
+    "webview.guilib",
+    "webview.http",
+    "webview.window",
+    "bottle",
+    "proxy_tools",
+    "typing_extensions",
+]
+binaries = collect_dynamic_libs("webview")
+datas = [
+    (str(root / "static"), "static"),
+]
+datas += collect_data_files("webview")
+# CEF bundles Chromium. Qt WebEngine does too. Neither is a system web view.
+excludes = [
+    "webview.platforms.cef",
+    "webview.platforms.android",
+    "cefpython3",
+    "PyQt5",
+    "PyQt6",
+    "PySide2",
+    "PySide6",
+    "qtpy",
+    "PIL",
+    "pystray",
+]
 if sys.platform == "darwin":
-    hidden = ["webview.platforms.cocoa"]
+    frameworks = (
+        "objc",
+        "AppKit",
+        "Foundation",
+        "WebKit",
+        "Quartz",
+        "Security",
+        "UniformTypeIdentifiers",
+        "PyObjCTools",
+    )
+    absent = [
+        name
+        for name in ("AppKit", "Foundation", "objc", "WebKit")
+        if importlib.util.find_spec(name) is None
+    ]
+    if absent:
+        raise SystemExit("Missing macOS web view frameworks: " + ", ".join(absent))
+    for name in frameworks:
+        if importlib.util.find_spec(name) is not None:
+            binaries += collect_dynamic_libs(name)
+    hidden += [
+        "webview.platforms.cocoa",
+        "AppKit",
+        "Foundation",
+        "WebKit",
+        "objc",
+        "Quartz",
+        "Security",
+        "UniformTypeIdentifiers",
+        "PyObjCTools",
+        "PyObjCTools.AppHelper",
+    ]
 elif sys.platform == "win32":
-    hidden = ["webview.platforms.edgechromium", "webview.platforms.winforms"]
+    if importlib.util.find_spec("clr") is None:
+        raise SystemExit("Missing build inputs: pythonnet")
+    hidden += [
+        "webview.platforms.winforms",
+        "webview.platforms.edgechromium",
+        "webview.platforms.win32",
+        "clr",
+        "clr_loader",
+        "pythonnet",
+    ]
 else:
-    hidden = ["webview.platforms.gtk"]
+    hidden += ["webview.platforms.gtk", "gi"]
 hidden.extend(telemetry_hiddenimports())
 
 a = Analysis(
     ["desktop.py"],
     pathex=[str(root)],
-    binaries=[],
-    datas=[(str(root / "static"), "static")],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
 )
 pyz = PYZ(a.pure)
@@ -107,4 +181,12 @@ if sys.platform == "darwin":
         name="Serato Library.app",
         icon=None,
         bundle_identifier="local.seratolibrary.browser",
+        info_plist={
+            "CFBundleShortVersionString": app_config.APP_VERSION,
+            "CFBundleVersion": app_config.APP_VERSION,
+            "NSHighResolutionCapable": True,
+            "NSRemovableVolumesUsageDescription": (
+                "Serato Library reads music files on external drives."
+            ),
+        },
     )

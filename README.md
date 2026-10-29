@@ -1,34 +1,96 @@
-# Serato web library
+# Serato Library
 
-A local window for the Serato DJ Pro library on macOS and Windows. The user guide is [on GitHub Pages](https://mookiejones.github.io/serato-library-manager/) and [in the repository](docs/index.md).
+[![CI](https://github.com/mookiejones/serato-library-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/mookiejones/serato-library-manager/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/mookiejones/serato-library-manager)](https://github.com/mookiejones/serato-library-manager/releases/latest)
+[![Python 3.12 and 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.14-3776AB)](https://github.com/mookiejones/serato-library-manager/blob/main/.github/workflows/ci.yml)
 
-[![Merge copies dialog. One file is selected to keep, and the plan lists crates and fields.](docs/media/duplicate-merge-poster.jpg)](docs/media/duplicate-merge.mp4)
+A local window for the Serato DJ Pro library on macOS and Windows. Source on `main` is app version **1.1.0**. The page stays on this computer.
 
-Select the picture to play the duplicate-merge recording. The steps are in the guide under Duplicates. On the published site the same recording plays in the page.
+<picture>
+  <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/hero-dark.svg">
+  <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/hero-dark.png">
+  <source type="image/svg+xml" srcset="docs/images/hero-light.svg">
+  <img alt="Serato Library Manager: restore your library to any point in time, checked against the saved backup, on every drive." src="docs/images/hero-light.png" width="100%">
+</picture>
 
-## Run
+The hero is a product illustration. The screenshots below show example data of the crates, snapshots, and Prepare views. The app has one theme, so there is no dark variant.
 
-1. Quit Serato DJ Pro.
-2. From this directory, run `python3 server.py`.
-3. Open `http://127.0.0.1:8765`.
+## Install
 
-The server uses the Python standard library. On macOS it reads `~/Library/Application Support/Serato/Library/master.sqlite`. On Windows it reads `%LOCALAPPDATA%\Serato\Library\master.sqlite`. Writes wait until Serato has quit. Press Ctrl-C to stop the server.
+Download from [GitHub Releases](https://github.com/mookiejones/serato-library-manager/releases). That is the only download. There is no Homebrew formula, winget package, or separate website.
 
-The Duplicates view can merge copies that share a title, artist, and length. Choose the file to keep. The others leave the library, and the copy you keep is added to the crates they were in. Empty fields are filled from the other copies. Play count and rating keep the higher value. Audio files stay on disk unless you move them to the Trash. Cue points stay in the audio file. A merge reads them and does not rewrite them.
+The builds are unsigned. The Mac and Windows warnings, including Removable Volumes, are in [First install](docs/first-install.md). The published copy is [First install](https://mookiejones.github.io/serato-library-manager/first-install.html).
 
-**Gig** in the view list is a read-only check. It prints a ready score and a Holding it back list: missing files, a drive that is not connected, Apple Music streaming tracks, empty crates, and whether a snapshot from the last 7 days exists. A missing drive, or a missing file in the crate you selected, is not ready. Tracks on a drive that is unplugged are unavailable under that drive's name, not missing files. `python3 gig_check.py` prints the same report and does not write a file. With no saved snapshot the report says `No snapshots yet`.
+The release on that page today is **v0.1.1**. It attaches `Serato-Library-macos.zip` and `Serato-Library-windows.zip`.
 
-**Rekordbox** in the track bar downloads `rekordbox.xml` for the open crate, including subcrates, or for the whole space. What the file keeps is [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md). The file includes the path, title, artist, album, genre, BPM, key, length, bitrate, comments, hot cues, loops, and beatgrid. In Rekordbox 6 and 7 the import control is at Preferences, Advanced, Database, rekordbox xml. Since Rekordbox 5.6.1 an import does not update a track that is already in the collection. To overwrite it, select the tracks in the rekordbox xml list, right-click, choose Import to Collection, and answer Yes to load information from imported library. That replaces cues, the beatgrid, and tags. `python3 rekordbox.py -o rekordbox.xml` writes the same file and prints what could not be copied. Device Library Plus and OneLibrary USB drives are not written.
+App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed:
 
-The Files view renames, moves, and deletes audio on disk and updates the library path so crates and history stay attached. Replacing a track copies its cue points onto the new file when the tag can take them, and says so when it cannot. Nothing is written until you confirm the preview. A move also points saved related-track links at the new path.
+| Computer | File |
+| --- | --- |
+| Mac, Apple silicon | `Serato-Library-macos-arm64.dmg` |
+| Mac, Intel | `Serato-Library-macos-x64.dmg` |
+| Windows installer | `Serato-Library-windows-setup.exe` |
+| Windows, no installer | `Serato-Library-windows.zip` |
 
-The first launch asks "Share anonymous usage stats and crash reports?" Sharing stays off until you choose it. Settings in the sidebar keeps that switch, and can open or copy the local log. [PRIVACY.md](PRIVACY.md) lists what can leave the machine.
+`SHA256SUMS` is on that same release. [First install](docs/first-install.md) uses these names.
 
-Open a track to save related tracks, with a note and a rating, or to keep a one-way link. Suggestions use musical key, tempo, and shared crates. The links are stored in `related.sqlite` next to the app settings, not in Serato's library, so they can be saved while Serato is open. Copying them into a Serato crate named `Related - ` plus the track title is a library write and waits until Serato has quit. The file layout is [docs/related-tracks.md](docs/related-tracks.md).
+## Features
+
+These are on `main` (1.1.0).
+
+- Browse crates, history, missing files, stems, and Prepare.
+- Merge duplicate copies into the file you keep. Cue points stay in the audio file.
+- Import and export M3U. Export `rekordbox.xml`. **Hot loops** starts off, and the app remembers that checkbox in its settings. Uses a free hot-cue pad. What that file keeps is in [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md).
+- Save related tracks in `related.sqlite` next to the app settings, not in Serato's library.
+- Rename, move, replace, and trash audio, and update the library path.
+- Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied.
+- Run **Gig**, a read-only check before a gig. It gives a ready score and a Holding it back list: missing files, a drive that is not connected, Apple Music streaming tracks, empty crates, whether a snapshot from the last 7 days exists, and what changed since the latest snapshot. A missing drive, or a missing file in the crate you selected, is not ready. `python3 gig_check.py` prints the same report. See [Before a gig](docs/guide/gig-check.md).
+- The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
+- Ask before sharing anonymous counts and crash reports. Setup asks on the first launch. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
+
+The page source is strict TypeScript in `src/`. `npm run build` writes the `static/app.js` the server loads. Node is not required to run the server. Node 22 or newer is required to typecheck and rebuild that file.
+
+### Screenshots
+
+<figure>
+  <img alt="Crates view with an example library" src="docs/images/screenshot-home.png" width="100%">
+  <figcaption>Example data. Crates.</figcaption>
+</figure>
+
+<figure>
+  <img alt="Snapshots view: reviewing a restore before anything is written" src="docs/images/screenshot-backups.png" width="100%">
+  <figcaption>Example data. Snapshots, reviewing a restore before anything is written. The Serato 4.1.0 (build 4.1.0.1) line is the test fixture, not a detected install.</figcaption>
+</figure>
+
+<figure>
+  <img alt="Prepare space for gig prep" src="docs/images/screenshot-gig-prep.png" width="100%">
+  <figcaption>Example data. Prepare.</figcaption>
+</figure>
+
+## Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/architecture-dark.svg">
+  <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/architecture-dark.png">
+  <source type="image/svg+xml" srcset="docs/images/architecture-light.svg">
+  <img alt="The UI (static/app.js) talks over HTTP to server.py on 127.0.0.1. The safe-write layer (library.py, files.py, tags.py, snapshot_frames.py, snapshots.py, serato_web/completeness.py) writes the _Serato_ folder on every drive and saves to the snapshot store first." src="docs/images/architecture-light.png" width="100%">
+</picture>
+
+`desktop.py` opens a native window titled Serato Library. The window uses the system web view: WebView2 on Windows, WKWebView on macOS, and WebKitGTK or Qt WebKit on Linux. Chromium is not bundled. Color and type tokens live in `static/tokens.css`. The code reference is [docs/architecture.md](docs/architecture.md).
+
+## Run from source
+
+Quit Serato DJ Pro before a write.
+
+```bash
+python3 server.py
+```
+
+Open `http://127.0.0.1:8765`. The server uses the Python standard library. On macOS the library is `~/Library/Application Support/Serato/Library/master.sqlite`. On Windows it is `%LOCALAPPDATA%\Serato\Library\master.sqlite`. Stop the server with Ctrl-C.
 
 In VS Code, press F5. That launch runs `server.py`.
 
-## Desktop window
+### Desktop app
 
 ```bash
 python3 -m venv .venv
@@ -36,36 +98,39 @@ python3 -m venv .venv
 .venv/bin/python desktop.py
 ```
 
-The window loads the same page. Closing it stops the server. On Windows, use `.venv\Scripts\python` in place of `.venv/bin/python`.
+The app binds `127.0.0.1` on a free port and opens a window titled Serato Library. Close the window to quit. A second launch focuses that window. On Windows, use `.venv\Scripts\python`, and install the WebView2 runtime when Windows does not already have it. On macOS, also install `requirements-macos.txt` in that environment so WKWebView can load. On Linux, install WebKitGTK (GTK 3 and WebKit2), or Qt WebKit without Qt WebEngine. `SERATO_LIBRARY_NO_WINDOW=1` or `--no-window` skips the window.
 
-To build an unsigned app on the current operating system:
+A local unsigned build of the current operating system:
 
 ```bash
 .venv/bin/pip install -r requirements-build.txt
 .venv/bin/python -m PyInstaller serato-library.spec
 ```
 
-On macOS the app is `dist/Serato Library.app`. On Windows it is `dist/Serato Library/`. On Windows, use `.venv\Scripts\python` for both commands. Build on each system you want to ship.
-
-## GitHub
-
-GitHub Actions runs the test suite, audits the pinned requirements, and publishes unsigned desktop zips. The library server stays on `127.0.0.1`. GitHub Pages publishes the user guide only, as a static site. The developer guide is [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3) project board. Feature ideas live in [issues labelled feature-gap](https://github.com/mookiejones/serato-library-manager/issues?q=label%3Afeature-gap). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes.
-
-## Sharing
-
-Crash reports use `sentry-sdk`. Usage counts use the `posthog` package. Both stay off when their key is missing, and both stay off until you opt in. The variables are `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` (the host defaults to `https://us.i.posthog.com`). A release build reads those names from GitHub Actions secrets. The guide is [docs/github.md](docs/github.md). The server still starts when the packages are not installed. Sharing is then a no-op.
+Release disk images and the Windows installer come from GitHub Actions, not from this command.
 
 ## Tests
-
-Install the pinned packages, then run the suite from this directory. The suite imports `sentry-sdk` and `posthog`.
 
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m unittest discover -s tests -t . -v
 ```
 
-The tests build a temporary database. They do not open the live Serato library. Settings and logs for the run stay in a temporary directory.
+The suite imports `sentry-sdk` and `posthog`. It builds a temporary database. It does not open the live Serato library.
 
-## Documentation
+CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/workflows/ci.yml): Ubuntu on Python 3.12 and 3.14, and Windows on Python 3.12. The Windows job also runs `python scripts/release_bundle.py check-tag` under bash with `RELEASE_TAG` set to `v0.0.0`.
 
-The user guide is [docs/index.md](docs/index.md). The published copy is [https://mookiejones.github.io/serato-library-manager/](https://mookiejones.github.io/serato-library-manager/). The code reference is [docs/architecture.md](docs/architecture.md). Related-track storage is [docs/related-tracks.md](docs/related-tracks.md). What the app can send is [PRIVACY.md](PRIVACY.md). Functions in `server.py`, `desktop.py`, `library.py`, `files.py`, `related.py`, `rekordbox.py`, `gig_check.py`, `snapshots.py`, `tags.py`, `telemetry.py`, `app_config.py`, and `app_log.py` use Google-style docstrings.
+## Supported versions
+
+| | |
+| --- | --- |
+| App | `1.1.0` in source (`app_config.APP_VERSION`). Latest GitHub Release: v0.1.1. |
+| Python | 3.12 and 3.14 on Ubuntu CI. 3.12 on Windows CI. Frozen builds embed 3.12. |
+| OS | macOS and Windows for the app. Linux runs the test suite and is not a published build. |
+| Serato | Serato DJ Pro. Writes and restores run when the version is a dotted number below 5. Serato 5 can be snapshotted and read. Writes and restores stay off while Lucid and Flexible beatgrid storage is not verified. An unknown version blocks writes. |
+
+## More
+
+The user guide is [docs/index.md](docs/index.md) and [the published site](https://mookiejones.github.io/serato-library-manager/). Contributing is [CONTRIBUTING.md](CONTRIBUTING.md). Security reports are [SECURITY.md](SECURITY.md). Actions and releases are [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3).
+
+This repository has no `LICENSE` file. GitHub reports the license as not specified.

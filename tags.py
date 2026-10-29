@@ -1,10 +1,12 @@
 """Read Serato cue points, loops, flips, and beatgrids from audio files.
 
-Serato stores these in GEOB frames (Markers2 and BeatGrid), not in the
-library database. Reading never rewrites a file. ``copy_serato_geob``
-copies existing Serato GEOB frames onto another file when that file has a
-plain ID3v2.3 tag, or when it is an MP3 with no tag yet. Other frames and
-the audio bytes stay as they are. Any other layout is left untouched.
+Serato stores these outside the library database. MP3, AIFF, and WAV keep
+them in ID3 GEOB frames. FLAC keeps them in Vorbis comments. M4A and MP4
+keep them in freeform atoms. Reading never rewrites a file.
+``copy_serato_geob`` copies existing Serato GEOB frames onto another file
+when that file has a plain ID3v2.3 tag, or when it is an MP3 with no tag
+yet. Other frames and the audio bytes stay as they are. Any other layout
+is left untouched.
 """
 
 from __future__ import annotations
@@ -12,12 +14,15 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import logging
 import os
 import shutil
 import struct
 import tempfile
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import BinaryIO, NotRequired, TypedDict
+
+logger = logging.getLogger("serato.tags")
 
 
 class Cue(TypedDict):
@@ -96,8 +101,14 @@ class CueCopy(TypedDict):
 def read_serato_tags(path: str | None) -> SeratoTags:
     """Read Serato cue, loop, flip, and beatgrid data from an audio file.
 
-    The read covers the first 2,000,000 bytes and, for a longer file, the last
-    512,000 bytes. A missing path or an unreadable file returns an empty result.
+    ID3 is taken from the first 2,000,000 bytes and, for a longer file, the
+    last 512,000 bytes, then parsed by ``serato_tags_from_regions``. FLAC
+    metadata blocks are walked from the open file, including a Vorbis
+    comment that follows album art. That walk has no byte cap. An M4A, MP4,
+    AAC, or ALAC file, or any file that starts with ``ftyp``, is walked by
+    atom size, so a ``moov`` after the audio is read without loading the
+    audio. A missing path or an unreadable file returns an empty result.
+    The file is not rewritten.
 
     Args:
         path: Filesystem path of the audio file, or None.
@@ -129,22 +140,23 @@ def read_serato_tags(path: str | None) -> SeratoTags:
         # Cues sit in the tag header. The tail covers ID3 written at the end of a WAV.
         size = file.stat().st_size
         with file.open("rb") as handle:
-            head = handle.read(min(size, 2_000_000))
+            head = handle.read(min(size, _HEAD_READ))
             tail = b""
-            if size > 2_000_000:
-                handle.seek(max(0, size - 512_000))
-                tail = handle.read(512_000)
+            if size > _HEAD_READ:
+                handle.seek(max(0, size - _TAIL_READ))
+                tail = handle.read(_TAIL_READ)
+            container = _container_frames(handle, file, size, head)
     except OSError:
         return empty
-
-    return serato_tags_from_regions(head, tail)
+    return _apply_frames(serato_tags_from_regions(head, tail), container)
 
 
 def serato_tags_from_regions(head: bytes, tail: bytes = b"") -> SeratoTags:
     """Parse Serato frames from bytes already read from a file.
 
     ``read_serato_tags`` uses this after it has opened the file. An export
-    can open the file once, keep those bytes, and parse them here.
+    can open the file once, keep those bytes, and parse them here. FLAC and
+    MP4 blocks are not in these windows. Those are read from the open file.
 
     Args:
         head: The first bytes of the file.
@@ -153,7 +165,18 @@ def serato_tags_from_regions(head: bytes, tail: bytes = b"") -> SeratoTags:
     Returns:
         The same dict ``read_serato_tags`` returns.
     """
-    frames = _geob_frames(head) + _geob_frames(tail)
+    return _tags_from_frames(_geob_frames(head) + _geob_frames(tail))
+
+
+def _tags_from_frames(frames: list[tuple[str, bytes]]) -> SeratoTags:
+    """Turn Markers2 and BeatGrid payloads into the public tag dict.
+
+    Args:
+        frames: Frame name and payload pairs, ID3 or container.
+
+    Returns:
+        Cues, loops, flips, beatgrid, beatgrid_warning, and found.
+    """
     cues: list[Cue] = []
     loops: list[Loop] = []
     flips: list[Flip] = []
@@ -185,6 +208,41 @@ def serato_tags_from_regions(head: bytes, tail: bytes = b"") -> SeratoTags:
         "beatgrid": beatgrid,
         "beatgrid_warning": beatgrid_warning,
         "found": found,
+    }
+
+
+def _apply_frames(parsed: SeratoTags, frames: list[tuple[str, bytes]]) -> SeratoTags:
+    """Add container frames to the ID3 result.
+
+    Args:
+        parsed: Tags already taken from the ID3 windows.
+        frames: Markers2 and BeatGrid payloads from FLAC or MP4.
+
+    Returns:
+        The combined dict. An empty container list leaves ``parsed`` as it was.
+        A container beatgrid replaces the ID3 one, matching a single pass
+        that sees the ID3 frames first.
+    """
+    if not frames:
+        return parsed
+    extra = _tags_from_frames(_unique_frames(frames))
+    cues = [*parsed["cues"], *extra["cues"]]
+    loops = [*parsed["loops"], *extra["loops"]]
+    flips = [*parsed["flips"], *extra["flips"]]
+    cues.sort(key=lambda item: (item["index"], item["start_ms"]))
+    loops.sort(key=lambda item: (item["index"], item["start_ms"]))
+    beatgrid = parsed["beatgrid"]
+    warning = parsed.get("beatgrid_warning")
+    if extra["beatgrid"] or extra.get("beatgrid_warning"):
+        beatgrid = extra["beatgrid"]
+        warning = extra.get("beatgrid_warning")
+    return {
+        "cues": cues,
+        "loops": loops,
+        "flips": flips,
+        "beatgrid": beatgrid,
+        "beatgrid_warning": warning,
+        "found": bool(parsed["found"] or extra["found"]),
     }
 
 
@@ -331,6 +389,366 @@ def _decode_text(encoding: int, raw: bytes) -> str:
     return raw.decode("utf-8", "replace").rstrip("\x00")
 
 
+_B64_ALPHABET = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
+_ENVELOPE_MARK = b"application/octet-stream\x00\x00"
+_SERATO_MEAN = b"com.serato.dj"
+_SERATO_FRAME_NAMES = frozenset({"Serato Markers2", "Serato BeatGrid"})
+_HEAD_READ = 2_000_000
+_TAIL_READ = 512_000
+
+
+def _unique_frames(items: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    """Drop repeated container frames.
+
+    The same atom can sit in both the head window and the moov body.
+
+    Args:
+        items: Frame name and payload pairs.
+
+    Returns:
+        The first copy of each pair, in the order they were found.
+    """
+    seen: set[tuple[str, bytes]] = set()
+    unique: list[tuple[str, bytes]] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique
+
+
+def _decode_serato_base64(raw: bytes) -> bytes | None:
+    """Decode Serato base64 that omits padding and may contain newlines.
+
+    A length of 4n+1 is not a valid group, so one alphabet character is
+    added before the standard ``=`` pad. Characters outside the alphabet,
+    including newlines and null padding, are ignored.
+
+    Args:
+        raw: Base64 text, possibly wrapped and unpadded.
+
+    Returns:
+        The decoded bytes, or None when nothing decodes.
+    """
+    cleaned = bytes(byte for byte in raw if byte in _B64_ALPHABET)
+    if not cleaned:
+        return None
+    while len(cleaned) % 4 == 1:
+        cleaned += b"A"
+    pad = (-len(cleaned)) % 4
+    try:
+        return base64.b64decode(cleaned + (b"=" * pad), validate=False)
+    except binascii.Error:
+        return None
+
+
+def _unwrap_serato_envelope(raw: bytes) -> tuple[str, bytes] | None:
+    """Split one FLAC or MP4 Serato value into a frame name and payload.
+
+    The value is base64 of ``application/octet-stream``, two nulls, a
+    null-terminated name such as ``Serato Markers2``, and the payload the
+    GEOB parser already accepts.
+
+    Args:
+        raw: The Vorbis comment value or the MP4 data bytes.
+
+    Returns:
+        The frame name and payload for Markers2 or BeatGrid. Other Serato
+        blocks, and values that do not decode, return None.
+    """
+    decoded = _decode_serato_base64(raw)
+    if not decoded or not decoded.startswith(_ENVELOPE_MARK):
+        return None
+    name, sep, payload = decoded[len(_ENVELOPE_MARK):].partition(b"\x00")
+    if not sep or not name:
+        return None
+    label = name.decode("utf-8", "replace")
+    if label not in _SERATO_FRAME_NAMES:
+        return None
+    return label, payload
+
+
+_MP4_SUFFIXES = frozenset({".m4a", ".mp4", ".aac", ".alac"})
+
+
+def _is_mp4_family(path: Path, head: bytes) -> bool:
+    """Return whether the open file should be scanned for MP4 atoms.
+
+    Args:
+        path: Filesystem path. The suffix is compared case-insensitively.
+        head: Leading bytes. An ``ftyp`` atom counts even when the suffix
+            is something else. An MP3 does not.
+
+    Returns:
+        True for ``.m4a``, ``.mp4``, ``.aac``, ``.alac``, or an ``ftyp`` atom.
+    """
+    if path.suffix.lower() in _MP4_SUFFIXES:
+        return True
+    return len(head) >= 8 and head[4:8] == b"ftyp"
+
+
+def _container_frames(
+    handle: BinaryIO,
+    path: Path,
+    size: int,
+    head: bytes,
+) -> list[tuple[str, bytes]]:
+    """Collect Markers2 and BeatGrid payloads stored outside ID3.
+
+    The file is still open. FLAC blocks are visited by seeking to each
+    header. MP4 atoms are visited only for an MP4-family file.
+
+    Args:
+        handle: Open audio file. The walks seek within it.
+        path: Filesystem path, used for the suffix check.
+        size: File size in bytes.
+        head: Leading bytes already read.
+
+    Returns:
+        Frame name and payload pairs. The file is not written.
+    """
+    frames: list[tuple[str, bytes]] = []
+    if head.startswith(b"fLaC") or path.suffix.lower() == ".flac":
+        frames.extend(_flac_serato_frames(handle, size))
+    if _is_mp4_family(path, head):
+        frames.extend(_mp4_moov_frames(handle, size))
+    return frames
+
+
+def _flac_serato_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
+    """Read Serato Vorbis comments by walking every FLAC metadata block.
+
+    Each block header is 4 bytes: a type, a last-block flag, and a 24-bit
+    length. The body of a picture or padding block is skipped with seek.
+    A Vorbis comment is read in full. There is no byte cap. A length that
+    would run past the end of the file stops the walk.
+
+    Args:
+        handle: Open file positioned anywhere.
+        size: File size in bytes.
+
+    Returns:
+        Frame name and payload pairs. A file that does not start with
+        ``fLaC`` contributes nothing.
+    """
+    if size < 8:
+        return []
+    handle.seek(0)
+    if handle.read(4) != b"fLaC":
+        return []
+    frames: list[tuple[str, bytes]] = []
+    pos = 4
+    while pos + 4 <= size:
+        handle.seek(pos)
+        header = handle.read(4)
+        if len(header) < 4:
+            break
+        block_type = header[0] & 0x7F
+        is_last = bool(header[0] & 0x80)
+        length = int.from_bytes(header[1:4], "big")
+        data_at = pos + 4
+        if length > size - data_at:
+            break
+        if block_type == 127:
+            break
+        if block_type == 4:
+            handle.seek(data_at)
+            block = handle.read(length)
+            if len(block) != length:
+                break
+            frames.extend(_vorbis_comment_frames(block))
+        if is_last:
+            break
+        next_pos = data_at + length
+        if next_pos <= pos:
+            break
+        pos = next_pos
+    return frames
+
+
+def _vorbis_comment_frames(block: bytes) -> list[tuple[str, bytes]]:
+    """Read ``SERATO_*`` fields from one Vorbis comment block.
+
+    Lengths are little-endian, which is the Vorbis comment rule.
+
+    Args:
+        block: Comment block bytes, vendor string included.
+
+    Returns:
+        Frame name and payload pairs. A short or truncated block is empty.
+    """
+    if len(block) < 8:
+        return []
+    vendor_len = int.from_bytes(block[0:4], "little")
+    if vendor_len > len(block) - 8:
+        return []
+    pos = 4 + vendor_len
+    count = int.from_bytes(block[pos:pos + 4], "little")
+    pos += 4
+    frames: list[tuple[str, bytes]] = []
+    # Each step consumes the 4-byte length, so a hostile count stops at the
+    # end of the block instead of looping forever.
+    for _ in range(min(count, len(block))):
+        if pos + 4 > len(block):
+            break
+        comment_len = int.from_bytes(block[pos:pos + 4], "little")
+        pos += 4
+        if comment_len > len(block) - pos:
+            break
+        comment = block[pos:pos + comment_len]
+        pos += comment_len
+        key, sep, value = comment.partition(b"=")
+        if not sep:
+            continue
+        if not key.decode("utf-8", "replace").upper().startswith("SERATO_"):
+            continue
+        unwrapped = _unwrap_serato_envelope(value)
+        if unwrapped is not None:
+            frames.append(unwrapped)
+    return frames
+
+
+def _mp4_moov_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
+    """Read Serato atoms from each top-level ``moov``, skipping audio.
+
+    Args:
+        handle: Open MP4 file.
+        size: File size in bytes.
+
+    Returns:
+        Frame name and payload pairs. ``mdat`` is skipped by its declared
+        size and is not read into memory.
+    """
+    frames: list[tuple[str, bytes]] = []
+    pos = 0
+    for _ in range(64):
+        if pos + 8 > size:
+            break
+        handle.seek(pos)
+        header = handle.read(8)
+        if len(header) < 8:
+            break
+        atom_size = int.from_bytes(header[:4], "big")
+        kind = header[4:8]
+        header_len = 8
+        if atom_size == 1:
+            extended = handle.read(8)
+            if len(extended) < 8:
+                break
+            atom_size = int.from_bytes(extended, "big")
+            header_len = 16
+        elif atom_size == 0:
+            atom_size = size - pos
+        if atom_size < header_len or pos + atom_size > size:
+            break
+        if kind == b"moov":
+            body_len = atom_size - header_len
+            if body_len > _TAG_LIMIT:
+                logger.warning(
+                    "An MP4 moov is larger than %s bytes. Serato markers past that point were not read.",
+                    _TAG_LIMIT,
+                )
+                body_len = _TAG_LIMIT
+            frames.extend(_mp4_serato_frames(handle.read(body_len)))
+        pos += atom_size
+    return frames
+
+
+def _mp4_serato_frames(blob: bytes) -> list[tuple[str, bytes]]:
+    """Find ``----:com.serato.dj`` atoms in a byte window.
+
+    Args:
+        blob: Bytes that may contain a freeform atom. The window does not
+            have to start on an atom boundary.
+
+    Returns:
+        Frame name and payload pairs.
+    """
+    frames: list[tuple[str, bytes]] = []
+    start = 0
+    while True:
+        index = blob.find(_SERATO_MEAN, start)
+        if index < 0:
+            break
+        start = index + len(_SERATO_MEAN)
+        parsed = _mp4_freeform_at(blob, index)
+        if parsed is not None:
+            frames.append(parsed)
+    return frames
+
+
+def _mp4_freeform_at(blob: bytes, index: int) -> tuple[str, bytes] | None:
+    """Parse the freeform atom whose mean string starts at ``index``.
+
+    The layout is a 32-bit ``----`` atom, then ``mean``, ``name``, and
+    ``data``. ``mean`` and ``name`` start with a 4-byte version and flags.
+    ``data`` starts with a 4-byte type and a 4-byte locale.
+
+    Args:
+        blob: Bytes containing the atom.
+        index: Index of ``com.serato.dj``.
+
+    Returns:
+        The frame name and payload, or None when the bytes around the mean
+        are not a Serato freeform atom.
+    """
+    # [size][----][size][mean][flags]com.serato.dj
+    if index < 20 or blob[index - 8:index - 4] != b"mean":
+        return None
+    if blob[index - 16:index - 12] != b"----":
+        return None
+    mean_size = int.from_bytes(blob[index - 12:index - 8], "big")
+    mean_start = index - 12
+    if not 25 <= mean_size <= 64 or mean_start + mean_size > len(blob):
+        return None
+    mean_text = blob[index:mean_start + mean_size].split(b"\x00", 1)[0]
+    if mean_text != _SERATO_MEAN:
+        return None
+    box_start = index - 20
+    box_size = int.from_bytes(blob[box_start:box_start + 4], "big")
+    if box_size < 8 or box_start + box_size > len(blob):
+        return None
+    data: bytes | None = None
+    for kind, child in _mp4_atoms(blob[box_start + 8:box_start + box_size]):
+        if kind == b"data" and len(child) >= 8:
+            data = child[8:]
+            break
+    if data is None:
+        return None
+    return _unwrap_serato_envelope(data)
+
+
+def _mp4_atoms(buf: bytes) -> list[tuple[bytes, bytes]]:
+    """Split a buffer of sibling MP4 atoms.
+
+    Args:
+        buf: Concatenated atoms. A 32-bit size of 1 uses the 64-bit size
+            that follows the type.
+
+    Returns:
+        Type and body pairs. A truncated atom ends the list.
+    """
+    atoms: list[tuple[bytes, bytes]] = []
+    pos = 0
+    while pos + 8 <= len(buf):
+        atom_size = int.from_bytes(buf[pos:pos + 4], "big")
+        kind = buf[pos + 4:pos + 8]
+        header_len = 8
+        if atom_size == 1:
+            if pos + 16 > len(buf):
+                break
+            atom_size = int.from_bytes(buf[pos + 8:pos + 16], "big")
+            header_len = 16
+        if atom_size < header_len or pos + atom_size > len(buf):
+            break
+        atoms.append((kind, buf[pos + header_len:pos + atom_size]))
+        pos += atom_size
+    return atoms
+
+
 def _parse_markers2(payload: bytes) -> MarkerEntries:
     """Parse a Serato Markers2 payload into cues, loops, and flips.
 
@@ -343,17 +761,8 @@ def _parse_markers2(payload: bytes) -> MarkerEntries:
     result: MarkerEntries = {"cues": [], "loops": [], "flips": []}
     if len(payload) < 2 or payload[:2] != b"\x01\x01":
         return result
-    encoded = payload[2:].replace(b"\n", b"").replace(b"\x00", b"")
-    if not encoded:
-        return result
-    # Serato omits base64 padding. A length of 4n+1 is not a valid group,
-    # so one alphabet character is added before the standard '=' pad.
-    while len(encoded) % 4 == 1:
-        encoded += b"A"
-    pad = (-len(encoded)) % 4
-    try:
-        decoded = base64.b64decode(encoded + (b"=" * pad), validate=False)
-    except binascii.Error:
+    decoded = _decode_serato_base64(payload[2:])
+    if not decoded:
         return result
     if decoded.startswith(b"\x01\x01"):
         decoded = decoded[2:]
@@ -500,7 +909,7 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
         payload: BeatGrid bytes. Version byte 1 is accepted. More than 4096 markers is rejected.
 
     Returns:
-        Marker dicts. Earlier markers store a beat count. The last marker stores BPM. A payload shorter than the declared marker count is empty.
+        Marker dicts. Earlier markers store a beat count. The last marker stores BPM, rounded to two decimal places. Positions keep the stored float so a later BPM calculation is not based on a three-decimal rounding. A payload shorter than the declared marker count is empty.
     """
     # Version byte 1 is the only layout this reader accepts. The marker
     # count is a big-endian integer at bytes 2-5. Byte 1 is unused.
@@ -521,11 +930,11 @@ def _parse_beatgrid(payload: bytes) -> list[BeatMarker]:
         if index == count - 1:
             bpm = struct.unpack(">f", payload[pos:pos + 4])[0]
             pos += 4
-            markers.append({"position": round(position, 3), "bpm": round(bpm, 2)})
+            markers.append({"position": position, "bpm": round(bpm, 2)})
         else:
             beats = int.from_bytes(payload[pos:pos + 4], "big")
             pos += 4
-            markers.append({"position": round(position, 3), "beats": beats})
+            markers.append({"position": position, "beats": beats})
     return markers
 
 

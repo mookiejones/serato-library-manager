@@ -12,12 +12,14 @@ import io
 import struct
 import unicodedata
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree
 
 import app_config
 import library
 import rekordbox
+import server
 import tags
 from library import LibraryError
 from tests.fixture import ROOT, TempLibrary, open_database
@@ -194,6 +196,32 @@ def _node(tree: dict[str, object], name: str) -> dict[str, object] | None:
             if found is not None:
                 return found
     return None
+
+
+def _position_mark_attributes(xml: str, track_name: str) -> list[dict[str, str]]:
+    """Read POSITION_MARK attributes for one track from rekordbox XML.
+
+    Args:
+        xml: A DJ_PLAYLISTS document.
+        track_name: TRACK Name to select.
+
+    Returns:
+        One attribute dict per POSITION_MARK, in document order.
+
+    Raises:
+        AssertionError: If the collection or the track is missing.
+    """
+    document = ElementTree.fromstring(xml.encode("utf-8"))
+    collection = document.find("COLLECTION")
+    if collection is None:
+        raise AssertionError("COLLECTION")
+    track = next(
+        (item for item in collection.findall("TRACK") if item.get("Name") == track_name),
+        None,
+    )
+    if track is None:
+        raise AssertionError(track_name)
+    return [dict(mark.attrib) for mark in track.findall("POSITION_MARK")]
 
 
 def _counts_match(node: dict[str, object]) -> None:
@@ -387,6 +415,29 @@ class MarkerConversionTests(unittest.TestCase):
         )
         self.assertEqual(huge[0]["Bpm"], "90.00")
         self.assertEqual(rekordbox.tempo_entries([]), [])
+
+    def test_segment_bpm_keeps_the_stored_position(self) -> None:
+        """Divide the span by the stored float, not by a three-decimal rounding.
+
+        Four beats across a position that rounds to 2.000 seconds is 120.00
+        only after that rounding. The stored float is slightly longer, so the
+        written BPM is lower.
+
+        Returns:
+            None. The test fails if the BPM matches the rounded span.
+        """
+        payload = bytes([1, 0]) + (2).to_bytes(4, "big")
+        payload += struct.pack(">f", 0.0) + (4).to_bytes(4, "big")
+        payload += struct.pack(">f", 2.0004) + struct.pack(">f", 100.0)
+        markers = tags._parse_beatgrid(payload)
+        end = float(markers[1]["position"])
+        self.assertNotEqual(round(end, 3), end)
+        entries = rekordbox.tempo_entries(markers)
+        full = f"{(4 * 60.0 / end):.2f}"
+        rounded = f"{(4 * 60.0 / round(end, 3)):.2f}"
+        self.assertNotEqual(full, rounded)
+        self.assertEqual(entries[0]["Bpm"], full)
+        self.assertEqual(entries[0]["Bpm"], "119.98")
 
 
 class ExportTests(unittest.TestCase):
@@ -630,6 +681,126 @@ class ExportTests(unittest.TestCase):
             self.assertEqual(_node(prepare_root, "Prepare")["type"], "1")
             self.assertEqual(prepare["tracks"], [])
 
+    def test_empty_crate_entries_are_zero(self) -> None:
+        """Write Entries="0" for a crate that has no tracks.
+
+        The playlist node is still present. Its attribute matches the empty
+        child list.
+
+        Returns:
+            None. The test fails if the attribute is missing or not zero.
+        """
+        with TempLibrary():
+            created = library.crate_action({"action": "create", "name": "Empty"})
+            xml, _report = rekordbox.export_rekordbox("Serato Library", int(created["id"]))
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            playlists = document.find("PLAYLISTS")
+            assert playlists is not None
+            root = playlists.find("NODE")
+            assert root is not None
+            crate = root.find("NODE")
+            assert crate is not None
+            self.assertEqual(crate.get("Name"), "Empty")
+            self.assertEqual(crate.get("Type"), "1")
+            self.assertEqual(crate.get("Entries"), "0")
+            self.assertEqual(list(crate), [])
+
+    def test_xml_special_characters_round_trip(self) -> None:
+        """Keep & < > \" and ' in a title and an artist.
+
+        ElementTree escapes them in the file. Parsing the file returns the
+        original characters.
+
+        Returns:
+            None. The test fails if a character is dropped or double-escaped.
+        """
+        title = 'Tom & Jerry <3> "ok" \'yo\''
+        artist = "A & B <C> \"D\" 'E'"
+        with TempLibrary():
+            with open_database(library.MASTER) as conn:
+                conn.execute(
+                    "UPDATE asset SET name = ?, artist = ? WHERE id = 1",
+                    (title, artist),
+                )
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            self.assertIn("&amp;", xml)
+            self.assertIn("&lt;", xml)
+            self.assertIn("&gt;", xml)
+            self.assertIn("&quot;", xml)
+            self.assertIn("'yo'", xml)
+            self.assertIn("'E'", xml)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            match = next(track for track in tracks if track["track_id"] == "1")
+            self.assertEqual(match["name"], title)
+            self.assertEqual(match["artist"], artist)
+            again = ElementTree.fromstring(xml.encode("utf-8"))
+            self.assertEqual(
+                rekordbox.parse_rekordbox(ElementTree.tostring(again, encoding="unicode")),
+                parsed,
+            )
+
+    def test_a_track_without_cues_or_a_grid_has_no_marker_nodes(self) -> None:
+        """Omit POSITION_MARK and TEMPO when the file has neither.
+
+        The track stays in the collection. The audio file is plain bytes
+        with no Serato tag.
+
+        Returns:
+            None. The test fails if either child element is written.
+        """
+        with TempLibrary() as temp:
+            audio = temp.root / "plain.wav"
+            audio.write_bytes(b"not a tag")
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    """
+                    UPDATE asset
+                    SET name = 'Bare', artist = 'None', portable_id = ?, file_name = 'plain.wav'
+                    WHERE id = 2
+                    """,
+                    (str(audio),),
+                )
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            bare = next(item for item in collection.findall("TRACK") if item.get("Name") == "Bare")
+            self.assertEqual(bare.findall("POSITION_MARK"), [])
+            self.assertEqual(bare.findall("TEMPO"), [])
+
+    def test_controls_and_surrogates_are_stripped_from_title_and_artist(self) -> None:
+        """Drop C0 controls and unpaired surrogates from the track name fields.
+
+        SQLite refuses a lone surrogate, so the row is passed to the track
+        builder. The characters that remain are the visible text.
+
+        Returns:
+            None. The test fails if a control or a surrogate is still in the attribute.
+        """
+        element = rekordbox._track_element(
+            {
+                "id": 9,
+                "portable_id": "Music/plain.mp3",
+                "name": "A\x01&\x00B\ud800C",
+                "artist": "DJ\x0b\udfff <Band>",
+            },
+            memory_cues=False,
+            hot_loops=False,
+            key_notation="asis",
+            stats={},
+            unicode_names=[],
+            unreadable_names=[],
+            invalid_names=[],
+            folder_cache={},
+        )
+        assert element is not None
+        self.assertEqual(element.get("Name"), "A&BC")
+        self.assertEqual(element.get("Artist"), "DJ <Band>")
+        self.assertNotIn("\ud800", element.get("Name") or "")
+        self.assertNotIn("\udfff", element.get("Artist") or "")
+
     def test_empty_library_bpm_uses_the_beatgrid(self) -> None:
         """Fill AverageBpm from the beatgrid when the library BPM is empty.
 
@@ -761,6 +932,190 @@ class ExportTests(unittest.TestCase):
         self.assertIn("outside slots 0–7", page)
         self.assertIn("treated as a downbeat", page)
         self.assertIn("26 ms earlier", page)
+
+    def test_page_renders_hot_loops(self) -> None:
+        """Show Hot loops, off, beside Memory cues, with its help line.
+
+        Reads the page and the user-guide export section. No server is
+        started. The checkbox has no checked attribute. Cue and loop
+        attributes are checked on the XML elements, not by scanning the
+        script source for a query string.
+
+        Returns:
+            None. The test fails if the label or the help line is missing.
+        """
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        guide = (ROOT / "docs" / "guide" / "playlists.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        page = _HotLoopsMarkup()
+        page.feed(html)
+        page.close()
+        checkbox = page.checkbox
+        self.assertIsNotNone(checkbox)
+        assert checkbox is not None
+        self.assertEqual(checkbox.get("type"), "checkbox")
+        self.assertNotIn("checked", checkbox)
+        self.assertEqual(checkbox.get("aria-describedby"), "rekordbox-hot-loops-help")
+        self.assertEqual(page.label, "Hot loops")
+        self.assertEqual(page.help, "Uses a free hot-cue pad")
+        self.assertLess(html.index('id="rekordbox-memory"'), html.index('id="rekordbox-hot-loops"'))
+        self.assertLess(html.index('id="rekordbox-hot-loops"'), html.index('id="rekordbox-key"'))
+        self.assertIn("Hot loops", guide)
+        self.assertIn("Uses a free hot-cue pad", guide)
+        self.assertIn("settings.json", guide)
+        self.assertIn("Uses a free hot-cue pad", readme)
+        self.assertNotIn("localStorage", script)
+
+    def test_hot_loop_marks_are_position_mark_attributes(self) -> None:
+        """Read cue and loop fields from POSITION_MARK elements.
+
+        Pad 0 already has a hot cue, and pads 1 through 7 are free.
+        With hot loops on, the loop on pad 0 stays a memory loop
+        (``Num="-1"``) and the loop on pad 2 uses that pad. A loop
+        outside slots 0 through 7 stays a memory loop too. With hot
+        loops off, every loop is ``Num="-1"``. The attributes come from
+        ``xml.etree.ElementTree``, not from a search of the XML text.
+
+        Returns:
+            None. The test fails if a cue or loop attribute differs.
+        """
+        with TempLibrary() as temp:
+            audio = temp.root / "loops.wav"
+            _write_audio(
+                audio,
+                _cue_payload(
+                    [(0, 1000, b"\xCC\x00\x00", "Pad")],
+                    [
+                        (0, 2000, 3000, b"\x00\xAA\x00", "Taken"),
+                        (2, 4000, 5000, b"\x00\x00\xCC", "Free"),
+                        (9, 6000, 7000, b"\xFF\xFF\xFF", "Outside"),
+                    ],
+                ),
+            )
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET name = ?, portable_id = ?, file_name = ? WHERE id = 1",
+                    ("Loops", str(audio), audio.name),
+                )
+            on_xml, _on_report = rekordbox.export_rekordbox(
+                "Serato Library", None, memory_cues=True, hot_loops=True
+            )
+            off_xml, _off_report = rekordbox.export_rekordbox(
+                "Serato Library", None, memory_cues=True, hot_loops=False
+            )
+        cue = {
+            "Name": "Pad",
+            "Type": "0",
+            "Start": "1.000",
+            "Num": "0",
+            "Red": "204",
+            "Green": "0",
+            "Blue": "0",
+        }
+        memory = {**cue, "Num": "-1"}
+        taken = {
+            "Name": "Taken",
+            "Type": "4",
+            "Start": "2.000",
+            "Num": "-1",
+            "Red": "0",
+            "Green": "170",
+            "Blue": "0",
+            "End": "3.000",
+        }
+        free = {
+            "Name": "Free",
+            "Type": "4",
+            "Start": "4.000",
+            "Num": "2",
+            "Red": "0",
+            "Green": "0",
+            "Blue": "204",
+            "End": "5.000",
+        }
+        outside = {
+            "Name": "Outside",
+            "Type": "4",
+            "Start": "6.000",
+            "Num": "-1",
+            "Red": "255",
+            "Green": "255",
+            "Blue": "255",
+            "End": "7.000",
+        }
+        self.assertEqual(
+            _position_mark_attributes(on_xml, "Loops"),
+            [cue, memory, taken, free, outside],
+        )
+        self.assertEqual(
+            _position_mark_attributes(off_xml, "Loops"),
+            [cue, memory, taken, {**free, "Num": "-1"}, outside],
+        )
+
+
+class _HotLoopsMarkup(HTMLParser):
+    """Collect the Hot loops checkbox, its label, and its help line."""
+
+    def __init__(self) -> None:
+        """Start with no control captured.
+
+        Returns:
+            None.
+        """
+        super().__init__()
+        self.checkbox: dict[str, str | None] | None = None
+        self.label = ""
+        self.help = ""
+        self._label_depth = 0
+        self._capture_at = 0
+        self._label_parts: list[str] = []
+        self._help_parts: list[str] = []
+        self._in_help = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Record the checkbox and the start of its label or help line.
+
+        Args:
+            tag: Element name.
+            attrs: Attribute pairs. A boolean attribute has value None.
+        """
+        attributes = dict(attrs)
+        if tag == "label":
+            self._label_depth += 1
+        if tag == "input" and attributes.get("id") == "rekordbox-hot-loops":
+            self.checkbox = attributes
+            self._capture_at = self._label_depth
+            self._label_parts = []
+        if attributes.get("id") == "rekordbox-hot-loops-help":
+            self._in_help = True
+            self._help_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        """Leave the label or the help line.
+
+        Args:
+            tag: Element name.
+        """
+        if tag == "label" and self._capture_at == self._label_depth and self._capture_at:
+            self.label = " ".join("".join(self._label_parts).split())
+            self._capture_at = 0
+        if tag == "label" and self._label_depth:
+            self._label_depth -= 1
+        if self._in_help:
+            self.help = " ".join("".join(self._help_parts).split())
+            self._in_help = False
+
+    def handle_data(self, data: str) -> None:
+        """Keep the label words and the help line.
+
+        Args:
+            data: Text node.
+        """
+        if self._capture_at:
+            self._label_parts.append(data)
+        if self._in_help:
+            self._help_parts.append(data)
 
 
 def _cue_payload(cues: list[tuple[int, int, bytes, str]], loops: list[tuple[int, int, int, bytes, str]] | None = None) -> bytes:
@@ -1224,6 +1579,7 @@ class RoundTripChecklistTests(unittest.TestCase):
             stats=stats,
             unicode_names=names,
             unreadable_names=[],
+            invalid_names=[],
             folder_cache={},
         )
         self.assertIsNone(skipped)
@@ -1360,6 +1716,239 @@ class RoundTripChecklistTests(unittest.TestCase):
         )
         self.assertEqual([item["Battito"] for item in tempos], ["1", "3"])
         self.assertEqual(tempos[0]["Bpm"], "120.00")
+
+    def test_a_nan_beatgrid_marker_is_skipped_and_counted(self) -> None:
+        """Skip a non-finite marker instead of aborting the export.
+
+        The first marker is NaN. The marker at 1 second is still a TEMPO.
+        Infinity is left out too. A file that stores the same NaN marker
+        still produces XML, and the loss report counts the skip.
+
+        Returns:
+            None. The test fails if tempo_entries raises or the count is missing.
+        """
+        stats: dict[str, int] = {}
+        entries = rekordbox.tempo_entries(
+            [
+                {"position": float("nan"), "beats": 4},
+                {"position": 1.0, "bpm": 120.0},
+            ],
+            stats=stats,
+        )
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["Bpm"], "120.00")
+        self.assertEqual(rekordbox.position_ms(entries[0]["Inizio"]), 1000)
+        self.assertEqual(stats["grid_nonfinite"], 1)
+        inf_stats: dict[str, int] = {}
+        self.assertEqual(
+            rekordbox.tempo_entries([{"position": float("inf"), "bpm": 120.0}], stats=inf_stats),
+            [],
+        )
+        self.assertEqual(inf_stats["grid_nonfinite"], 1)
+        report = rekordbox._loss_report({"grid_nonfinite": 1}, True, False, "asis")
+        self.assertIn("not a real number", " ".join(report))
+        with TempLibrary() as temp:
+            audio = temp.root / "nan-grid.wav"
+            _id3(audio, [_geob("Serato BeatGrid", _beatgrid([(float("nan"), 4), (1.0, 120.0)]))])
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'nan-grid.wav', name = 'Nan grid' WHERE id = 1",
+                    (str(audio),),
+                )
+            xml, exported = rekordbox.export_rekordbox("Serato Library", None)
+            parsed = rekordbox.parse_rekordbox(xml)
+            tracks = parsed["tracks"]
+            assert isinstance(tracks, list)
+            grid = next(track for track in tracks if track["name"] == "Nan grid")
+            tempos = grid["tempos"]
+            assert isinstance(tempos, list)
+            self.assertEqual(len(tempos), 1)
+            self.assertEqual(tempos[0]["Bpm"], "120.00")
+            names = {track["name"] for track in tracks}
+            self.assertIn("Same", names)
+            self.assertIn("not a real number", " ".join(exported))
+
+    def test_aac_and_m4a_kinds_differ(self) -> None:
+        """Label a raw AAC file and an M4A file with their own Kind values.
+
+        ``.aac`` is not an M4A container. ``.m4a`` stays ``M4A File``.
+        The labels are the Kind attributes in the XML.
+
+        Returns:
+            None. The test fails if either file is given the other label.
+        """
+        self.assertEqual(rekordbox._kind("/music/song.aac", {}), "AAC File")
+        self.assertEqual(rekordbox._kind("/music/song.m4a", {}), "M4A File")
+        self.assertEqual(rekordbox._kind(r"C:\music\SONG.AAC", {}), "AAC File")
+        with TempLibrary() as temp:
+            aac = str(temp.root / "song.aac")
+            m4a = str(temp.root / "song.m4a")
+            with open_database(temp.db) as conn:
+                conn.execute("DELETE FROM space_asset")
+                conn.execute("DELETE FROM asset")
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                    VALUES
+                        (1, 'Raw', 'DJ', ?, 'song.aac', 1),
+                        (2, 'Wrapped', 'DJ', ?, 'song.m4a', 1)
+                    """,
+                    (aac, m4a),
+                )
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (1, 1)")
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (2, 1)")
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            kinds = {item.get("Name"): item.get("Kind") for item in collection.findall("TRACK")}
+            self.assertEqual(kinds["Raw"], "AAC File")
+            self.assertEqual(kinds["Wrapped"], "M4A File")
+
+    def test_a_null_in_the_path_is_a_missing_file(self) -> None:
+        """Export the rest of the library when one path contains a NUL.
+
+        ``Path.is_file`` raises ``ValueError`` on some Python versions and
+        returns false on others. The track stays in the XML without cue
+        points, the loss report names it, and a warning is logged.
+
+        Returns:
+            None. The test fails if the export raises or the other track is omitted.
+        """
+        with TempLibrary() as temp:
+            stored = str(temp.root / "null-song.mp3").replace("null-song.mp3", "null-\x00song.mp3")
+            self.assertIn("\x00", stored)
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO asset (id, name, artist, portable_id, file_name, location_id)
+                    VALUES (8, 'Null song', 'DJ', ?, 'null-song.mp3', 1)
+                    """,
+                    (stored,),
+                )
+                conn.execute("INSERT INTO space_asset (asset_id, space_id) VALUES (8, 1)")
+            with self.assertLogs("serato", level="WARNING") as caught:
+                xml, report = rekordbox.export_rekordbox("Serato Library", None)
+            text = " ".join(report)
+            self.assertIn("null character", text)
+            self.assertIn("missing file", text)
+            self.assertIn("null-", text)
+            self.assertIn("song.mp3", text)
+            self.assertIn("null character", " ".join(caught.output))
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            collection = document.find("COLLECTION")
+            assert collection is not None
+            names = {item.get("Name") for item in collection.findall("TRACK")}
+            self.assertIn("Null song", names)
+            self.assertIn("Same", names)
+            null_track = next(item for item in collection.findall("TRACK") if item.get("Name") == "Null song")
+            self.assertEqual(list(null_track), [])
+
+    def test_display_rounds_a_beatgrid_position_and_the_export_does_not(self) -> None:
+        """Round a beatgrid position on the track panel only.
+
+        The stored float is slightly longer than three decimals. The panel
+        payload uses the millisecond string. The export BPM still divides
+        by the stored float, so it does not match the rounded span.
+
+        Returns:
+            None. The test fails if the panel shows the long float or the BPM uses the rounded span.
+        """
+        payload = bytes([1, 0]) + (2).to_bytes(4, "big")
+        payload += struct.pack(">f", 0.0) + (4).to_bytes(4, "big")
+        payload += struct.pack(">f", 2.0004) + struct.pack(">f", 100.0)
+        with TempLibrary() as temp:
+            audio = temp.root / "long-grid.wav"
+            _id3(audio, [_geob("Serato BeatGrid", payload)])
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    "UPDATE asset SET portable_id = ?, file_name = 'long-grid.wav' WHERE id = 1",
+                    (str(audio),),
+                )
+            detail = server.load_track(1)
+            assert detail is not None
+            grid = detail["beatgrid"]
+            assert isinstance(grid, list)
+            self.assertEqual(len(grid), 2)
+            shown = grid[1]["position"]
+            self.assertIsInstance(shown, str)
+            markers = tags.read_serato_tags(audio)["beatgrid"]
+            end = float(markers[1]["position"])
+            self.assertEqual(shown, f"{end:.3f}")
+            self.assertNotEqual(shown, f"{end:.16f}")
+            self.assertNotIn("00000", str(shown))
+            entries = rekordbox.tempo_entries(markers)
+            full = f"{(4 * 60.0 / end):.2f}"
+            rounded = f"{(4 * 60.0 / round(end, 3)):.2f}"
+            self.assertNotEqual(full, rounded)
+            self.assertEqual(entries[0]["Bpm"], full)
+            self.assertNotEqual(entries[0]["Bpm"], rounded)
+
+    def test_nonfinite_last_bpm_is_counted(self) -> None:
+        """Count a last marker whose BPM is NaN or infinite.
+
+        The position is a real time, so the position check keeps the marker.
+        The TEMPO entry is still omitted, and ``grid_nonfinite`` counts it.
+        An earlier marker with a usable span is written. A grid that is only
+        the bad last marker writes nothing and still counts one.
+
+        Returns:
+            None. The test fails if the bad BPM is silent or the earlier marker is dropped.
+        """
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            stats: dict[str, int] = {}
+            entries = rekordbox.tempo_entries(
+                [
+                    {"position": 0.0, "beats": 4},
+                    {"position": 2.0, "bpm": bad},
+                ],
+                stats=stats,
+            )
+            self.assertEqual(stats.get("grid_nonfinite"), 1, bad)
+            self.assertEqual(len(entries), 1, bad)
+            self.assertEqual(entries[0]["Bpm"], "120.00", bad)
+        alone: dict[str, int] = {}
+        self.assertEqual(
+            rekordbox.tempo_entries([{"position": 1.0, "bpm": float("nan")}], stats=alone),
+            [],
+        )
+        self.assertEqual(alone["grid_nonfinite"], 1)
+        text = " ".join(rekordbox._loss_report({"grid_nonfinite": 1}, True, False, "asis"))
+        self.assertIn("BPM", text)
+        self.assertIn("not a real number", text)
+
+    def test_a_null_in_a_crate_name_is_stripped_from_the_xml(self) -> None:
+        """Write a crate whose name contains NUL without putting that character in the XML.
+
+        The name is stored with the NUL. Serialising the playlist tree removes
+        it, and the visible name is the text on either side. The rest of the
+        export still parses.
+
+        Returns:
+            None. The test fails if the export raises or the XML still contains NUL.
+        """
+        with TempLibrary() as temp:
+            with open_database(temp.db) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO container
+                        (id, parent_id, name, type, list_order, space_id, time_added, expanded, portable_id)
+                    VALUES (9, 1, ?, 1, 1, 1, 1, 0, '')
+                    """,
+                    ("House\x00Party",),
+                )
+                stored = conn.execute("SELECT name FROM container WHERE id = 9").fetchone()
+                assert stored is not None
+                self.assertIn("\x00", stored[0])
+            xml, _report = rekordbox.export_rekordbox("Serato Library", None)
+            self.assertNotIn("\x00", xml)
+            document = ElementTree.fromstring(xml.encode("utf-8"))
+            self.assertEqual(document.tag, "DJ_PLAYLISTS")
+            parsed = rekordbox.parse_rekordbox(xml)
+            playlists = parsed["playlists"]
+            assert isinstance(playlists, dict)
+            found = _node(playlists, "HouseParty")
+            self.assertIsNotNone(found)
 
 
 class ParseTests(unittest.TestCase):

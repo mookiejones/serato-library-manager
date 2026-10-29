@@ -1,0 +1,35 @@
+/* Generated from tokens.json. Green = safe/undoable, amber = heads-up, red = data leaves the library. */
+:root {
+  --color-bg: #0d0f14;
+  --color-panel: #181b24;
+  --color-card: #1f2330;
+  --color-border: #2c3140;
+  --color-button: #262a36;
+  --color-text: #e6e8ee;
+  --color-text-muted: #9aa0ad;
+  --color-text-faint: #6b7280;
+  --color-primary: #3d7bdc;
+  --color-safe: #5fd38d;
+  --color-safe-bg: #132a1d;
+  --color-safe-border: #2f6b46;
+  --color-warn: #e0a83a;
+  --color-warn-text: #f2c46b;
+  --color-warn-bg: #2a2214;
+  --color-danger: #e0566b;
+  --color-danger-text: #ff8a9a;
+  --color-danger-bg: #2a1418;
+  --radius-card: 8px;
+  --radius-panel: 12px;
+  --radius-pill: 14px;
+  --font-family: DejaVu Sans, system-ui;
+  --font-title: 20px;
+  --font-heading: 14px;
+  --font-body: 13px;
+  --font-caption: 11px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+}

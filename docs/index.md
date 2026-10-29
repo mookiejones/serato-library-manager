@@ -4,7 +4,9 @@ Serato Library is a window on your computer for the Serato DJ Pro library. Brows
 
 The app talks only to this computer. It is not a website you log in to. Your tracks, crate names, and file paths stay here.
 
-[Install the app](guide/install.md). Read [Safety and backups](guide/safety.md) before the first edit.
+The first time you open it, setup finds your library and saves a safety copy before anything can change.
+
+[Install the app](first-install.md). Read [Safety and backups](guide/safety.md) before the first edit.
 
 ![The library window on a sample collection. Crates are on the left. The open track is on the right.](media/crates.png)
 
@@ -18,6 +20,7 @@ The app talks only to this computer. It is not a website you log in to. Your tra
 - [Import and export M3U playlists](guide/playlists.md), and export rekordbox.xml for CDJs. [Moving between Serato and Rekordbox](coming-from-rekordbox.md) lists what that file keeps.
 - [Save related tracks](guide/related.md), and open the live view in the separate listener app while you play.
 - [Rename, move, replace, and trash files](guide/files.md) so crates and history follow the file.
+- [Keep hash-checked snapshots and restore one](guide/safety.md#snapshots), including crates on each drive and the cue data stored in audio files. Audio files themselves are not copied.
 - Change [sharing, and open the log](guide/settings.md).
 
 Pictures in this guide use a small sample library, not your collection.
