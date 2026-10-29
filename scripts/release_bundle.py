@@ -922,9 +922,9 @@ def sha256_file(path: Path) -> str:
 def app_version() -> str:
     """Return the version passed to the Windows installer.
 
-    A baked release tag is used without its leading ``v``, so ``v1.2.3-rc1``
-    becomes ``1.2.3-rc1``. A development checkout uses
-    ``app_config.APP_VERSION``.
+    A release tag is used without its leading ``v``, so ``v1.2.3-rc1``
+    becomes ``1.2.3-rc1``. Any other resolved version contributes its
+    leading ``MAJOR.MINOR.PATCH``.
 
     Returns:
         ``MAJOR.MINOR.PATCH``, or that plus ``-rcN`` / ``-betaN``.
@@ -1421,9 +1421,10 @@ def build_setup(dist: Path, dest: Path) -> None:
         SystemExit: If this is not Windows, the script or the build is
             missing, or the compiler does not write ``dest``.
 
-    The version passed to the script is :func:`app_version`. A baked
-    release tag is used without its leading ``v``. A development checkout
-    passes ``app_config.APP_VERSION``.
+    The version passed to the script is :func:`app_version`, taken from
+    the same identity as ``GET /api/version``. A release tag is used
+    without its leading ``v``. Any other version contributes its leading
+    ``MAJOR.MINOR.PATCH``.
     """
     if sys.platform != "win32":
         raise SystemExit("The Windows installer is built on Windows.")

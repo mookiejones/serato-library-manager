@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import _version  # noqa: E402
+import app_config  # noqa: E402
 import release_bundle  # noqa: E402
 import server  # noqa: E402
 import version_info  # noqa: E402
@@ -497,12 +498,12 @@ class StampTests(unittest.TestCase):
     def test_installer_version_prefers_a_baked_tag(self) -> None:
         """Pass the tag without ``v`` to Inno Setup.
 
-        An empty stamp still returns the package version ``1.1.0``.
-        Nothing is written.
+        An empty stamp with no git uses the numeric triple ``0.0.0``.
+        ``APP_VERSION`` stays the full fallback string. Nothing is written.
 
         Returns:
-            None. The test fails if the prerelease or the package
-            version is dropped.
+            None. The test fails if the prerelease is dropped or the
+            fallback disagrees with ``__version__``.
         """
         with (
             mock.patch.object(_version, "VERSION", "v1.2.3-rc2"),
@@ -511,8 +512,13 @@ class StampTests(unittest.TestCase):
         ):
             self.assertEqual(version_info.installer_version(), "1.2.3-rc2")
             self.assertEqual(release_bundle.app_version(), "1.2.3-rc2")
-        with _empty_bake():
-            self.assertEqual(release_bundle.app_version(), "1.1.0")
+            self.assertEqual(app_config.APP_VERSION, "v1.2.3-rc2")
+            self.assertEqual(app_config.__version__, app_config.APP_VERSION)
+        with _empty_bake(), mock.patch("version_info.subprocess.run", side_effect=FileNotFoundError):
+            self.assertEqual(release_bundle.app_version(), "0.0.0")
+            self.assertEqual(app_config.APP_VERSION, "0.0.0+dev")
+            self.assertEqual(app_config.__version__, "0.0.0+dev")
+            self.assertEqual(version_info.payload()["version"], app_config.APP_VERSION)
 
 
 class WindowsResourceTests(unittest.TestCase):
@@ -639,11 +645,12 @@ class EndpointTests(unittest.TestCase):
 
         ``serve`` uses a free port and does not require the library.
         ``_library_call`` raises if a library route runs. The body is
-        the three documented fields.
+        the three documented fields. ``GET /api/settings`` ``app_version``,
+        ``APP_VERSION``, and ``__version__`` are that same ``version``.
 
         Returns:
-            None. The test fails if the status is not 200 or the library
-            is opened.
+            None. The test fails if the status is not 200, the library
+            is opened, or settings reports a different version.
         """
         identity = version_info.VersionIdentity("v1.4.0-rc2", "abc123def456", "release")
         missing = Path("/tmp/serato-library-missing-master.sqlite")
@@ -665,6 +672,11 @@ class EndpointTests(unittest.TestCase):
                     body,
                     {"version": "v1.4.0-rc2", "commit": "abc123def456", "source": "release"},
                 )
+                with urllib.request.urlopen(f"http://{host}:{port}/api/settings", timeout=5) as settings_response:
+                    settings = json.loads(settings_response.read().decode("utf-8"))
+                self.assertEqual(settings["app_version"], body["version"])
+                self.assertEqual(app_config.APP_VERSION, body["version"])
+                self.assertEqual(app_config.__version__, body["version"])
             finally:
                 httpd.shutdown()
                 httpd.server_close()
@@ -750,8 +762,10 @@ class ReleaseDocTests(unittest.TestCase):
         github = (ROOT / "docs" / "github.md").read_text(encoding="utf-8")
         self.assertIn("/api/version", architecture)
         self.assertIn("0.0.0+dev", architecture)
-        self.assertIn("git describe --tags --always --dirty", architecture)
-        self.assertIn("1.1.0", architecture)
+        self.assertIn("git describe", architecture)
+        self.assertIn("the same string `GET /api/version` returns", architecture)
+        self.assertIn("`app_version` is the `version` field from `GET /api/version`", architecture)
+        self.assertNotIn("not the release tag", architecture)
         self.assertIn("assert-version", github)
         self.assertIn("write_version.py", github)
         self.assertIn("0.0.0+dev", github)

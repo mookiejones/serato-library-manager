@@ -18,10 +18,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Single source for the app version. Sentry's release, PostHog's
-# app_version, and ``__version__`` all read this string.
-APP_VERSION = "1.1.0"
-__version__ = APP_VERSION
+import version_info
+
 CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
@@ -52,6 +50,26 @@ _WINDOW_LIMITS = (
 _UUID = uuid.UUID
 _settings_lock = threading.RLock()
 logger = logging.getLogger("serato.library.config")
+
+
+def __getattr__(name: str) -> str:
+    """Resolve the app version from the same identity as ``GET /api/version``.
+
+    Args:
+        name: ``APP_VERSION`` or ``__version__``.
+
+    Returns:
+        The ``version`` string from :func:`version_info.resolve`. Sentry,
+        PostHog, ``GET /api/settings``, and Rekordbox export all read it
+        through this attribute, so a stamped tag cannot disagree with the
+        version endpoint.
+
+    Raises:
+        AttributeError: If ``name`` is not one of those two attributes.
+    """
+    if name in {"APP_VERSION", "__version__"}:
+        return version_info.resolve().version
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @dataclass(frozen=True)

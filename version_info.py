@@ -150,39 +150,25 @@ def payload() -> dict[str, object]:
     return {"version": info.version, "commit": info.commit, "source": info.source}
 
 
-def package_version() -> str:
-    """Return ``app_config.APP_VERSION`` when it is ``MAJOR.MINOR.PATCH``.
-
-    Returns:
-        The package version constant.
-
-    Raises:
-        ValueError: If the constant is any other shape.
-    """
-    import app_config
-
-    version = app_config.APP_VERSION
-    if not isinstance(version, str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
-        raise ValueError(f"APP_VERSION must look like 1.2.3, got {version!r}")
-    return version
-
-
 def installer_version() -> str:
     """Return the version string passed to Inno Setup.
 
     Returns:
-        A baked release tag without the leading ``v``, including
-        ``-rcN`` or ``-betaN``. A development checkout returns
-        ``APP_VERSION``.
+        A release tag without the leading ``v``, including ``-rcN`` or
+        ``-betaN``. Any other resolved version contributes its leading
+        ``MAJOR.MINOR.PATCH``. A string with no triple contributes
+        ``0.0.0``.
 
     Raises:
-        ValueError: If ``APP_VERSION`` is not ``MAJOR.MINOR.PATCH`` and
-            no release tag was baked.
+        ValueError: If a numeric component does not fit in 16 bits.
+
+    Uses :func:`resolve`, the same identity as ``GET /api/version``.
     """
-    baked = baked_identity()
-    if baked is not None and baked.source == "release" and is_release_tag(baked.version):
-        return baked.version[1:]
-    return package_version()
+    version = resolve().version
+    if is_release_tag(version):
+        return version[1:]
+    major, minor, patch, _build = version_numbers(version)
+    return f"{major}.{minor}.{patch}"
 
 
 def version_numbers(version: str) -> tuple[int, int, int, int]:

@@ -8,7 +8,7 @@
 ; certificate would fail the compile.
 
 #ifndef AppVersion
-  #error Pass /DAppVersion= from the release tag, or from app_config.APP_VERSION.
+  #error Pass /DAppVersion= from the release identity.
 #endif
 #ifndef SourceDir
   #error Pass /DSourceDir= pointing at the PyInstaller folder.

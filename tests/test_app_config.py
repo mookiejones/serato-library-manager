@@ -13,7 +13,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import _version
 import app_config
+import version_info
 
 
 class SettingsTests(unittest.TestCase):
@@ -630,30 +632,50 @@ class LayoutSettingsTests(unittest.TestCase):
 class VersionTests(unittest.TestCase):
     """The app version has one definition.
 
-    Sentry's release and PostHog's ``app_version`` import
-    ``APP_VERSION``. ``__version__`` must stay that same string.
+    Sentry's release, PostHog's ``app_version``, ``__version__``, and
+    ``GET /api/settings`` all read the string ``GET /api/version`` returns.
     """
 
-    def test_version_alias_matches_the_constant(self) -> None:
-        """Keep ``__version__`` equal to ``APP_VERSION``.
+    def test_version_alias_matches_the_resolver(self) -> None:
+        """Keep ``__version__`` and ``APP_VERSION`` on the version endpoint.
+
+        Nothing is written. A stamped tag must replace both attributes
+        together, so a hard-coded package version cannot linger.
 
         Returns:
-            None. The test fails when the alias is a second literal.
+            None. The test fails when either attribute is a second string.
         """
-        self.assertEqual(app_config.__version__, app_config.APP_VERSION)
-        self.assertEqual(app_config.APP_VERSION, "1.1.0")
+        resolved = version_info.resolve().version
+        self.assertEqual(app_config.__version__, resolved)
+        self.assertEqual(app_config.APP_VERSION, resolved)
+        self.assertIsInstance(app_config.APP_VERSION, str)
+        with (
+            mock.patch.object(_version, "VERSION", "v2.0.0"),
+            mock.patch.object(_version, "COMMIT", "abcdef012345"),
+            mock.patch.object(_version, "SOURCE", "release"),
+        ):
+            self.assertEqual(app_config.APP_VERSION, "v2.0.0")
+            self.assertEqual(app_config.__version__, "v2.0.0")
+            self.assertEqual(version_info.payload()["version"], "v2.0.0")
 
-    def test_docs_quote_the_same_version(self) -> None:
-        """Keep the privacy and architecture notes on ``APP_VERSION``.
+    def test_docs_name_the_shared_version(self) -> None:
+        """Point the privacy and architecture notes at ``GET /api/version``.
+
+        The live version changes with the checkout, so the notes name the
+        source instead of copying one release string.
 
         Returns:
-            None. The test fails when either document still names another
-            release string.
+            None. The test fails when either document still treats
+            ``1.1.0`` as the only app version.
         """
         root = Path(__file__).resolve().parents[1]
-        for relative in ("PRIVACY.md", "docs/architecture.md"):
-            text = (root / relative).read_text(encoding="utf-8")
-            self.assertIn(app_config.APP_VERSION, text)
+        architecture = (root / "docs" / "architecture.md").read_text(encoding="utf-8")
+        privacy = (root / "PRIVACY.md").read_text(encoding="utf-8")
+        self.assertIn("the same string `GET /api/version` returns", architecture)
+        self.assertIn("`app_version` is the `version` field from `GET /api/version`", architecture)
+        self.assertNotIn("not the release tag", architecture)
+        self.assertIn("GET /api/version", privacy)
+        self.assertNotIn("(`1.1.0`)", privacy)
 
 
 if __name__ == "__main__":
