@@ -477,7 +477,7 @@ def _drive_path(drive: Path | str) -> Path:
     """Return an absolute drive path. Does not create it.
 
     Args:
-        drive: A path the caller passed. This is the drive that person
+        drive: A path the caller passed. This is the drive the person
             chose on this computer. The server binds ``127.0.0.1`` and the
             check only reads.
 
