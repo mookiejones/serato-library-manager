@@ -21,6 +21,8 @@
   --missing: var(--color-danger);
   --rule: var(--color-border);
   --row: 36px; /* must match ROW in app.js */
+  --file-row: 44px; /* must match FILE_ROW in src/state.ts */
+  --file-root-row: 64px; /* must match ROOT_ROW in src/state.ts */
   --font: var(--font-family);
   --display: "Fraunces", "Iowan Old Style", Palatino, serif;
 }
@@ -50,6 +52,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 .list:focus-visible,
+.files-list:focus-visible,
 .crate:focus-visible,
 .twist:focus-visible,
 .splitter:focus-visible {
@@ -354,6 +357,11 @@ body.is-resizing {
 }
 
 button:disabled { cursor: default; }
+
+#files-up:disabled,
+.files-actions button:disabled {
+  opacity: 0.38;
+}
 
 .rekordbox-options {
   display: flex;
@@ -1004,9 +1012,50 @@ dialog .check input {
   flex: 1;
   min-width: 0;
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.files-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.files-crumbs li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.files-crumb {
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-heading);
+}
+
+.files-crumb[aria-current="page"] {
+  font-weight: 600;
+}
+
+.files-sep {
+  color: var(--color-text);
+  padding: 0 var(--space-1);
+}
+
+.files-elsewhere {
+  margin-left: auto;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  font-size: var(--font-body);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .files-pick {
@@ -1022,22 +1071,97 @@ dialog .check input {
   padding: 0 var(--space-4) var(--space-3);
 }
 
+.files-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.files-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
 .files-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  border-top: 1px solid var(--rule);
+  gap: var(--space-2);
+  height: var(--file-row);
+  min-height: var(--file-row);
+  max-height: var(--file-row);
+  border-bottom: 1px solid var(--rule);
+}
+
+.files-row.is-root {
+  height: var(--file-root-row);
+  min-height: var(--file-root-row);
+  max-height: var(--file-root-row);
+}
+
+.files-row.is-missing .files-icon,
+.files-row.is-missing .files-root-label,
+.files-row.is-missing .files-root-detail {
+  color: var(--quiet);
+}
+
+.files-open:focus-visible,
+.files-kind:focus-visible,
+.files-file input:focus-visible,
+.files-crumb:focus-visible,
+.files-elsewhere:focus-visible {
+  outline: 2px solid var(--cadmium);
+  outline-offset: -2px;
+}
+
+.files-row.is-active {
+  background: var(--color-selection);
+}
+
+.files-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--color-text);
 }
 
 .files-open,
-.files-file {
+.files-file,
+.files-kind {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   min-height: 44px;
+  min-width: 0;
   flex: 1;
   text-align: left;
+  overflow: hidden;
+}
+
+.files-open span,
+.files-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-open .files-root-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  gap: 2px;
+}
+
+.files-root-label {
+  font-weight: 600;
+}
+
+.files-root-detail {
+  color: var(--quiet);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .files-badge,
@@ -1064,7 +1188,42 @@ dialog .check input {
 .files-empty {
   margin: 0;
   padding: var(--space-5) 0;
-  color: var(--quiet);
+  color: var(--color-text);
+}
+
+.files-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 36rem;
+  margin: var(--space-6) 0;
+}
+
+.files-empty-state h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.files-empty-state p {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--color-text);
+  font-size: var(--font-body);
+  line-height: 1.5;
+}
+
+.files-primary {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-card);
+  background: var(--color-primary);
+  color: var(--color-card);
+  font-size: var(--font-title);
+  font-weight: 700;
 }
 
 .files-field {

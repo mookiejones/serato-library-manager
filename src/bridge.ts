@@ -11,10 +11,12 @@ export const bridge: {
   selectTrack: (id: number) => void | Promise<void>;
   selectEntry: (id: number) => void;
   openMergeDialog: () => Promise<void>;
+  openSetup: () => void;
 } = {
   selectTrack(_id: number) {},
   selectEntry(_id: number) {},
   openMergeDialog() {
     return Promise.resolve();
   },
+  openSetup() {},
 };

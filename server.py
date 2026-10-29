@@ -27,6 +27,7 @@ import app_log
 import files
 import gig_check
 import library
+import music_roots
 import rekordbox
 import related
 import setup_flow
@@ -523,7 +524,12 @@ def _safe_folder_error(message: str) -> str:
         The message when it is one of the short folder sentences.
         A generic sentence when the text contains a path.
     """
-    if message in {"That folder could not be read.", "Shortcuts are left alone.", "That request is not valid."}:
+    if message in {
+        "That folder could not be read.",
+        "Shortcuts are left alone.",
+        "That request is not valid.",
+        "That folder is outside the music folders.",
+    }:
         return message
     return "That folder could not be read."
 
@@ -545,6 +551,20 @@ def query_text(
     if not values:
         return default
     return values[0]
+
+
+def _flag(query: dict[str, list[str]], key: str) -> bool:
+    """Return whether a query flag is ``1``, ``true``, or ``yes``.
+
+    Args:
+        query: Parsed query string.
+        key: Parameter name.
+
+    Returns:
+        True when the first value is one of those words, ignoring case.
+    """
+    raw = query_text(query, key, "") or ""
+    return raw.lower() in {"1", "true", "yes"}
 
 
 def connect() -> sqlite3.Connection:
@@ -580,9 +600,10 @@ def db_stamp() -> tuple[int, ...]:
 
 
 def invalidate() -> None:
-    """Drop the cached library payloads."""
+    """Drop the cached library payloads and the Files music-root cache."""
     _cache["stamp"] = None
     _cache["libraries"] = {}
+    files.invalidate_browse_cache()
 
 
 def display_name(name: str) -> str:
@@ -1565,8 +1586,19 @@ class Handler(BaseHTTPRequestHandler):
                 groups = as_dicts(_library_call("duplicate_groups", space))
                 self.send_json({"space": space, "groups": groups, "count": len(groups)})
                 return
+            if parsed.path == "/api/library-roots":
+                self.send_json(music_roots.library_roots(refresh=_flag(query, "refresh")))
+                return
             if parsed.path == "/api/files":
-                self.send_json(files.list_directory(query_text(query, "path", "") or ""))
+                elsewhere = _flag(query, "elsewhere")
+                refresh = _flag(query, "refresh")
+                self.send_json(
+                    files.list_directory(
+                        query_text(query, "path", "") or "",
+                        elsewhere=elsewhere,
+                        refresh=refresh,
+                    )
+                )
                 return
             if parsed.path == "/api/snapshots":
                 self._get_snapshots(query)
