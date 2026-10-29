@@ -559,7 +559,10 @@ class DirectoryTests(unittest.TestCase):
                     (str(other),),
                 )
             found = music_roots.track_directories()
-            self.assertEqual(found, [shared.parent, other.parent])
+            self.assertEqual(
+                [item.resolve() for item in found],
+                [shared.parent.resolve(), other.parent.resolve()],
+            )
 
 
 class CacheTests(unittest.TestCase):

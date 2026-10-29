@@ -40,14 +40,21 @@ class ShallowShortcutTests(unittest.TestCase):
             secret = temp.root / "secret"
             secret.mkdir()
             (secret / "hidden.mp3").write_bytes(b"x")
+            anchor = _shallow_anchor()
+            if anchor is None:
+                self.skipTest("no shallow folder is available")
             token = uuid.uuid4().hex
-            link = Path("/tmp") / f"serato-shallow-{token}"
-            real = Path("/tmp") / f"serato-real-{token}"
-            real.mkdir()
+            link = anchor / f"serato-shallow-{token}"
+            real = anchor / f"serato-real-{token}"
+            try:
+                real.mkdir()
+            except OSError:
+                self.skipTest("cannot create a shallow folder")
+            root_path = str(anchor.resolve())
             roots = [
                 {
                     "name": "Temp · /",
-                    "path": "/tmp",
+                    "path": root_path,
                     "kind": "folder",
                     "missing": False,
                 }
@@ -66,11 +73,29 @@ class ShallowShortcutTests(unittest.TestCase):
                     opened = files.list_directory(str(real))
                 self.assertEqual(opened["path"], str(real.resolve()))
                 self.assertEqual(opened["entries"], [])
-                self.assertEqual(opened["parent"], "/tmp")
-                self.assertEqual(opened["breadcrumb"][0]["path"], "/tmp")
+                self.assertEqual(opened["parent"], str(real.resolve().parent))
+                self.assertEqual(opened["breadcrumb"][0]["path"], root_path)
             finally:
                 link.unlink(missing_ok=True)
                 real.rmdir()
+
+
+def _shallow_anchor() -> Path | None:
+    """Return a directory one or two components below the drive.
+
+    The deep-shortcut check allows a shortcut at that depth. ``/tmp`` is
+    that directory on Linux. Windows uses the drive root when it can be
+    used as a parent.
+
+    Returns:
+        The directory, or None when neither candidate exists.
+    """
+    if Path("/tmp").is_dir():
+        return Path("/tmp")
+    anchor = Path(Path.cwd().anchor)
+    if anchor.is_dir() and anchor != Path("/"):
+        return anchor
+    return None
 
 
 if __name__ == "__main__":

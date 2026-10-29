@@ -306,14 +306,14 @@ def volume_label(path: Path) -> str:
         path: Drive root or volume directory.
 
     Returns:
-        The Windows volume label when the system reports one, otherwise
-        the last path component or the drive letter.
+        The Windows volume label for a drive root, otherwise the last
+        path component. A drive root with no label uses its letter.
     """
-    if sys.platform == "win32":
+    if sys.platform == "win32" and path.drive and path.parent == path:
         label = _windows_label(path)
         if label:
             return label
-        letter = path.drive[:1] if path.drive else ""
+        letter = path.drive[:1]
         return letter or "Drive"
     return path.name or "Drive"
 
