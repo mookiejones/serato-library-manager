@@ -710,16 +710,25 @@ class DriveCheckTests(unittest.TestCase):
             None.
         """
         calls: list[str] = []
+        resolves: list[str] = []
 
         def exists(path: Path) -> bool:
             calls.append(os.fspath(path))
             return False
 
+        real_resolve = Path.resolve
+
+        def counting_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+            resolves.append(os.fspath(path))
+            return real_resolve(path, *args, **kwargs)
+
         paths = [f"Music/missing-{index}.mp3" for index in range(30)]
         drive = self._drive(paths)
-        report = drive_check.check_drive(drive, exists=exists, filesystem="ext4")
+        with patch.object(Path, "resolve", counting_resolve):
+            report = drive_check.check_drive(drive, exists=exists, filesystem="ext4")
         self.assertEqual(report.counts["missing"], 30)
         self.assertLess(len(calls), 20)
+        self.assertLess(len(resolves), 40)
 
     def test_ten_thousand_tracks_finish_within_ten_seconds(self) -> None:
         """A crate of 10,000 missing tracks is classified in under 10 seconds.

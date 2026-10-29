@@ -490,11 +490,26 @@ def _drive_path(drive: Path | str) -> Path:
     text = os.fspath(drive)
     if "\x00" in text or not text.strip():
         raise library.LibraryError("Choose a drive.", 400)
-    # codeql[py/path-injection]
-    path = Path(text).expanduser()
-    if not path.is_absolute():
-        path = path.resolve()
-    return path
+    # realpath, then the drive prefix. CodeQL treats that pair as a checked path.
+    normalized = os.path.realpath(os.path.expanduser(text))
+    if not normalized.startswith(_absolute_prefix(normalized)):
+        raise library.LibraryError("Choose a drive.", 400)
+    return Path(normalized)
+
+
+def _absolute_prefix(normalized: str) -> str:
+    """Return the drive prefix a normalized absolute path must keep.
+
+    Args:
+        normalized: Output of ``os.path.realpath``.
+
+    Returns:
+        ``E:\\`` for a Windows drive, the UNC share root, or ``/``.
+    """
+    drive, _rest = os.path.splitdrive(normalized)
+    if drive:
+        return drive + os.sep
+    return os.sep
 
 
 def _volume_label(raw: str) -> str:
@@ -824,6 +839,8 @@ def _classify(
     """
     cache: dict[Path, list[tuple[str, Path]]] = {}
     missing_parents: set[str] = set()
+    resolved_root = drive_root.resolve()
+    letters = _mounted_letters(drive_root)
     findings: list[Finding] = []
     rows: list[CrateReport] = []
     fat = is_fat_filesystem(filesystem)
@@ -850,7 +867,7 @@ def _classify(
                 continue
             seen.add(stored)
             counts["tracks"] += 1
-            hit = _locate(stored, drive_root, cache, exists, missing_parents)
+            hit = _locate(stored, drive_root, cache, exists, missing_parents, resolved_root, letters)
             track = _track_name(stored)
             if hit.kind == "off_drive":
                 counts["off_drive"] += 1
@@ -1123,6 +1140,8 @@ def _locate(
     cache: dict[Path, list[tuple[str, Path]]],
     exists: Callable[[Path], bool],
     missing_parents: set[str],
+    resolved_root: Path,
+    letters: tuple[str, ...],
 ) -> _Hit:
     """Find a stored path on the drive or somewhere else.
 
@@ -1133,16 +1152,18 @@ def _locate(
         exists: Off-drive probe.
         missing_parents: Parents already known to be absent. Siblings under
             one of them are not statted again.
+        resolved_root: ``drive_root`` resolved once for this check.
+        letters: Other Windows drive letters, computed once for this check.
 
     Returns:
         On the drive, off the drive with the place it was found, or missing.
     """
-    on_drive = _find_on_drive(stored, drive_root, cache)
+    on_drive = _find_on_drive(stored, drive_root, cache, resolved_root)
     if on_drive is not None:
         if on_drive[0]:
             return _Hit("on_drive", str(on_drive[1]), _file_size(on_drive[1]))
         return _Hit("off_drive", str(on_drive[1]), _file_size(on_drive[1]))
-    outside = _first_outside(stored, drive_root, exists, missing_parents)
+    outside = _first_outside(stored, resolved_root, exists, missing_parents, letters)
     if outside is not None:
         return _Hit("off_drive", str(outside), _file_size(outside))
     return _Hit("missing", "", None)
@@ -1152,6 +1173,7 @@ def _find_on_drive(
     stored: str,
     drive_root: Path,
     cache: dict[Path, list[tuple[str, Path]]],
+    resolved_root: Path,
 ) -> tuple[bool, Path] | None:
     """Walk a stored path under the drive.
 
@@ -1159,17 +1181,18 @@ def _find_on_drive(
         stored: Crate path.
         drive_root: Drive root.
         cache: Directory listings.
+        resolved_root: ``drive_root`` resolved once for this check.
 
     Returns:
         ``(True, path)`` when the file is inside the drive.
         ``(False, path)`` when the crate path is on the drive but a shortcut
         points at a file outside it. None when the path is not on the drive.
     """
-    parts = _on_drive_parts(stored, drive_root)
+    parts = _on_drive_parts(stored, drive_root, resolved_root)
     if parts is None:
         return None
     current = drive_root
-    root_resolved = drive_root.resolve()
+    root_resolved = resolved_root
     for part in parts:
         if part == "..":
             try:
@@ -1202,12 +1225,13 @@ def _find_on_drive(
     return (True, current)
 
 
-def _on_drive_parts(stored: str, drive_root: Path) -> tuple[str, ...] | None:
+def _on_drive_parts(stored: str, drive_root: Path, resolved_root: Path) -> tuple[str, ...] | None:
     """Return the components to walk under the drive, or None.
 
     Args:
         stored: Crate path.
         drive_root: Drive root.
+        resolved_root: ``drive_root`` resolved once for this check.
 
     Returns:
         Relative components when the stored path belongs on this volume.
@@ -1218,32 +1242,31 @@ def _on_drive_parts(stored: str, drive_root: Path) -> tuple[str, ...] | None:
         if _is_unc(stored) or (_LETTER.match(stored) and os.name != "nt"):
             return None
         candidate = Path(stored.replace("\\", "/")) if not _LETTER.match(stored) else Path(stored)
-        if not _contained(drive_root, candidate):
+        if not _contained(drive_root, candidate, resolved_root):
             return None
         try:
-            relative = candidate.resolve().relative_to(drive_root.resolve())
-        except (OSError, ValueError):
-            try:
-                relative = Path(candidate).relative_to(drive_root)
-            except ValueError:
-                return None
+            relative = candidate.absolute().relative_to(resolved_root)
+        except ValueError:
+            return None
         return _stored_parts(relative.as_posix())
     return _stored_parts(stored)
 
 
 def _first_outside(
     stored: str,
-    drive_root: Path,
+    resolved_root: Path,
     exists: Callable[[Path], bool],
     missing_parents: set[str],
+    letters: tuple[str, ...],
 ) -> Path | None:
     """Return the first off-drive place this path exists.
 
     Args:
         stored: Crate path.
-        drive_root: Drive root.
+        resolved_root: Drive root, already resolved.
         exists: Probe.
         missing_parents: Parents already known to be absent.
+        letters: Other Windows drive letters.
 
     Returns:
         The path, or None. Relative paths are tried at the filesystem root
@@ -1251,7 +1274,7 @@ def _first_outside(
         laptop track (no leading slash). The search does not scan the disk.
         Once a parent is absent, later tracks under it are not statted.
     """
-    for candidate in _outside_candidates(stored, drive_root):
+    for candidate in _outside_candidates(stored, resolved_root, letters):
         parent = os.fspath(candidate.parent)
         if parent in missing_parents:
             continue
@@ -1266,12 +1289,13 @@ def _first_outside(
     return None
 
 
-def _outside_candidates(stored: str, drive_root: Path) -> tuple[Path, ...]:
+def _outside_candidates(stored: str, resolved_root: Path, letters: tuple[str, ...]) -> tuple[Path, ...]:
     """Return off-drive paths worth a single stat.
 
     Args:
         stored: Crate path.
-        drive_root: Drive root.
+        resolved_root: Drive root, already resolved.
+        letters: Other Windows drive letters.
 
     Returns:
         Candidates that are not inside the drive. Order is the stored
@@ -1287,11 +1311,11 @@ def _outside_candidates(stored: str, drive_root: Path) -> tuple[Path, ...]:
         if stripped:
             found.append(Path("/") / stripped)
             found.append(Path.home() / stripped)
-            found.extend(_other_drive_letters(stripped, drive_root))
+            found.extend(_other_drive_letters(stripped, letters))
     unique: list[Path] = []
     seen: set[str] = set()
     for candidate in found:
-        if _path_inside(drive_root, candidate):
+        if _path_inside(resolved_root, candidate):
             continue
         key = os.fspath(candidate)
         if key in seen:
@@ -1301,16 +1325,15 @@ def _outside_candidates(stored: str, drive_root: Path) -> tuple[Path, ...]:
     return tuple(unique)
 
 
-def _other_drive_letters(relative: str, drive_root: Path) -> tuple[Path, ...]:
-    """Return the same relative path on other Windows drive letters.
+def _mounted_letters(drive_root: Path) -> tuple[str, ...]:
+    """Return mounted Windows drive letters other than this drive.
 
     Args:
-        relative: Volume-relative path with forward slashes.
         drive_root: Drive being checked.
 
     Returns:
-        One path per mounted letter other than this drive. Empty when
-        this is not Windows.
+        Letters such as ``D:``. Empty when this is not Windows. The list is
+        read once per check.
     """
     if os.name != "nt":
         return ()
@@ -1318,52 +1341,79 @@ def _other_drive_letters(relative: str, drive_root: Path) -> tuple[Path, ...]:
     if listdrives is None:
         return ()
     own = drive_root.drive.upper()
-    text = relative.replace("/", "\\").lstrip("\\")
-    found: list[Path] = []
+    found: list[str] = []
     for drive in listdrives():
         if len(drive) < 2 or drive[1] != ":":
             continue
         letter = drive[:2].upper()
-        if letter == own:
-            continue
-        found.append(Path(letter + "\\" + text))
+        if letter != own and letter not in found:
+            found.append(letter)
     return tuple(found)
 
 
-def _path_inside(root: Path, candidate: Path) -> bool:
+def _other_drive_letters(relative: str, letters: tuple[str, ...]) -> tuple[Path, ...]:
+    """Return the same relative path on other Windows drive letters.
+
+    Args:
+        relative: Volume-relative path with forward slashes.
+        letters: Mounted letters other than the drive being checked.
+
+    Returns:
+        One path per letter.
+    """
+    text = relative.replace("/", "\\").lstrip("\\")
+    return tuple(Path(letter + "\\" + text) for letter in letters)
+
+
+def _path_inside(resolved_root: Path, candidate: Path) -> bool:
     """Return whether a candidate is lexically inside the drive.
 
     Args:
-        root: Drive root.
+        resolved_root: Drive root, already resolved.
         candidate: Possible file.
 
     Returns:
         True when the candidate is the drive or a path under it. A Windows
-        drive-letter path is outside a POSIX drive.
+        drive-letter path is outside a POSIX drive. A missing path is not
+        resolved, so this does not stat once per track.
     """
     raw = os.fspath(candidate)
     if _LETTER.match(raw) and os.name != "nt":
         return False
-    return _contained(root, candidate)
+    try:
+        lexical = candidate if candidate.is_absolute() else candidate.absolute()
+    except OSError:
+        return False
+    if lexical != resolved_root and resolved_root not in lexical.parents:
+        return False
+    return _contained(resolved_root, candidate, resolved_root)
 
 
-def _contained(root: Path, candidate: Path) -> bool:
+def _contained(root: Path, candidate: Path, resolved_root: Path | None = None) -> bool:
     """Return whether a path stays inside a directory.
 
     Args:
         root: Directory that must contain the candidate.
         candidate: Path to test.
+        resolved_root: ``root`` already resolved. None resolves it.
 
     Returns:
         True when the resolved candidate is the root or a child of it.
         A sibling whose name only starts with the root name is outside.
+        A path that is lexically outside is rejected without resolving it.
     """
     try:
-        resolved_root = root.resolve()
+        root_resolved = resolved_root if resolved_root is not None else root.resolve()
+        lexical = candidate if candidate.is_absolute() else candidate.absolute()
+    except OSError:
+        return False
+    if lexical != root_resolved and root_resolved not in lexical.parents:
+        return False
+    try:
         resolved = candidate.resolve()
     except OSError:
         return False
-    return resolved == resolved_root or resolved_root in resolved.parents
+    return resolved == root_resolved or root_resolved in resolved.parents
 
 
 def _listing(directory: Path, cache: dict[Path, list[tuple[str, Path]]]) -> list[tuple[str, Path]]:
