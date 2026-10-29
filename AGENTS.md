@@ -58,6 +58,10 @@ npm run build
 - `tests/` is a `unittest` suite. `tests/fixture.py` points `library.MASTER` at a temporary database. `src/wizard.test.ts` is the Vitest suite for the setup steps.
 - `.vscode/launch.json` starts `server.py` on F5. "Python: Debug Tests" runs the suite. The desktop app uses `.venv`. The server launch uses the system Python.
 
+## Strict TypeScript
+
+`src/` is the page in strict TypeScript.
+
 ## After a change
 
 1. Update `docs/architecture.md` when behavior, the API, the layout, or the run path changes.
@@ -65,6 +69,23 @@ npm run build
 3. Update `docs/github.md` when a workflow, a release check, or a GitHub setting changes.
 4. Update `PRIVACY.md` and the README when sharing, local logs, or telemetry keys change.
 5. Commit the change. Do not push unless asked.
+
+## Merge rules
+
+- `main` is protected. Changes go in only through a pull request.
+- If a new push dismisses the `mookiejones-qa` approval, re-request review.
+- These checks must pass:
+  - `tests (ubuntu-latest, Python 3.12)`
+  - `tests (ubuntu-latest, Python 3.14)`
+  - `tests (windows-latest, Python 3.12)`
+  - `frontend (ubuntu-latest)`
+  - `frontend (windows-latest)`
+  - `analyze Python` (CodeQL)
+- Do not force-push to `main`.
+- Admins can bypass these rules, but should not.
+- The team (including agents) may merge a PR once `mookiejones-qa` has approved its latest commit and all required checks are green (the six listed: Ubuntu + Windows tests, frontend, and `analyze Python` (CodeQL)). Agents never tag or publish a release (including pre-releases) without Charles (@mookiejones)'s explicit OK.
+- QA reviews every pull request and blocks any pull request lacking tests for its changes.
+- Follow [Library safety](#library-safety) and [strict TypeScript](#strict-typescript).
 
 ## Library safety
 
