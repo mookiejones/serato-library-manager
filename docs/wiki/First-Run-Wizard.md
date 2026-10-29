@@ -24,7 +24,7 @@ The first open runs setup until you choose **Open my library**. **Cancel** close
 | Step | Heading | Button |
 | --- | --- | --- |
 | Welcome | **See your Serato library** | **Get started** |
-| Find your library | **Find your library** | **Use this library** when it names the disk and the tracks. **Check again** when it found nothing. **Choose a folder** points at the folder yourself. |
+| Find your library | **Find your library** | **Use this library** when it names the disk and the tracks. **Check again** when it found nothing. **Choose a folder** opens a library already in that folder when the usual one is not there. It does not create a library. |
 | Safety snapshot | **Safety snapshot** | **Take a safety snapshot**, then **Continue**. The body says a backup of your library data is saved before anything is changed. |
 | Sharing | **Share anonymous usage stats and crash reports?** | **No, don't share** is first. **Yes, share** is the other choice. This step is skipped when a choice is already saved. |
 | Done | **Library ready. Snapshot saved.** | **Open my library** |

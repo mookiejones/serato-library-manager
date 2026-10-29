@@ -21,7 +21,7 @@ Setup says **No Serato library was found on this computer.** The app stays open.
 2. Open Serato DJ Pro once, then quit it.
 3. Return to Serato Library and choose **Check again**.
 
-The usual folder is in [Install](install.md#where-serato-keeps-the-library). **Choose a folder** confirms that folder. It does not switch the app to a different library.
+The usual folder is in [Install](install.md#where-serato-keeps-the-library). **Choose a folder** opens a library that is already in that folder when the usual one is not there. It does not create a library, and it does not switch away from the library the app already has open.
 
 ## macOS says the app is damaged or cannot be opened
 

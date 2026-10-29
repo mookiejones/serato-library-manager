@@ -25,7 +25,7 @@ Quit Serato DJ Pro if it is open and you plan to edit the library. Then open the
 A window titled **Serato Library** opens. The page is served on `127.0.0.1`. The first time, setup runs before the library is yours to browse.
 
 1. **Welcome.** Read the one sentence. Choose **Get started**.
-2. **Find your library.** The page names the disk and how many tracks it found. Choose **Use this library**. If it found nothing, open Serato DJ once, quit it, and choose **Check again**. **Choose a folder** lets you point at that folder yourself. The app still opens the library Serato keeps on this computer.
+2. **Find your library.** The page names the disk and how many tracks it found. Choose **Use this library**. If it found nothing, open Serato DJ once, quit it, and choose **Check again**. If the library is already in another folder, choose **Choose a folder**, open that folder, and choose **Use this folder**. The app does not create a library. It does not switch away from a library it already has open.
 3. **Safety snapshot.** Choose **Take a safety snapshot**. If Serato DJ is open, the page says **Close Serato DJ to continue** and checks again on its own. When the copy is saved, choose **Continue**.
 4. **Sharing,** if you have not chosen yet. **No, don't share** and **Yes, share** are the same kind of button. **No, don't share** is first.
 5. **Done.** The page says **Library ready. Snapshot saved.** Choose **Open my library**.
@@ -67,7 +67,7 @@ On Windows, the file is `%LOCALAPPDATA%\Serato\Library\master.sqlite`.
 2. Paste `%LOCALAPPDATA%\Serato\Library`.
 3. Press Enter.
 
-If that file is missing, the app stays open. Setup says **No Serato library was found on this computer.** Install Serato DJ Pro and open it once so it can create the library. Quit Serato DJ. Then choose **Check again**.
+If that file is missing, the app stays open. Setup says **No Serato library was found on this computer.** Install Serato DJ Pro and open it once so it can create the library. Quit Serato DJ. Then choose **Check again**. If the library is already in another folder, choose **Choose a folder** and then **Use this folder**. That choice is remembered on this computer. It does not create a library file.
 
 ## If the window does not open
 

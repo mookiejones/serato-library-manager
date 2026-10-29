@@ -5,6 +5,11 @@ one JSON file under the per-system config directory. A missing file means
 the sharing choice has not been made, and sharing stays off. ``False`` is
 a real choice and must not be treated as missing. The export bar has its
 own defaults and can be saved before that choice.
+
+``library.json`` in that same directory remembers a Serato ``master.sqlite``
+chosen in setup when the usual library file is not there. It is a path on
+this computer. It is not part of ``settings.json`` and it is not a usage
+report. Writing it does not open or change the database.
 """
 
 from __future__ import annotations
@@ -25,6 +30,8 @@ __version__ = APP_VERSION
 CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
+LIBRARY_CHOICE_NAME = "library.json"
+_LIBRARY_CHOICE_LIMIT = 65_536
 # Keys this file is allowed to store. Anything else is dropped on load.
 SETTINGS_KEYS = ("install_id", "telemetry_consent", "window", "wizard_complete", "rekordbox", "layout")
 LAYOUT_FIELDS = ("track_list_width",)
@@ -828,3 +835,128 @@ def set_track_list_width(value: int | None) -> Settings:
         )
         save_settings(updated)
         return updated
+
+
+def library_choice_path() -> Path:
+    """Return the file that remembers a chosen Serato library.
+
+    Returns:
+        ``library.json`` inside :func:`config_dir`. The file is not created.
+    """
+    return config_dir() / LIBRARY_CHOICE_NAME
+
+
+def load_remembered_library() -> Path | None:
+    """Return the stored library file, or None.
+
+    Returns:
+        An absolute ``master.sqlite`` path when the file names one. None
+        when the file is missing, unreadable, a shortcut, or the path is
+        not that shape. The database is not opened.
+
+    A relative path, a wrong file name, and an unknown key are ignored.
+    The warning names the key. A missing file is not a warning.
+    """
+    path = library_choice_path()
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        if path.stat().st_size > _LIBRARY_CHOICE_LIMIT:
+            logger.warning("Config file %s is too large — ignored", path.name)
+            return None
+        text = path.read_text(encoding="utf-8")
+        payload: object = json.loads(text)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        logger.warning("Config file %s could not be read — ignored", path.name)
+        return None
+    if not isinstance(payload, dict):
+        logger.warning("Config file must be a mapping — ignored")
+        return None
+    for key in payload:
+        if key != "path":
+            logger.warning("Unknown config key %r — ignored", key)
+    if "path" not in payload:
+        return None
+    return _parse_library_choice(payload.get("path"))
+
+
+def _parse_library_choice(value: object) -> Path | None:
+    """Return a stored library path, or None when it cannot be used.
+
+    Args:
+        value: The ``path`` member of ``library.json``.
+
+    Returns:
+        The path when it is an absolute ``master.sqlite`` string. None
+        after a warning for any other value, including a relative path.
+    """
+    if not isinstance(value, str) or not value or "\x00" in value or len(value) > 4096:
+        logger.warning("Config key 'path' has wrong type — ignored")
+        return None
+    candidate = Path(value)
+    if not candidate.is_absolute() or candidate.name != "master.sqlite":
+        logger.warning("Config key 'path' must be an absolute master.sqlite path — ignored")
+        return None
+    return candidate
+
+
+def remember_library(path: Path) -> None:
+    """Remember a Serato library file for the next launch.
+
+    Args:
+        path: Absolute ``master.sqlite`` path. A shortcut is refused.
+
+    Raises:
+        ValueError: If ``path`` is not an absolute ``master.sqlite`` file
+            path, or it is a shortcut.
+        OSError: If the choice file is a shortcut or a directory, or it
+            cannot be written.
+
+    The database is not opened. The write is a temp file in the same
+    directory followed by replace.
+    """
+    if not isinstance(path, Path):
+        raise ValueError("library path must be an absolute master.sqlite path.")
+    if not path.is_absolute() or path.name != "master.sqlite" or "\x00" in str(path):
+        raise ValueError("library path must be an absolute master.sqlite path.")
+    if path.is_symlink():
+        raise ValueError("library path must not be a shortcut.")
+    resolved = path.resolve()
+    if resolved.name != "master.sqlite":
+        raise ValueError("library path must be an absolute master.sqlite path.")
+    _write_library_choice({"path": str(resolved)})
+
+
+def forget_remembered_library() -> None:
+    """Remove a remembered library path.
+
+    Raises:
+        OSError: If the choice file is a shortcut or cannot be removed.
+
+    A missing file is left alone. The database is not opened.
+    """
+    dest = library_choice_path()
+    if dest.is_symlink():
+        raise OSError("The library choice file cannot be replaced.")
+    if dest.is_file():
+        dest.unlink()
+
+
+def _write_library_choice(body: dict[str, str]) -> None:
+    """Replace ``library.json`` with ``body``.
+
+    Args:
+        body: The object to store. ``path`` is the only field.
+
+    Raises:
+        OSError: If the destination is a shortcut or a directory, or the
+            write fails.
+    """
+    dest = library_choice_path()
+    if dest.is_symlink() or dest.is_dir():
+        raise OSError("The library choice file cannot be replaced.")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(body, indent=2, sort_keys=True) + "\n"
+    temporary = dest.with_suffix(".json.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(dest)

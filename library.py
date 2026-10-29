@@ -280,6 +280,72 @@ def read_conn(path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def is_serato_database(path: Path) -> bool:
+    """Return whether a file is a Serato master database.
+
+    Args:
+        path: Candidate file. A missing file, a shortcut, or any other
+            SQLite file is not a Serato library.
+
+    Returns:
+        True when the file can be opened read-only and has the ``asset``,
+        ``container``, and ``space`` tables. The file is not created or
+        modified.
+    """
+    candidate = Path(path)
+    try:
+        if candidate.is_symlink() or not candidate.is_file():
+            return False
+    except OSError:
+        return False
+    try:
+        with closing(read_conn(candidate)) as conn:
+            rows = conn.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table' AND name IN ('asset', 'container', 'space')
+                """
+            ).fetchall()
+    except (LibraryError, sqlite3.Error, OSError):
+        return False
+    return {row[0] for row in rows} == {"asset", "container", "space"}
+
+
+def use_library_file(path: Path) -> None:
+    """Point this process at an existing Serato database.
+
+    Args:
+        path: ``master.sqlite`` to read. It must already be a Serato
+            library file, and it must not be a shortcut.
+
+    Returns:
+        None.
+
+    Raises:
+        LibraryError: If the path is not an absolute ``master.sqlite``
+            file, is a shortcut, or is not a Serato library.
+
+    The database is opened read-only to check its tables. Nothing is
+    written, and no backup is taken, because the file is not changed.
+    """
+    global MASTER
+    candidate = Path(path)
+    if (
+        not candidate.is_absolute()
+        or candidate.name != "master.sqlite"
+        or "\x00" in str(candidate)
+    ):
+        raise LibraryError("That folder is not the Serato library on this computer.")
+    try:
+        if candidate.is_symlink() or not candidate.is_file():
+            raise LibraryError("That folder is not the Serato library on this computer.")
+        if not is_serato_database(candidate):
+            raise LibraryError("That folder is not the Serato library on this computer.")
+        MASTER = candidate.resolve()
+    except OSError as exc:
+        raise LibraryError("That folder is not the Serato library on this computer.") from exc
+
+
 def _process_is_serato(pid: int) -> bool:
     """Return whether a process id is a live Serato process.
 

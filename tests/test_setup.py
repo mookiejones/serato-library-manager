@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -23,7 +25,9 @@ import app_log
 import library
 import server
 import setup_flow
-from tests.fixture import TempLibrary
+import snapshots
+import telemetry
+from tests.fixture import TempLibrary, build_database
 
 
 def _request(base: str, path: str, payload: dict | None = None) -> tuple[int, object]:
@@ -448,6 +452,337 @@ class MissingLibraryServerTests(unittest.TestCase):
                     app_log.close_files()
         finally:
             tmp.cleanup()
+
+    def test_empty_home_serves_the_page_and_reports_the_missing_library(self) -> None:
+        """Start ``server.py`` against an empty home and keep serving.
+
+        The home directory has no Serato library. ``require_library`` stays
+        at the default ``python server.py`` uses. The page loads, setup
+        says the library was not found and offers a folder choice, and the
+        process does not create a library file.
+
+        Returns:
+            None. The test fails if the process exits or the page is missing.
+        """
+        home = Path(tempfile.mkdtemp(prefix="serato-empty-home-"))
+        config = home / "config"
+        logs = home / "logs"
+        config.mkdir()
+        logs.mkdir()
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+        env["APPDATA"] = str(home / "AppData" / "Roaming")
+        env["XDG_CONFIG_HOME"] = str(home / ".config")
+        env["XDG_STATE_HOME"] = str(home / "state")
+        env[app_config.CONFIG_ENV] = str(config)
+        env[app_config.LOG_ENV] = str(logs)
+        env.pop("HOMEDRIVE", None)
+        env.pop("HOMEPATH", None)
+        env.pop("SERATO_LIBRARY_SMOKE", None)
+        script = (
+            "import json, sys, threading\n"
+            "import library, server\n"
+            "master = str(library.MASTER)\n"
+            "try:\n"
+            "    httpd = server.serve(port=0, require_library=True)\n"
+            "except SystemExit as exc:\n"
+            "    sys.stdout.write(json.dumps({'error': str(exc)}) + '\\n')\n"
+            "    sys.stdout.flush()\n"
+            "    raise SystemExit(1)\n"
+            "host, port = httpd.server_address\n"
+            "if isinstance(host, bytes):\n"
+            "    host = host.decode()\n"
+            "sys.stdout.write(json.dumps({'host': host, 'port': int(port), 'master': master}) + '\\n')\n"
+            "sys.stdout.flush()\n"
+            "thread = threading.Thread(target=httpd.serve_forever, daemon=True)\n"
+            "thread.start()\n"
+            "sys.stdin.readline()\n"
+            "httpd.shutdown()\n"
+            "httpd.server_close()\n"
+            "thread.join(3)\n"
+        )
+        stderr_path = home / "stderr.txt"
+        stderr = stderr_path.open("w", encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            text=True,
+        )
+        line = ""
+        code = 1
+        try:
+            box: dict[str, str] = {}
+
+            def _read() -> None:
+                if proc.stdout is not None:
+                    box["line"] = proc.stdout.readline()
+
+            reader = threading.Thread(target=_read)
+            reader.start()
+            reader.join(20)
+            if reader.is_alive():
+                proc.kill()
+                self.fail("The server did not start against an empty home.")
+            line = box.get("line", "")
+            started = json.loads(line) if line else {}
+            self.assertNotIn("error", started, line)
+            master = Path(started["master"])
+            self.assertTrue(master.is_absolute())
+            self.assertEqual(master.name, "master.sqlite")
+            self.assertTrue(master.resolve().is_relative_to(home.resolve()))
+            self.assertFalse(master.exists())
+            base = f"http://{started['host']}:{started['port']}"
+            status, page = _request_text(base, "/")
+            self.assertEqual(status, 200)
+            self.assertIn("Get started", page)
+            self.assertIn("Choose a folder", page)
+            status, payload = _request(base, "/api/setup")
+            self.assertEqual(status, 200)
+            assert isinstance(payload, dict)
+            self.assertFalse(payload["found"])
+            self.assertEqual(payload["summary"], setup_flow.NOT_FOUND_SUMMARY)
+            self.assertIn("Open Serato DJ once", str(payload["next"]))
+            body = json.dumps(payload)
+            self.assertNotIn("master.sqlite", body)
+            self.assertNotIn(str(master), body)
+            self.assertNotIn(str(home), body)
+            status, picked = _request(base, "/api/setup", {"folder": str(home)})
+            self.assertEqual(status, 200)
+            assert isinstance(picked, dict)
+            self.assertFalse(picked["found"])
+            self.assertEqual(picked["summary"], setup_flow.NOT_FOUND_SUMMARY)
+            self.assertEqual(picked["next"], setup_flow.PICK_FAILED_NEXT)
+            self.assertNotIn(str(home), json.dumps(picked))
+            status, library_payload = _request(base, "/api/library")
+            self.assertEqual(status, 404)
+            assert isinstance(library_payload, dict)
+            self.assertEqual(
+                library_payload["error"],
+                "No Serato library was found on this computer.",
+            )
+            self.assertFalse(master.exists())
+            self.assertFalse((config / app_config.LIBRARY_CHOICE_NAME).exists())
+            if proc.stdin is not None:
+                proc.stdin.write("\n")
+                proc.stdin.flush()
+            code = proc.wait(timeout=5)
+            self.assertEqual(code, 0, stderr_path.read_text(encoding="utf-8", errors="replace")[-2000:])
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+            stderr.close()
+            if proc.stdout is not None:
+                proc.stdout.close()
+            if proc.stdin is not None:
+                proc.stdin.close()
+
+
+class ChosenLibraryTests(unittest.TestCase):
+    """A missing usual library can open a folder that already has one."""
+
+    def setUp(self) -> None:
+        """Point the process at a missing file and isolate settings.
+
+        Returns:
+            None.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self.config = root / "config"
+        self.logs = root / "logs"
+        self.config.mkdir()
+        self.logs.mkdir()
+        self.missing = root / "missing" / "master.sqlite"
+        self.folder = root / "crate-library"
+        self.folder.mkdir()
+        self.db = self.folder / "master.sqlite"
+        build_database(self.db)
+        self._before = self.db.read_bytes()
+        self._old_master = library.MASTER
+        self._old_backed = set(library._backed_up)
+        library.MASTER = self.missing
+        library._backed_up.clear()
+        server.invalidate()
+        self._env = mock.patch.dict(
+            os.environ,
+            {
+                app_config.CONFIG_ENV: str(self.config),
+                app_config.LOG_ENV: str(self.logs),
+                "SERATO_LIBRARY_DISABLE_WATCH": "1",
+            },
+        )
+        self._env.start()
+        self.httpd = server.serve(port=0, require_library=True)
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+        host, port = self.httpd.server_address
+        self.base = f"http://{host}:{port}"
+
+    def tearDown(self) -> None:
+        """Stop the server and restore the process library path.
+
+        Returns:
+            None.
+        """
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=3)
+        snapshots.stop_watch()
+        telemetry.shutdown()
+        self._env.stop()
+        app_log.close_files()
+        library.MASTER = self._old_master
+        library._backed_up.clear()
+        library._backed_up.update(self._old_backed)
+        server.invalidate()
+        self._tmp.cleanup()
+
+    def test_chosen_folder_opens_the_library_without_writing_it(self) -> None:
+        """Open an existing library and leave its bytes unchanged.
+
+        A later title save still copies a backup first. The setup
+        response does not include the path. A folder that is not a
+        library is refused, and so is a shortcut to the file.
+
+        Returns:
+            None. The test fails if the file changes before the save,
+            or if no backup is made for that save.
+        """
+        status, missing = _request(self.base, "/api/setup")
+        self.assertEqual(status, 200)
+        assert isinstance(missing, dict)
+        self.assertFalse(missing["found"])
+        status, picked = _request(self.base, "/api/setup", {"folder": str(self.folder)})
+        self.assertEqual(status, 200)
+        assert isinstance(picked, dict)
+        self.assertTrue(picked["found"])
+        self.assertEqual(picked["track_count"], 2)
+        reported = json.dumps(picked)
+        self.assertNotIn(str(self.db), reported)
+        self.assertNotIn("master.sqlite", reported)
+        self.assertEqual(self.db.read_bytes(), self._before)
+        status, library_payload = _request(self.base, "/api/library")
+        self.assertEqual(status, 200)
+        assert isinstance(library_payload, dict)
+        self.assertEqual(len(library_payload["tracks"]), 2)
+        self.assertEqual(self.db.read_bytes(), self._before)
+        stored = json.loads((self.config / app_config.LIBRARY_CHOICE_NAME).read_text(encoding="utf-8"))
+        self.assertEqual(Path(stored["path"]).resolve(), self.db.resolve())
+        status, settings = _request(self.base, "/api/settings")
+        self.assertEqual(status, 200)
+        self.assertNotIn(str(self.db), json.dumps(settings))
+        other = self.folder.parent / "other"
+        other.mkdir()
+        (other / "master.sqlite").write_bytes(b"not a database")
+        untouched = (other / "master.sqlite").read_bytes()
+        status, rejected = _request(self.base, "/api/setup", {"folder": str(other)})
+        self.assertEqual(status, 200)
+        assert isinstance(rejected, dict)
+        self.assertFalse(rejected["found"])
+        self.assertEqual(rejected["summary"], setup_flow.WRONG_FOLDER_SUMMARY)
+        self.assertEqual((other / "master.sqlite").read_bytes(), untouched)
+        self.assertEqual(Path(library.MASTER).resolve(), self.db.resolve())
+        link = self.folder.parent / "linked"
+        link.mkdir()
+        linked_db = link / "master.sqlite"
+        try:
+            linked_db.symlink_to(self.db)
+        except OSError:
+            linked_db = None
+        if linked_db is not None:
+            library.MASTER = self.missing
+            refused = setup_flow.accept_folder(str(link))
+            self.assertFalse(refused["found"])
+            self.assertEqual(linked_db.read_bytes(), self._before)
+            self.assertFalse(Path(library.MASTER).is_file())
+            library.MASTER = self.db
+        result = library.save_track(1, {"name": "Renamed", "bpm": 126})
+        self.assertTrue(result["ok"])
+        backups = list((self.db.resolve().parent / "Backups").glob("serato-web-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertTrue((backups[0] / "master.sqlite").is_file())
+        self.assertNotEqual(self.db.read_bytes(), self._before)
+
+    def test_open_library_is_not_switched(self) -> None:
+        """Refuse a second library while one is already open.
+
+        Returns:
+            None. The test fails if the process path changes.
+        """
+        library.MASTER = self.db
+        elsewhere = self.folder.parent / "elsewhere"
+        elsewhere.mkdir()
+        build_database(elsewhere / "master.sqlite")
+        before = (elsewhere / "master.sqlite").read_bytes()
+        chosen = setup_flow.accept_folder(str(elsewhere))
+        self.assertFalse(chosen["found"])
+        self.assertEqual(chosen["summary"], setup_flow.WRONG_FOLDER_SUMMARY)
+        self.assertEqual(Path(library.MASTER).resolve(), self.db.resolve())
+        self.assertEqual((elsewhere / "master.sqlite").read_bytes(), before)
+        self.assertFalse((self.config / app_config.LIBRARY_CHOICE_NAME).exists())
+
+    def test_remembered_library_is_used_on_the_next_start(self) -> None:
+        """Use library.json when the server starts again.
+
+        A relative path, a wrong file name, and a non-library file are
+        ignored. A missing remembered file leaves the usual path alone.
+
+        Returns:
+            None. The test fails if the next start stays on the missing path.
+        """
+        setup_flow.accept_folder(str(self.folder))
+        self.assertEqual(Path(library.MASTER).resolve(), self.db.resolve())
+        library.MASTER = self.missing
+        server.invalidate()
+        httpd = server.serve(port=0, require_library=True)
+        try:
+            self.assertEqual(Path(library.MASTER).resolve(), self.db.resolve())
+            host, port = httpd.server_address
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                status, payload = _request(f"http://{host}:{port}", "/api/setup")
+            finally:
+                httpd.shutdown()
+                thread.join(timeout=3)
+            self.assertEqual(status, 200)
+            assert isinstance(payload, dict)
+            self.assertTrue(payload["found"])
+            self.assertNotIn(str(self.db), json.dumps(payload))
+        finally:
+            httpd.server_close()
+            snapshots.stop_watch()
+            telemetry.shutdown()
+        choice = self.config / app_config.LIBRARY_CHOICE_NAME
+        choice.write_text(json.dumps({"path": "relative/master.sqlite"}), encoding="utf-8")
+        library.MASTER = self.missing
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            self.assertIsNone(app_config.load_remembered_library())
+            setup_flow.apply_remembered_library()
+        self.assertTrue(any("path" in line for line in caught.output))
+        self.assertEqual(library.MASTER, self.missing)
+        choice.write_text(
+            json.dumps({"path": str(self.folder / "notes.sqlite")}),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING"):
+            self.assertIsNone(app_config.load_remembered_library())
+        plain = self.folder.parent / "plain"
+        plain.mkdir()
+        plain_db = plain / "master.sqlite"
+        plain_db.write_bytes(b"not a database")
+        app_config.remember_library(plain_db)
+        library.MASTER = self.missing
+        setup_flow.apply_remembered_library()
+        self.assertEqual(library.MASTER, self.missing)
+        self.assertEqual(plain_db.read_bytes(), b"not a database")
 
 
 class _ArtSlots(HTMLParser):
