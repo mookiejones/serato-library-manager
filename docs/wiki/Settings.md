@@ -31,7 +31,7 @@ What can leave, and only after you choose share and only when a key is present, 
 
 **Open logs folder** says **Opened the logs folder.** or **Couldn't open the logs folder.** **Copy logs** says **Copied the logs.** A long log says **Copied the latest log entries. Older entries were left out.** An empty log says **No log entries yet.**
 
-The same settings file remembers the window, the track-list width, that setup finished, and the Rekordbox bar: Memory cues, Hot loops, and the key notation.
+The same settings file remembers the window, the track-list width, that setup finished, and the Rekordbox bar: Memory cues, Hot loops, and the key notation. If setup was pointed at a library that is not in the usual folder, `library.json` in that same folder remembers the file. The path stays on this computer.
 
 | System | Settings | Logs |
 | --- | --- | --- |

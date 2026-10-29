@@ -47,7 +47,7 @@ This app's own files use a different folder, **Serato Library**, with a space.
 
 | System | This app |
 | --- | --- |
-| Mac | `~/Library/Application Support/Serato Library/` (`settings.json`, `related.sqlite`) |
+| Mac | `~/Library/Application Support/Serato Library/` (`settings.json`, `library.json`, `related.sqlite`) |
 | Windows | `%APPDATA%\Serato Library\` |
 
 Hash-checked Backups are `Library/Backups/snapshots` next to `master.sqlite`. The first save in a session also writes `Library/Backups/serato-web-` plus the date and time. That folder is `master.sqlite` and `root.sqlite` only.

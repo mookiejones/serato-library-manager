@@ -76,7 +76,7 @@ A window titled **Serato Library** opens. It stays on this computer. Close the w
 
 Choose **Get started**. When the page names your library, choose **Use this library**.
 
-Nothing there yet? Open Serato DJ once, quit it, and choose **Check again**.
+Nothing there yet? Open Serato DJ once, quit it, and choose **Check again**. If the library is already in another folder, choose **Choose a folder**.
 
 **Cancel** leaves the library alone. Setup comes back until you choose **Open my library**.
 
