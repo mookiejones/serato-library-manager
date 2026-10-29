@@ -159,6 +159,15 @@ textarea:focus-visible,
   text-underline-offset: 3px;
 }
 
+.app-version {
+  margin: 0 0 var(--space-1);
+  color: var(--color-card);
+  font-size: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .mode-note,
 .crate-foot {
   margin: var(--space-2) var(--space-1);
@@ -805,10 +814,31 @@ dialog p {
 
 #consent-accept,
 #open-logs,
-#copy-logs {
+#copy-logs,
+#copy-version {
   background: transparent;
   color: var(--ink);
   border: 1px solid var(--ink);
+}
+
+.about {
+  margin-top: var(--space-5);
+}
+
+.about h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.about-version {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 dialog .check {

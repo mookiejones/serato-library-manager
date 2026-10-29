@@ -80,6 +80,10 @@ export interface ElementIds {
   "settings-close": HTMLButtonElement;
   "open-logs": HTMLButtonElement;
   "copy-logs": HTMLButtonElement;
+  "app-version": HTMLParagraphElement;
+  "about-version": HTMLParagraphElement;
+  "copy-version": HTMLButtonElement;
+  "version-copy-status": HTMLParagraphElement;
   "files-dialog": HTMLDialogElement;
   "files-list": HTMLDivElement;
   "files-status": HTMLParagraphElement;

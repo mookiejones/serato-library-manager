@@ -125,7 +125,7 @@ CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/wor
 
 | | |
 | --- | --- |
-| App | `app_config.APP_VERSION` is the string `GET /api/version` returns. A release build stamps the tag into `_version.py`. Latest GitHub Release: v0.1.1. |
+| App | `app_config.APP_VERSION` is the string `GET /api/version` returns. The rail footer and Settings → About show that string. A release build stamps the tag into `_version.py`. Latest GitHub Release: v0.1.1. |
 | Python | 3.12 and 3.14 on Ubuntu CI. 3.12 on Windows CI. Frozen builds embed 3.12. |
 | OS | macOS and Windows for the app. Linux runs the test suite and is not a published build. |
 | Serato | Serato DJ Pro. Writes and restores run when the version is a dotted number below 5. Serato 5 can be snapshotted and read. Writes and restores stay off while Lucid and Flexible beatgrid storage is not verified. An unknown version blocks writes. |

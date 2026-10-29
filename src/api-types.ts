@@ -350,6 +350,13 @@ export interface SettingsPayload {
   error?: string;
 }
 
+/** JSON body of GET /api/version. commit is null when git cannot name one. */
+export interface VersionPayload {
+  version: string;
+  commit: string | null;
+  source: "release" | "git" | "dev";
+}
+
 export interface LogsPayload {
   text?: string;
   truncated?: boolean;

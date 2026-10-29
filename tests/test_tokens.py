@@ -369,6 +369,7 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     ('.view-switch button[aria-selected="true"]', ("--color-bg",), 15, 400),
     ('.sort-crates button[aria-pressed="true"]', ("--color-bg",), 15, 400),
     (".rail-foot button", ("--color-bg",), 15, 400),
+    (".app-version", ("--color-bg",), 13, 400),
     (".mode-note", ("--color-bg",), 13, 400),
     (".crate-foot", ("--color-bg",), 13, 400),
     (".crate-row", ("--color-bg", "--color-panel"), 15, 400),
@@ -408,11 +409,13 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     ("dialog", ("--color-card",), 15, 400),
     (".dialog-note", ("--color-card",), 15, 400),
     (".dialog-status", ("--color-card",), 15, 400),
+    (".about-version", ("--color-card",), 13, 400),
     ("#consent-decline", ("--color-text",), 15, 400),
     ("#settings-close", ("--color-text",), 15, 400),
     ("#consent-accept", ("--color-card",), 15, 400),
     ("#open-logs", ("--color-card",), 15, 400),
     ("#copy-logs", ("--color-card",), 15, 400),
+    ("#copy-version", ("--color-card",), 15, 400),
     ("#rekordbox-download", ("--color-text",), 15, 400),
     ("#rekordbox-cancel", ("--color-card",), 15, 400),
     (".merge-meta", ("--color-card",), 15, 400),
@@ -643,7 +646,7 @@ class ContrastTests(unittest.TestCase):
             ratio = contrast(_over(mark, surface, alpha or 0), surface)
             self.assertGreaterEqual(ratio, 3, f"holds-selection on {background_name} is {ratio:.2f}:1")
 
-        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice"):
+        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#copy-version", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice"):
             border = _paint(self._rule(selector)["border"], self.colors)
             ratio = contrast(border, self._surface("--color-card"))
             self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
@@ -696,6 +699,7 @@ class ContrastTests(unittest.TestCase):
             "#consent-accept",
             "#open-logs",
             "#copy-logs",
+            "#copy-version",
             "#rekordbox-cancel",
             "#merge-cancel",
             ".wizard-choice",
