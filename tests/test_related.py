@@ -514,8 +514,8 @@ class SidecarTests(unittest.TestCase):
         """Create ``Related - Same`` and drop a track after the link is removed.
 
         The anchor stays out of the crate. The second refresh removes the
-        track that is no longer linked. Serato's backup runs because this
-        writes the library.
+        track that is no longer linked. The write does not add a Backups
+        directory beside the library.
 
         Returns:
             None. The test fails if the crate membership is stale.
@@ -525,7 +525,7 @@ class SidecarTests(unittest.TestCase):
         self.assertTrue(first["created"])
         self.assertEqual(first["name"], "Related - Same")
         self.assertEqual(first["added"], [2])
-        self.assertTrue((self.library.root / "Backups").is_dir())
+        self.assertFalse((self.library.root / "Backups").exists())
         related.remove_link(related.overview("Music/same-a.mp3")["saved"][0]["id"])
         second = related.refresh_crate("Music/same-a.mp3")
         self.assertFalse(second["created"])

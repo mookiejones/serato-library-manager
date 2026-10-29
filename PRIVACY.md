@@ -38,6 +38,8 @@ A missing `SENTRY_DSN` keeps crash reports off even after you opt in. A missing 
 
 The log file is `serato-library.log`. It rotates at 1 MiB and keeps three older files. Logs stay on this machine. They can include the path of the library database. They are not uploaded. Settings has **Open logs folder** and **Copy logs**.
 
+Each library write also appends one JSON line to `operations.jsonl` under the app data folder (`write-checks` inside the same directory as `settings.json`). It is not written beside `master.sqlite`. That line names the operation, a crate, track, or file name, the files that were snapshotted, and whether the write was checked or put back. A file outside the library folder is stored as its name only. The line stays on this machine. It is not a usage report, and it is not uploaded.
+
 ## Release builds
 
 A tagged release writes `SENTRY_DSN`, `POSTHOG_KEY`, and `POSTHOG_HOST` from GitHub Actions secrets into `_build_config.py` before the app is frozen. A manual run of that workflow does not. An empty secret leaves that service off. The copy of `_build_config.py` in git is empty, and a build from source uses that empty file. Do not commit a filled-in key file.

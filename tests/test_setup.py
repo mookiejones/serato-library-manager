@@ -715,9 +715,7 @@ class ChosenLibraryTests(unittest.TestCase):
             library.MASTER = self.db
         result = library.save_track(1, {"name": "Renamed", "bpm": 126})
         self.assertTrue(result["ok"])
-        backups = list((self.db.resolve().parent / "Backups").glob("serato-web-*"))
-        self.assertEqual(len(backups), 1)
-        self.assertTrue((backups[0] / "master.sqlite").is_file())
+        self.assertFalse((self.db.resolve().parent / "Backups").exists())
         self.assertNotEqual(self.db.read_bytes(), self._before)
 
     def test_open_library_is_not_switched(self) -> None:
