@@ -4,7 +4,10 @@ Backups you restore are **Snapshots**. That flow is in the app.
 
 > **PREVIEW.** A plain copy of each drive's `_Serato_` folder inside `Library/Backups/serato-web-` is not in the app. [Issue #91](https://github.com/mookiejones/serato-library-manager/issues/91). **Snapshots** already keeps those drive crates.
 
-> **TODO-SCREENSHOT:** The **Snapshots** view. One card shows a time, a reason, and a Serato version, with **Unavailable** and a drive name. **Review restore** is on the card. The dialog **Restore this snapshot** lists **Crates on an unavailable drive**. **Restore** is visible. The intro says a new snapshot is saved first.
+<figure>
+  <img alt="The Snapshots view with the Restore this snapshot dialog open." src="images/features/backups-and-restore.png">
+  <figcaption>Example data. Review restore is open. The outside-change banner that setup left above the list was cropped off.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -15,7 +18,7 @@ flowchart TD
   plan --> confirm["Restore"]
   confirm --> pre["A new Backup is saved first"]
   pre --> put["Library, drive crates, and Cue point frames"]
-  put --> audio["Restore never changes audio data"]
+  put --> audio["Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was."]
   unplug["Drive unplugged"] --> mark["Marked unavailable"]
   mark --> keep["Crates and tracks are never deleted"]
 ```
@@ -24,7 +27,7 @@ Open **Snapshots**. **Take a snapshot** saves a hash-checked Backup of the libra
 
 **Review restore** shows crates, tracks, Cue changes, and grid changes. **Nothing is changed until you confirm.** **Restore** saves a new snapshot first, so the list can undo it. If the app stops in the middle, the next open puts that saved snapshot back.
 
-Restore never changes audio data. It can put the saved Cue point frames back. The audio bytes stay as they are.
+Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 
 An unplugged drive is marked unavailable, never deleted. Its crates and tracks stay in the Backup, and a restore does not remove them. The plan lines are **Crates on an unavailable drive** and **Tracks on an unavailable drive**.
 
@@ -34,4 +37,4 @@ If something else changes the Serato folder, including Lexicon, the app saves a 
 
 The first save in a session also copies `master.sqlite` and `root.sqlite` into `Library/Backups/serato-web-` plus the date and time. That folder is the database only. It does not hold your music. The hash-checked Backups live in `Library/Backups/snapshots`, beside `master.sqlite`.
 
-On a Mac, external drives need **Files and Folders > Removable Volumes**. The steps are on [Install on a Mac](Install-macOS.md).
+On a Mac, external drives need **Files and Folders > Removable Volumes**. The steps are on [Install on a Mac](Install-macOS).

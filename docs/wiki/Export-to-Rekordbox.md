@@ -2,7 +2,10 @@
 
 > **Status: preview.** Rekordbox XML export is in the app ([PR #39](https://github.com/mookiejones/serato-library-manager/pull/39) is merged). The export is one-way. It does not write the Serato library back.
 
-> **TODO-SCREENSHOT:** **Crates** with a crate selected. The bar shows **Rekordbox**, **Memory cues** checked, **Hot loops** clear, and **Key as stored**. The dialog **Download rekordbox.xml?** lists what is not copied. **Download** and **Cancel** are at the bottom.
+<figure>
+  <img alt="The Download rekordbox.xml dialog over Crates, with Memory cues on and Hot loops off." src="images/features/export-to-rekordbox.png">
+  <figcaption>Example data. Memory cues is on, Hot loops is off, and the loss report is in the dialog.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD

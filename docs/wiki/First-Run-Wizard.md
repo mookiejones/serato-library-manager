@@ -1,6 +1,9 @@
 # First-run setup
 
-> **TODO-SCREENSHOT:** The setup dialog on **Safety snapshot**. The heading is **Safety snapshot**. The body says a backup of the library data is saved before anything is changed. The primary button reads **Take a safety snapshot**. **Back** and **Cancel** are beside it. The step label shows which step this is.
+<figure>
+  <img alt="The Safety snapshot step, with Take a safety snapshot, Back, and Cancel." src="images/features/first-run-setup.png">
+  <figcaption>Example data. Step 3 of 5, Safety snapshot.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -30,4 +33,4 @@ If Serato DJ is open on the snapshot step, the page says **Close Serato DJ to co
 
 **Back** is on every step except Welcome. **Run setup again** in **Settings** shows these steps another time. **Cancel** on that run leaves the library as it is and does not forget that you already finished setup.
 
-The safety copy is the first Backup. Later copies are under **Snapshots**. [Backups and restore](Backups-and-Restore.md). Sharing is [Settings](Settings.md).
+The safety copy is the first Backup. Later copies are under **Snapshots**. [Backups and restore](Backups-and-Restore). Sharing is [Settings](Settings).

@@ -1,6 +1,9 @@
 # Settings
 
-> **TODO-SCREENSHOT:** The **Settings** dialog. The checkbox **Share anonymous usage stats and crash reports** is clear. The note under it says nothing is sent. **Run setup again**, **Open logs folder**, **Copy logs**, and **Close** are in a row.
+<figure>
+  <img alt="Settings with sharing off, and Run setup again, Open logs folder, Copy logs, and Close." src="images/features/settings.png">
+  <figcaption>Example data. Sharing is off. This copy has no telemetry keys.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -24,7 +27,7 @@ Tick **Share anonymous usage stats and crash reports** to turn sharing on. Clear
 
 What can leave, and only after you choose share and only when a key is present, is a count of an action, a track-count range, the app name, the app version, the operating system, a random install id, and a crash report with file paths removed. Titles, artists, crate names, notes, and paths stay on this computer. The full list is [PRIVACY.md](https://github.com/mookiejones/serato-library-manager/blob/main/PRIVACY.md).
 
-**Run setup again** opens [first-run setup](First-Run-Wizard.md). **Cancel** there does not forget that setup already finished.
+**Run setup again** opens [first-run setup](First-Run-Wizard). **Cancel** there does not forget that setup already finished.
 
 **Open logs folder** says **Opened the logs folder.** or **Couldn't open the logs folder.** **Copy logs** says **Copied the logs.** A long log says **Copied the latest log entries. Older entries were left out.** An empty log says **No log entries yet.**
 
@@ -35,4 +38,4 @@ The same settings file remembers the window, the track-list width, that setup fi
 | Mac | `~/Library/Application Support/Serato Library/settings.json` | `~/Library/Logs/Serato Library/` |
 | Windows | `%APPDATA%\Serato Library\settings.json` | `%LOCALAPPDATA%\Serato Library\Logs\` |
 
-**Serato Library** (with a space) is this app. `Serato/Library` is Serato's database. [Where Serato data lives](Where-Serato-Data-Lives.md).
+**Serato Library** (with a space) is this app. `Serato/Library` is Serato's database. [Where Serato data lives](Where-Serato-Data-Lives).

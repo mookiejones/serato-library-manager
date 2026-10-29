@@ -25,11 +25,30 @@ FEATURE_PAGES = (
     "Where-Serato-Data-Lives.md",
 )
 
-SIDEBAR_LINKS = FEATURE_PAGES + (
-    "Home.md",
-    "Quick-Start.md",
-    "Install-macOS.md",
-    "Install-Windows.md",
+FEATURE_IMAGES = {
+    "Hot-Loops-and-Cue-Points.md": "images/features/hot-loops-and-cue-points.png",
+    "Backups-and-Restore.md": "images/features/backups-and-restore.png",
+    "Crates.md": "images/features/crates.png",
+    "Export-to-Rekordbox.md": "images/features/export-to-rekordbox.png",
+    "Organizing-Files.md": "images/features/organizing-files.png",
+    "Related-Tracks.md": "images/features/related-tracks.png",
+    "First-Run-Wizard.md": "images/features/first-run-setup.png",
+    "Settings.md": "images/features/settings.png",
+    "Where-Serato-Data-Lives.md": "images/features/where-serato-data-lives.png",
+}
+
+SIDEBAR_LINKS = tuple(name.removesuffix(".md") for name in FEATURE_PAGES) + (
+    "Home",
+    "Quick-Start",
+    "Install-macOS",
+    "Install-Windows",
+)
+
+RESTORE = (
+    "Restore can rewrite the Serato tags (cue points, beatgrid, autotags) "
+    "inside each audio file, and removes Serato tags the snapshot didn't have. "
+    "The audio stream is hash-checked before and after; if it would change, "
+    "the file is left as it was."
 )
 
 
@@ -37,23 +56,26 @@ class WikiFeaturePageTests(unittest.TestCase):
     """Keep each feature page visual, short, and tied to the real nav names."""
 
     def test_each_feature_page_leads_with_a_picture_and_a_diagram(self) -> None:
-        """Require a screenshot placeholder and a Mermaid flow on every page.
+        """Require an example-data picture and a Mermaid flow on every page.
 
         Returns:
             None. The test fails when a page drops its picture or its diagram.
         """
         for name in FEATURE_PAGES:
             text = (WIKI / name).read_text(encoding="utf-8")
-            self.assertIn("TODO-SCREENSHOT", text, name)
+            image = FEATURE_IMAGES[name]
+            self.assertNotIn("TODO-SCREENSHOT", text, name)
+            self.assertIn(image, text, name)
+            self.assertTrue((WIKI / image).is_file(), image)
+            self.assertIn("Example data.", text, name)
             self.assertIn("```mermaid", text, name)
-            self.assertLess(text.index("TODO-SCREENSHOT"), text.index("```mermaid"), name)
+            self.assertLess(text.index(image), text.index("```mermaid"), name)
             self.assertNotIn("never touched", text, name)
 
     def test_sidebar_links_features_and_the_quick_start_pages(self) -> None:
         """Link every feature plus Home, Quick Start, and both Install pages.
 
-        Home, Quick Start, and the Install pages may live in another pull
-        request. The sidebar still names them.
+        Wiki links have no ``.md`` suffix.
 
         Returns:
             None. The test fails when a wiki link is missing.
@@ -61,16 +83,22 @@ class WikiFeaturePageTests(unittest.TestCase):
         sidebar = (WIKI / "_Sidebar.md").read_text(encoding="utf-8")
         for name in SIDEBAR_LINKS:
             self.assertIn(f"]({name})", sidebar)
+        for path in WIKI.glob("*.md"):
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if "http" in line:
+                    continue
+                self.assertNotIn(".md)", line, path.name)
 
     def test_backups_restore_audio_and_unplugged_drives(self) -> None:
-        """Say restore leaves audio data alone, and an unplugged drive stays.
+        """Say restore rewrites Serato tags, and an unplugged drive stays.
 
         Returns:
             None. The test fails when those sentences drift.
         """
         text = (WIKI / "Backups-and-Restore.md").read_text(encoding="utf-8")
         self.assertIn("Snapshots", text)
-        self.assertIn("Restore never changes audio data.", text)
+        self.assertIn(RESTORE, text)
+        self.assertNotIn("never changes audio", text)
         self.assertIn("marked unavailable, never deleted", text)
         self.assertIn("Files and Folders > Removable Volumes", text)
         self.assertIn("PREVIEW", text)
@@ -99,7 +127,7 @@ class WikiFeaturePageTests(unittest.TestCase):
         self.assertIn("Status: preview.", page)
         self.assertIn("https://github.com/mookiejones/serato-library-manager/pull/39", page)
         self.assertIn("Status: preview.", guide)
-        self.assertLess(page.index("Status: preview."), page.index("TODO-SCREENSHOT"))
+        self.assertLess(page.index("Status: preview."), page.index("images/features/"))
 
     def test_pages_use_the_nav_names(self) -> None:
         """Use Crates, Snapshots, and Prepare as the window names them.
@@ -110,6 +138,13 @@ class WikiFeaturePageTests(unittest.TestCase):
         crates = (WIKI / "Crates.md").read_text(encoding="utf-8")
         self.assertIn("**Crates**", crates)
         self.assertIn("**Prepare**", crates)
+        self.assertIn("expanded list", crates)
+        self.assertIn("native dropdown", crates)
+        files = (WIKI / "Organizing-Files.md").read_text(encoding="utf-8")
+        self.assertIn("/tmp/slm-example", files)
+        self.assertIn("example paths", files)
+        where_page = (WIKI / "Where-Serato-Data-Lives.md").read_text(encoding="utf-8")
+        self.assertIn("diagram, not a screenshot", where_page)
         hot = (WIKI / "Hot-Loops-and-Cue-Points.md").read_text(encoding="utf-8")
         self.assertIn("**Crates**", hot)
         self.assertIn("**Snapshots**", hot)
@@ -118,7 +153,10 @@ class WikiFeaturePageTests(unittest.TestCase):
         where = (WIKI / "Where-Serato-Data-Lives.md").read_text(encoding="utf-8")
         self.assertIn("marked unavailable, never deleted", where)
         self.assertIn("Files and Folders > Removable Volumes", where)
-        self.assertIn("Restore never changes audio data.", where)
+        self.assertIn(RESTORE, where)
+        self.assertNotIn("never changes audio", where)
+        self.assertIn(RESTORE, hot)
+        self.assertNotIn("never changes audio", hot)
 
     def test_mkdocs_excludes_wiki_markdown(self) -> None:
         """Keep the wiki drafts out of the strict site build.

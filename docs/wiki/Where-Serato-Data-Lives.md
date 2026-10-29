@@ -1,6 +1,9 @@
 # Where Serato data lives
 
-> **TODO-SCREENSHOT:** Two Finder windows on a Mac. One is `~/Library/Application Support/Serato/Library` with `master.sqlite` and `root.sqlite`. The other is `~/Library/Application Support/Serato Library` with `settings.json` and `related.sqlite`. Beside them, System Settings is on **Privacy & Security**, **Files and Folders**, **Serato Library**, with **Removable Volumes** switched on.
+<figure>
+  <img alt="A diagram of the Serato library folder, the Serato Library app folder, each drive's _Serato_ folder, and the rules for those files." src="images/features/where-serato-data-lives.png">
+  <figcaption>Example data. This is a diagram, not a screenshot. The paths in it are examples. The Rules box uses older wording for restore. The paragraph under the diagram is what restore does.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -26,7 +29,7 @@ On a Mac: Finder, **Go**, **Go to Folder**, paste `~/Library/Application Support
 
 On Windows: Windows key and R, paste `%LOCALAPPDATA%\Serato\Library`.
 
-Cue points, loops, and the beatgrid live in the audio file, not in the crate row. A normal save does not rewrite that file. **Files** can move, rename, and trash the audio file. Restore never changes audio data. It can put the saved Cue point frames back.
+Cue points, loops, and the beatgrid live in the audio file, not in the crate row. A normal save does not rewrite that file. **Files** can move, rename, and trash the audio file. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 
 Each drive with a Serato folder has `_Serato_` at its root, including `database V2`. **Snapshots** keeps those crates. An unplugged drive is marked unavailable, never deleted.
 
@@ -38,7 +41,7 @@ On a Mac, external drives need **Files and Folders > Removable Volumes**. That i
 4. Select **Serato Library**.
 5. Turn on **Removable Volumes**.
 
-The steps, including the unsigned-app warning, are on [Install on a Mac](Install-macOS.md).
+The steps, including the unsigned-app warning, are on [Install on a Mac](Install-macOS).
 
 This app's own files use a different folder, **Serato Library**, with a space.
 
@@ -49,4 +52,4 @@ This app's own files use a different folder, **Serato Library**, with a space.
 
 Hash-checked Backups are `Library/Backups/snapshots` next to `master.sqlite`. The first save in a session also writes `Library/Backups/serato-web-` plus the date and time. That folder is `master.sqlite` and `root.sqlite` only.
 
-Logs are `~/Library/Logs/Serato Library/` on a Mac and `%LOCALAPPDATA%\Serato Library\Logs\` on Windows. [Settings](Settings.md) opens that folder.
+Logs are `~/Library/Logs/Serato Library/` on a Mac and `%LOCALAPPDATA%\Serato Library\Logs\` on Windows. [Settings](Settings) opens that folder.

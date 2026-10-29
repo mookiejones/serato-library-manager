@@ -1,6 +1,9 @@
 # Organizing files
 
-> **TODO-SCREENSHOT:** The **Files** view in a music folder. One audio file is ticked and marked **In library**. The path line shows the folder. **Rename**, **Move to folder**, **Move this folder**, **Replace file**, and **Delete** are along the bottom. The dialog **Review this change** is open and says **Nothing is changed until you confirm.**
+<figure>
+  <img alt="The Files view reviewing a rename. The folder path is under /tmp/slm-example." src="images/features/organizing-files.png">
+  <figcaption>Example data. Paths that start with /tmp/slm-example are example paths. The dialog is reviewing a rename.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -28,6 +31,6 @@ Quit Serato DJ Pro first. Every change opens **Review this change**. The dialog 
 
 **Cancel** writes nothing. A shortcut cannot be selected. A missing library file can leave the library, and nothing goes to the Trash, because the file is not on disk.
 
-A successful move also updates related-track links. [Related tracks](Related-Tracks.md).
+A successful move also updates related-track links. [Related tracks](Related-Tracks).
 
-On a Mac, external drives need **Files and Folders > Removable Volumes**. The steps are on [Install on a Mac](Install-macOS.md). An unplugged drive is not in the folder list. It is not deleted from the library. [Backups and restore](Backups-and-Restore.md) marks that drive unavailable.
+On a Mac, external drives need **Files and Folders > Removable Volumes**. The steps are on [Install on a Mac](Install-macOS). An unplugged drive is not in the folder list. It is not deleted from the library. [Backups and restore](Backups-and-Restore) marks that drive unavailable.

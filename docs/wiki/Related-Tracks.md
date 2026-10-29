@@ -1,6 +1,9 @@
 # Related tracks
 
-> **TODO-SCREENSHOT:** A track open on the right. The **Related tracks** section shows one saved row marked **Two-way**, a note, and **Remove**. Under it, **Find a track to link**, **Note**, **Link rating**, **Two-way link**, and **Save link**. A suggestion row has **Save**. **Update Serato crate** is under the list.
+<figure>
+  <img alt="Related tracks on an open track, with a two-way link and suggestions." src="images/features/related-tracks.png">
+  <figcaption>Example data. One saved two-way link, suggestions, and Update Serato crate.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -36,4 +39,4 @@ The live view while a deck is playing is a different app, [serato-listener](http
 | Mac | `~/Library/Application Support/Serato Library/related.sqlite` |
 | Windows | `%APPDATA%\Serato Library\related.sqlite` |
 
-That folder is **Serato Library**, with a space. It is not `Serato/Library`, which holds `master.sqlite`. A move in **Files** updates these paths. [Where Serato data lives](Where-Serato-Data-Lives.md).
+That folder is **Serato Library**, with a space. It is not `Serato/Library`, which holds `master.sqlite`. A move in **Files** updates these paths. [Where Serato data lives](Where-Serato-Data-Lives).

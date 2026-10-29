@@ -1,6 +1,9 @@
 # Crates
 
-> **TODO-SCREENSHOT:** **Crates** selected in the sidebar. The space menu shows **Library**, and **Prepare** is one of the choices. A nested crate is open under a parent. **All tracks** is at the top. **New**, **Rename**, **Color**, and **Delete** sit under the list. One track is open on the right with crate checkboxes.
+<figure>
+  <img alt="Crates with Deep House selected and the open track's crate checkboxes." src="images/features/crates.png">
+  <figcaption>Example data. Deep House is open, and the track's crate checkboxes are on the right. The space menu is drawn here as an expanded list. In the app it is the native dropdown.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -31,4 +34,4 @@ There is no drag and drop. This app does not move an existing crate to a new par
 
 A smart crate shows **smart**. You cannot tick it in the track's crate list. Putting a crate inside it says **A smart crate cannot contain another crate.** Adding a track by hand says **Smart crates choose their tracks from rules.**
 
-To put a song in a crate, open the track, find **Crates**, and tick a normal crate. The audio file stays where it is. Moving, renaming, or trashing the file is [Organizing files](Organizing-Files.md).
+To put a song in a crate, open the track, find **Crates**, and tick a normal crate. The audio file stays where it is. Moving, renaming, or trashing the file is [Organizing files](Organizing-Files).

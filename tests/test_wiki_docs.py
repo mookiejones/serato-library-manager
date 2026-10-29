@@ -64,7 +64,14 @@ class QuickStartTests(unittest.TestCase):
         self.assertIn("The logo on the banner is not approved yet. It may change.", text)
         self.assertIn("images/quickstart-banner-light.png", text)
         self.assertNotIn("<picture>", text)
-        self.assertIn("Restore never changes audio data.", text)
+        self.assertIn(
+            "Restore can rewrite the Serato tags (cue points, beatgrid, autotags) "
+            "inside each audio file, and removes Serato tags the snapshot didn't have. "
+            "The audio stream is hash-checked before and after; if it would change, "
+            "the file is left as it was.",
+            text,
+        )
+        self.assertNotIn("never changes audio", text)
         self.assertNotIn("never touched", text)
         for caption in CAPTIONS:
             self.assertIn(caption, text)
@@ -98,7 +105,14 @@ class QuickStartTests(unittest.TestCase):
             "step-5-dark.svg",
         ):
             self.assertTrue((ROOT / "docs" / "wiki" / "images" / name).is_file())
-        self.assertIn("Restore never changes audio data.", text)
+        self.assertIn(
+            "Restore can rewrite the Serato tags (cue points, beatgrid, autotags) "
+            "inside each audio file, and removes Serato tags the snapshot didn't have. "
+            "The audio stream is hash-checked before and after; if it would change, "
+            "the file is left as it was.",
+            text,
+        )
+        self.assertNotIn("never changes audio", text)
         self.assertNotIn("never touched", text)
         for caption in CAPTIONS:
             self.assertIn(caption, text)
@@ -139,7 +153,14 @@ class InstallPageTests(unittest.TestCase):
         self.assertIn("Crates", home)
         self.assertIn("Snapshots", home)
         self.assertIn("PREVIEW", home)
-        self.assertIn("Restore never changes audio data.", home)
+        self.assertIn(
+            "Restore can rewrite the Serato tags (cue points, beatgrid, autotags) "
+            "inside each audio file, and removes Serato tags the snapshot didn't have. "
+            "The audio stream is hash-checked before and after; if it would change, "
+            "the file is left as it was.",
+            home,
+        )
+        self.assertNotIn("never changes audio", home)
         self.assertNotIn("never touched", home + mac + windows)
         quick = (ROOT / "docs" / "wiki" / "Quick-Start.md").read_text(encoding="utf-8")
         for page in (home, mac, windows, quick):

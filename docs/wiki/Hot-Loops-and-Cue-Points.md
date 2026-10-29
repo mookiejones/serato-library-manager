@@ -1,6 +1,9 @@
 # Hot loops and Cue points
 
-> **TODO-SCREENSHOT:** A track open on the right under **Cues, loops, and beatgrid**, with a few colored Cue points and one loop. The bar above the list shows **Memory cues** checked, **Hot loops** clear, the help line **Uses a free hot-cue pad**, and the key menu on **Key as stored**.
+<figure>
+  <img alt="Crates with Memory cues on, Hot loops off, and Cue points listed for the open track." src="images/features/hot-loops-and-cue-points.png">
+  <figcaption>Example data. Memory cues is on, Hot loops is off, and the open track lists Cue points and a loop.</figcaption>
+</figure>
 
 ```mermaid
 flowchart TD
@@ -9,7 +12,7 @@ flowchart TD
   file --> save["Save track writes the library only"]
   bar["Memory cues and Hot loops"] --> xml["Rekordbox writes rekordbox.xml"]
   snap["Snapshots, then Restore"] --> frames["Saved Cue point frames go back"]
-  frames --> audio["Restore never changes audio data"]
+  frames --> audio["Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was."]
 ```
 
 Cue points, loops, and the beatgrid live in the audio file. Open a track from **Crates**. The section is **Cues, loops, and beatgrid**. The line under it reads **Read from the audio file. These are not written back.**
@@ -20,4 +23,4 @@ Cue points, loops, and the beatgrid live in the audio file. Open a track from **
 
 Those boxes change the Rekordbox file only. They do not move pads inside Serato. With **Hot loops** on, a saved loop takes its own pad when that pad is free and it is one of the first eight. A loop whose pad is already taken stays a memory loop. A loop past those eight pads stays a memory loop too. With the box clear, every saved loop stays a memory loop.
 
-Putting Cue points back is a restore from **Snapshots**. Restore never changes audio data. It can put the saved Cue point frames back. [Backups and restore](Backups-and-Restore.md) is that flow. The export keeps **Status: preview** on [Export to Rekordbox](Export-to-Rekordbox.md).
+Putting Cue points back is a restore from **Snapshots**. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was. [Backups and restore](Backups-and-Restore) is that flow. The export keeps **Status: preview** on [Export to Rekordbox](Export-to-Rekordbox).
