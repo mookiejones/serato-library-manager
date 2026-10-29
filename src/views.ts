@@ -26,6 +26,7 @@ import type {
 import { bridge } from "./bridge";
 import { el } from "./dom";
 import { clockLabel, colorHex, compare, durationLabel, sizeLabel } from "./format";
+import { loadGigCheck, showGigFailure } from "./gig";
 import { failSnapshots, loadSnapshots } from "./restore";
 import { COLOR_NAMES, COLORS, FILE_ROW, ROOT_ROW, state } from "./state";
 import { paintRows } from "./virtual-scroll";
@@ -516,25 +517,33 @@ export function renderColumns() {
  */
 export function renderShell() {
   const cratesMode = state.mode === "crates";
+  const gigMode = state.mode === "gig";
   const historyMode = state.mode === "history";
-  el("crate-tools").hidden = !cratesMode;
+  const showCrates = cratesMode || gigMode;
+  el("crate-tools").hidden = !showCrates;
   el("crate-actions").hidden = !cratesMode;
-  el("crate-list").hidden = !cratesMode;
+  el("crate-list").hidden = !showCrates;
   el("session-list").hidden = !historyMode;
   el("mode-note").hidden = cratesMode || historyMode;
   const filesMode = state.mode === "files";
   const snapshotsMode = state.mode === "snapshots";
-  el("browser").hidden = filesMode || snapshotsMode;
-  el("track-splitter").hidden = filesMode || snapshotsMode;
-  el("detail").hidden = filesMode || snapshotsMode;
+  const panelMode = filesMode || snapshotsMode || gigMode;
+  el("browser").hidden = panelMode;
+  el("track-splitter").hidden = panelMode;
+  el("detail").hidden = panelMode;
   el("files-panel").hidden = !filesMode;
   el("snapshots-panel").hidden = !snapshotsMode;
+  el("gig-panel").hidden = !gigMode;
   if (state.mode === "missing") el("mode-note").textContent = "Tracks Serato has marked missing in this space.";
   if (state.mode === "duplicates") {
     el("mode-note").textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
   }
   if (state.mode === "stems") el("mode-note").textContent = "Tracks with a stems analysis state.";
   if (filesMode) el("mode-note").textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
+  if (gigMode) {
+    el("mode-note").textContent = "Read-only. This check does not change the library.";
+    document.querySelector(".rules")?.remove();
+  }
   if (snapshotsMode) {
     el("mode-note").textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
   }
@@ -559,6 +568,11 @@ export function renderShell() {
     }
     const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
     el("crate-foot").textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
+    return;
+  }
+  if (gigMode) {
+    const crate = state.crates.find((item) => item.id === state.activeCrate);
+    el("crate-foot").textContent = state.activeCrate === "all" ? "All tracks" : (crate?.name ?? "Selected crate");
     return;
   }
   if (snapshotsMode) {
@@ -606,6 +620,10 @@ export function renderList() {
   renderShell();
   if (state.mode === "files") {
     renderFiles();
+    return;
+  }
+  if (state.mode === "gig") {
+    renderCrates();
     return;
   }
   renderColumns();
@@ -670,6 +688,7 @@ export function selectCrate(id: number | "all") {
   if (id !== "all") expandAncestors(id);
   el("list").scrollTop = 0;
   renderList();
+  if (state.mode === "gig") loadGigCheck().catch(showGigFailure);
 }
 
 /**
@@ -2183,7 +2202,8 @@ export async function loadLibrary() {
 }
 
 /**
- * Switch among crates, history, missing, duplicates, stems, and files.
+ * Switch among crates, history, missing, duplicates, stems, files,
+ * snapshots, and gig.
  *
  * History sorts by start time descending and loads sessions once.
  * Duplicates load when this space has not been scanned yet. Files loads
@@ -2214,6 +2234,7 @@ export function setMode(mode: string) {
   if (mode === "snapshots") {
     loadSnapshots().catch((error) => failSnapshots(error));
   }
+  if (mode === "gig") loadGigCheck().catch(showGigFailure);
   renderList();
 }
 
@@ -2894,6 +2915,7 @@ export function wireLibrary(): void {
     const jobs = [loadLibrary()];
     if (state.mode === "history") jobs.push(loadHistory());
     if (state.mode === "duplicates") jobs.push(loadDuplicates());
+    if (state.mode === "gig") jobs.push(loadGigCheck().catch(showGigFailure));
     Promise.all(jobs).catch(showFailure);
   });
 
@@ -2926,6 +2948,7 @@ export function wireLibrary(): void {
     state.duplicateGroups = [];
     loadLibrary().then(() => {
       if (state.mode === "duplicates") return loadDuplicates();
+      if (state.mode === "gig") return loadGigCheck().catch(showGigFailure);
       return null;
     }).catch(showFailure);
   });

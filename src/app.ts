@@ -5,13 +5,14 @@
  * fetch when they are imported. This file attaches listeners, then calls
  * loadLibrary. Settings load when the dialogs wire. server.py uses port
  * 8765. The desktop app uses a free port, and this page calls the same
- * origin. Snapshot UI is src/restore.ts. This file does not open
- * master.sqlite itself.
+ * origin. Snapshot UI is src/restore.ts. The gig check is src/gig.ts.
+ * This file does not open master.sqlite itself.
  */
 
 import { failureOf } from "./api";
 import { wireDialogs } from "./dialogs";
 import { el } from "./dom";
+import { wireGigCheck } from "./gig";
 import { wireLayout } from "./layout";
 import {
   bindLibraryReload,
@@ -23,7 +24,7 @@ import {
   takeSnapshot,
 } from "./restore";
 import { state } from "./state";
-import { loadLibrary, showFailure, wireLibrary } from "./views";
+import { loadLibrary, setMode, showFailure, wireLibrary } from "./views";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
 /**
@@ -63,6 +64,9 @@ wireLibrary();
 wireVirtualScroll();
 wireDialogs();
 wireSnapshots();
+wireGigCheck(() => {
+  setMode("crates");
+});
 wireLayout();
 bindLibraryReload(loadLibrary);
 loadLibrary().catch(showFailure);

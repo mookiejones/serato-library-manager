@@ -2,9 +2,7 @@
 
 Snapshots, restore, and undo are in the app. The sidebar views include **Crates** and **Snapshots**. **Prepare** is a space in the space menu. Open **Snapshots**, then **Review restore**. Quit Serato first. [Safety and backups](guide/safety.md#snapshots) has the steps.
 
-!!! warning "PREVIEW"
-
-    **Gig check** is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app. The panic card below is an example layout, not the current window.
+The gig check is in the app. Open **Gig**, or run `python3 gig_check.py`. [Before a gig](guide/gig-check.md). The panic card below is an example layout, not the current window.
 
 > **Do this first.** Don't delete, re-import or "rebuild" anything yet. Most crates that look gone are only hidden.
 > Close Serato, then copy the whole `_Serato_` folder (on every drive) somewhere safe. That way every step below can be undone.
@@ -22,7 +20,7 @@ Snapshots, restore, and undo are in the app. The sidebar views include **Crates*
 
 ![Gig-night panic card. Example layout. Three columns for missing tracks, a vanished crate, and a drive that will not mount. The card shows Gig check and a Rewind control.](media/docs-panic-card.png)
 
-*Example layout, not the current window. **Gig check** on the card is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app. Restore is **Snapshots**, then **Review restore**.*
+*Example layout, not the current window. The gig check is in the app. Restore is **Snapshots**, then **Review restore**.*
 
 ## A. Red or missing tracks
 1. Plug in every drive your music lives on.
@@ -46,9 +44,7 @@ Snapshots, restore, and undo are in the app. The sidebar views include **Crates*
 
 ---
 
-!!! warning "PREVIEW"
-
-    **Gig check** is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app.
+The gig check is in the app. Open **Gig**, or run `python3 gig_check.py`. [Before a gig](guide/gig-check.md).
 
 **About this app.** Open **Snapshots** to restore, or to undo a change another program made. **Review restore** writes nothing until you confirm, and confirm saves a snapshot first. **Review undo** puts back the previous snapshot. [Is my library safe?](is-my-library-safe.md).
 

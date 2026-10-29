@@ -46,6 +46,7 @@ These are on `main` (1.1.0).
 - Save related tracks in `related.sqlite` next to the app settings, not in Serato's library.
 - Rename, move, replace, and trash audio, and update the library path.
 - Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied into the snapshot. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
+- Run **Gig**, a read-only check before a gig. It gives a ready score and a Holding it back list: missing files, a drive that is not connected, Apple Music streaming tracks, empty crates, whether a snapshot from the last 7 days exists, and what changed since the latest snapshot. A missing drive, or a missing file in the crate you selected, is not ready. `python3 gig_check.py` prints the same report. See [Before a gig](docs/guide/gig-check.md).
 - The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
 - Ask before sharing anonymous counts and crash reports. Setup asks on the first launch. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
 
@@ -133,7 +134,7 @@ CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/wor
 ## Guides
 
 - [Panic page](docs/panic.md). Red tracks, missing crates, a drive that will not mount, or a library that looks wrong after a Serato update. Restore in the app is **Snapshots**, then **Review restore**.
-- [Is my library safe?](docs/is-my-library-safe.md). Snapshots, restore, undo, and the outside-change watcher. The gig check is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. The pictures are example layouts.
+- [Is my library safe?](docs/is-my-library-safe.md). Snapshots, restore, undo, and the outside-change watcher. The gig check is in the app. The pictures are example layouts.
 - [Moving between Serato and Rekordbox](docs/coming-from-rekordbox.md). What the export keeps.
 - [User guide](docs/index.md). The rest of the app.
 

@@ -1,5 +1,9 @@
 # Troubleshooting
 
+## The gig check says Not ready
+
+Open [Before a gig](gig-check.md). **Not ready** with a drive name means that drive is absent. **Not ready** with missing files lists each path. The check does not change the library.
+
 ## The edit buttons are off
 
 Serato DJ Pro still has the library, or the database is locked.

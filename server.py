@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 import app_config
 import app_log
 import files
+import gig_check
 import library
 import music_roots
 import rekordbox
@@ -1514,8 +1515,9 @@ class Handler(BaseHTTPRequestHandler):
 
         Health and version are answered before the library is opened.
         Settings and logs are answered before the library routes. Library,
-        status, track, history, duplicate, file, related-track, M3U, and
-        rekordbox XML paths return data. Every other path is a file under static/.
+        status, track, history, duplicate, file, related-track, gig-check,
+        M3U, and rekordbox XML paths return data. Every other path is a file
+        under static/.
         """
         try:
             self._do_GET()
@@ -1526,8 +1528,8 @@ class Handler(BaseHTTPRequestHandler):
         """Answer a GET request.
 
         Health and version do not open the library. Library, status, track,
-        history, duplicate, file, M3U, and rekordbox XML paths return data.
-        Every other path is a file under static/.
+        history, duplicate, file, related-track, gig-check, M3U, and rekordbox
+        XML paths return data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1615,6 +1617,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(body)
+                return
+            if parsed.path == "/api/gig-check":
+                space = require_space(query_text(query, "space"))
+                raw_crate = query_text(query, "crate", "all") or "all"
+                report = gig_check.run_gig_check(space=space, crate_id=crate_query(raw_crate))
+                self.send_json(gig_check.report_to_dict(report))
                 return
             if parsed.path == "/api/export.rekordbox.xml":
                 space = require_space(query_text(query, "space"))

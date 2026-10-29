@@ -2,9 +2,7 @@
 
 Restore, undo, snapshots, and the outside-change watcher are in the app. Open **Snapshots**. The sidebar views include **Crates** and **Snapshots**. **Prepare** is a space in the space menu. [Safety and backups](guide/safety.md#snapshots) is the step-by-step page.
 
-!!! warning "PREVIEW"
-
-    The gig check is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app. The Rekordbox export in the first rule is already shipped. See [Coming from Rekordbox](coming-from-rekordbox.md).
+The gig check is in the app. Open **Gig**, or run `python3 gig_check.py`. It does not write the library. See [Before a gig](guide/gig-check.md). The Rekordbox export in the first rule is already shipped. See [Coming from Rekordbox](coming-from-rekordbox.md).
 
 ## The rules we follow
 - **Read first.** Checks, reports and the Rekordbox export only read your Serato files. The export writes a separate XML file and never writes back (see [Coming from Rekordbox](coming-from-rekordbox.md)).
@@ -12,7 +10,7 @@ Restore, undo, snapshots, and the outside-change watcher are in the app. Open **
 - **Snapshot first.** Before any change, we save a snapshot and check it against what's on disk.
 - **Every restore can be undone.** A restore takes its own snapshot first.
 - **A missing drive is never a deletion.** Its tracks and crates are marked unavailable, never removed.
-- **Empty crates.** Serato deletes empty crates when it closes. The gig check that would flag them first is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. It is not in the app.
+- **Empty crates.** The gig check flags an empty crate with **Serato may delete this crate when it closes.** Put a track in the crate if you want to keep it. See [Before a gig](guide/gig-check.md).
 - **Outside changes get caught.** If another app changes your Serato folder, we take a snapshot, show what changed and offer an undo. We can't catch the moment *before* an outside app writes, so undo returns you to our last snapshot. In the app that button is **Review undo**.
 - **Restore is free.**
 

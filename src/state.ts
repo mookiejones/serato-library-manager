@@ -101,6 +101,7 @@ export interface PageState {
   writeBlock: string;
   seratoRunning: boolean;
   snapshotPlanId: string;
+  gigToken: number;
   view: Track[];
 }
 
@@ -157,5 +158,6 @@ export const state: PageState = {
   writeBlock: "",
   seratoRunning: false,
   snapshotPlanId: "",
+  gigToken: 0,
   view: [],
 };

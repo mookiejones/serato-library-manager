@@ -38,6 +38,11 @@ export interface ElementIds {
   "snapshot-dialog": HTMLDialogElement;
   "snapshot-status": HTMLParagraphElement;
   "snapshots-take": HTMLButtonElement;
+  "gig-panel": HTMLElement;
+  "gig-scope": HTMLParagraphElement;
+  "gig-status": HTMLParagraphElement;
+  "gig-report": HTMLDivElement;
+  "gig-refresh": HTMLButtonElement;
   "crate-search": HTMLInputElement;
   reload: HTMLButtonElement;
   "export-m3u": HTMLButtonElement;

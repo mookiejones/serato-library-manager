@@ -459,13 +459,15 @@ def own_writes() -> Iterator[SnapshotStore]:
 class SnapshotStore:
     """Save, list, plan, and restore hash-checked snapshots for one library."""
 
-    def __init__(self, master: Path, drives: Sequence[DriveSpec] | None = None):
+    def __init__(self, master: Path, drives: Sequence[DriveSpec] | None = None, *, recover: bool = True):
         """Open the store beside a master database.
 
         Args:
             master: ``master.sqlite`` for this library.
             drives: Drives to snapshot. None discovers them, and a relocated
                 library discovers none unless this list is passed.
+            recover: Roll back an unfinished restore now. The read-only gig
+                check passes False so opening the store cannot write.
         """
         self.master = Path(master)
         self.drives = None if drives is None else list(drives)
@@ -475,7 +477,8 @@ class SnapshotStore:
         self.serato_running = serato_dj_running
         self.process_names: Callable[[], Sequence[str]] = default_process_names
         self._depth = 0
-        self._recover_if_journal()
+        if recover:
+            self._recover_if_journal()
 
     def list_snapshots(self) -> list[SnapshotInfo]:
         """Return snapshots, newest first.
@@ -515,6 +518,28 @@ class SnapshotStore:
         manifest = self._manifest(snapshot_id)
         self._verify(manifest)
         return _contents(manifest, self._read_blob)
+
+    def database_bytes(self, snapshot_id: str) -> bytes | None:
+        """Return the ``master.sqlite`` copy saved in one snapshot.
+
+        Args:
+            snapshot_id: Id from ``list_snapshots``.
+
+        Returns:
+            The database bytes after their hash is checked, or None when the
+            snapshot holds no database copy.
+
+        Raises:
+            SnapshotError: If the id, the manifest, or the blob is not valid.
+        """
+        database = self._manifest(snapshot_id).get("database")
+        master = database.get("master") if isinstance(database, dict) else None
+        if not isinstance(master, dict) or not isinstance(master.get("sha256"), str):
+            return None
+        data = self._read_blob(master["sha256"])
+        if data[:15] != b"SQLite format 3":
+            raise SnapshotError("A database snapshot is not a SQLite file.")
+        return data
 
     def take(self, trigger: str, reason: str, source: str | None = None) -> SnapshotInfo:
         """Save a snapshot of the database, crates, and Serato frames.
@@ -2269,6 +2294,44 @@ def _audio_paths(master: Path, spec: DriveSpec, drives: Sequence[Mapping[str, ob
     return paths
 
 
+def _connect_read_only(path: Path) -> sqlite3.Connection:
+    """Open a SQLite file in read-only URI mode.
+
+    Windows needs ``file:///C:/...``. A backslash in ``file:C:\\...`` does
+    not open. The plain ``file:`` form is tried after the RFC URI so a
+    platform that already accepted it still opens.
+
+    Args:
+        path: Database file. It must be absolute.
+
+    Returns:
+        An open connection. The caller closes it.
+
+    Raises:
+        sqlite3.Error: If every URI spelling fails.
+    """
+    uris: list[str] = []
+    try:
+        uris.append(path.resolve().as_uri() + "?mode=ro")
+    except (OSError, ValueError):
+        pass
+    posix = f"file:{path.as_posix()}?mode=ro"
+    if posix not in uris:
+        uris.append(posix)
+    plain = f"file:{path}?mode=ro"
+    if plain not in uris:
+        uris.append(plain)
+    last: sqlite3.Error | None = None
+    for uri in uris:
+        try:
+            return sqlite3.connect(uri, uri=True)
+        except sqlite3.Error as exc:
+            last = exc
+    if last is None:
+        raise sqlite3.OperationalError("The database URI could not be opened.")
+    raise last
+
+
 def _sqlite_audio_paths(master: Path, music_root: Path) -> list[Path]:
     """Resolve library tracks that live under one drive's music root.
 
@@ -2285,7 +2348,7 @@ def _sqlite_audio_paths(master: Path, music_root: Path) -> list[Path]:
         return []
     found: list[Path] = []
     try:
-        with closing(sqlite3.connect(f"file:{master}?mode=ro", uri=True)) as conn:
+        with closing(_connect_read_only(master)) as conn:
             rows = conn.execute("SELECT portable_id FROM asset").fetchall()
     except sqlite3.Error:
         return []
@@ -2301,13 +2364,28 @@ def _sqlite_audio_paths(master: Path, music_root: Path) -> list[Path]:
 def _resolve_track(text: str, music_root: Path) -> Path | None:
     """Resolve a crate path against a drive's music root.
 
+    An absolute path is the file itself. That includes a Windows drive
+    letter (``C:/Music/track.mp3``) and a UNC path. It is kept only when
+    the file stays inside ``music_root``. A relative path is joined onto
+    that root. A colon in a relative component is refused: that is an
+    alternate data stream or a drive-relative name, not a file to open.
+
     Args:
-        text: Path stored in a crate or database V2.
+        text: Path stored in a crate, database V2, or ``portable_id``.
         music_root: Root the path must stay inside.
 
     Returns:
         The file, or None when it is missing, a shortcut, or outside the root.
     """
+    if not text or "\x00" in text:
+        return None
+    direct = Path(text)
+    try:
+        absolute = direct.is_absolute()
+    except ValueError:
+        return None
+    if absolute:
+        return _file_inside(direct, music_root)
     raw = text.replace("\\", "/").lstrip("/")
     parts = [part for part in raw.split("/") if part != ""]
     if not raw or not parts or any(part in {".", ".."} for part in parts):
@@ -2332,6 +2410,49 @@ def _resolve_track(text: str, music_root: Path) -> Path | None:
         if _contained(resolved, root) and resolved.is_file():
             return resolved
     return None
+
+
+def _file_inside(candidate: Path, music_root: Path) -> Path | None:
+    """Return a regular file when an absolute path stays inside a drive.
+
+    Args:
+        candidate: Absolute path from a crate or a portable id.
+        music_root: Drive folder the file must stay inside.
+
+    Returns:
+        The resolved file, or None when it is a shortcut, missing,
+        outside the root, or a later component names an alternate data
+        stream.
+    """
+    if _stream_in_path(candidate):
+        return None
+    try:
+        if candidate.is_symlink():
+            return None
+        resolved = candidate.resolve()
+        root = music_root.resolve()
+    except (OSError, ValueError):
+        return None
+    if _contained(resolved, root) and resolved.is_file():
+        return resolved
+    return None
+
+
+def _stream_in_path(path: Path) -> bool:
+    """Return whether a component after the drive contains a colon.
+
+    Args:
+        path: Absolute path.
+
+    Returns:
+        True when a component other than the drive anchor contains ``:``.
+        ``C:\\`` is allowed to contain the drive colon. ``file:stream``
+        later in the path is an alternate data stream and is not opened.
+    """
+    parts = path.parts
+    if len(parts) <= 1:
+        return False
+    return any(":" in part for part in parts[1:])
 
 
 def _iter_serato_files(root: Path) -> list[tuple[str, Path]]:
@@ -2751,6 +2872,27 @@ def _realpath_within(root: Path, *parts: str) -> Path:
     return resolved_path
 
 
+def _strip_extended_prefix(path: str) -> str:
+    """Drop a Windows ``\\\\?\\`` prefix so two spellings of one file compare.
+
+    Args:
+        path: A path from ``realpath`` or from a stored id.
+
+    Returns:
+        The path without the extended prefix. UNC keeps its ``\\\\server``
+        form. Other platforms return the text unchanged.
+    """
+    if os.name != "nt":
+        return path
+    text = path.replace("/", "\\")
+    upper = text.upper()
+    if upper.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[8:]
+    if upper.startswith("\\\\?\\"):
+        return text[4:]
+    return text
+
+
 def _contained(path: Path, root: Path) -> bool:
     """Return whether a path stays inside a directory.
 
@@ -2760,18 +2902,26 @@ def _contained(path: Path, root: Path) -> bool:
 
     Returns:
         True when the resolved path is the directory or a child of it.
+        On Windows the check ignores case and an extended ``\\\\?\\`` prefix,
+        because that filesystem treats those spellings as the same file.
     """
     try:
-        base = os.path.realpath(root)
-        resolved = os.path.realpath(path)
+        base = _strip_extended_prefix(os.path.realpath(root))
+        resolved = _strip_extended_prefix(os.path.realpath(path))
     except OSError:
         return False
-    prefix = base if base.endswith(os.sep) else base + os.sep
-    if resolved != base and not resolved.startswith(prefix):
+    base_cmp = os.path.normcase(base)
+    resolved_cmp = os.path.normcase(resolved)
+    prefix = base_cmp if base_cmp.endswith(os.sep) else base_cmp + os.sep
+    if resolved_cmp != base_cmp and not resolved_cmp.startswith(prefix):
         return False
     base_path = Path(base)
     resolved_path = Path(resolved)
-    return resolved_path == base_path or base_path in resolved_path.parents
+    if resolved_path == base_path or base_path in resolved_path.parents:
+        return True
+    # Path.parents is case-sensitive. The prefix check already applied
+    # Windows' own case folding.
+    return os.name == "nt"
 
 
 def _chunks(data: bytes) -> list[tuple[str, bytes]]:

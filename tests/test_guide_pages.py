@@ -65,7 +65,7 @@ class GuidePageTests(unittest.TestCase):
         """Require both pages, the home links, and a nav entry for each.
 
         The whole library-safety page is not labelled PREVIEW. The gig
-        check on that page still is.
+        check is in the app.
 
         Returns:
             None. The test fails when a page or a nav entry is missing.
@@ -112,15 +112,15 @@ class GuidePageTests(unittest.TestCase):
                         f"{name} links to missing heading {target}",
                     )
 
-    def test_restore_is_shipped_and_the_gig_check_stays_preview(self) -> None:
-        """Describe restore as working, and keep PREVIEW on the gig check.
+    def test_restore_and_the_gig_check_are_in_the_app(self) -> None:
+        """Describe restore and the gig check as working.
 
-        Issue 35 has shipped. Issue 41 has not. The Rekordbox status
-        line is a different label and is not changed here.
+        Issue 35 and issue 41 have shipped. The Rekordbox status line is
+        a different label and stays preview.
 
         Returns:
             None. The test fails when restore is still tied to issue 35,
-            or when the gig check drops PREVIEW.
+            or when the gig check is still described as missing.
         """
         for name in PAGES:
             text = (DOCS / name).read_text(encoding="utf-8")
@@ -129,18 +129,22 @@ class GuidePageTests(unittest.TestCase):
             self.assertIn("**Snapshots**", text, name)
             self.assertIn("**Prepare**", text, name)
             self.assertIn("move, rename, and trash audio files", text, name)
-            self.assertIn("PREVIEW", text, name)
-            self.assertIn("https://github.com/mookiejones/serato-library-manager/issues/41", text, name)
+            self.assertNotIn("PREVIEW", text, name)
+            self.assertNotIn("not in the app", text, name)
+            self.assertIn("guide/gig-check.md", text, name)
             self.assertIn("gig check", text.lower(), name)
             self.assertNotIn("audio is never touched", text.lower(), name)
             self.assertNotIn("never touch the sound", text.lower(), name)
             self.assertNotIn("never touched", text.lower(), name)
             self.assertNotIn("issues/35", text, name)
+            self.assertNotIn("issues/41", text, name)
             self.assertNotIn("#35", text, name)
         index = (DOCS / "index.md").read_text(encoding="utf-8")
-        self.assertIn("issues/41", index)
+        self.assertIn("guide/gig-check.md", index)
+        self.assertIn("is in the app", index)
         self.assertNotIn("issues/35", index)
-        self.assertIn("PREVIEW", index)
+        self.assertNotIn("issues/41", index)
+        self.assertNotIn("PREVIEW", index)
         guide = (DOCS / "coming-from-rekordbox.md").read_text(encoding="utf-8")
         self.assertIn("Status: preview.", guide)
 

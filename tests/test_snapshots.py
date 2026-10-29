@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import plistlib
+import sqlite3
 import struct
 import subprocess
 import tempfile
@@ -20,7 +21,7 @@ import unittest
 from unittest import mock
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath, WindowsPath
 
 import app_log
 import library
@@ -31,6 +32,45 @@ from library import LibraryError
 from serato_web.completeness import CompletenessError, LEGACY_STATUS
 from snapshots import DriveSpec, SnapshotBlocked, SnapshotStore
 from tests.fixture import TempLibrary, open_database
+
+
+@contextmanager
+def _windows_containment() -> Iterator[None]:
+    """Compare paths the way Windows compares them.
+
+    On Windows this does nothing, so the real separator, case folding,
+    and ``realpath`` run. On other platforms those three are patched,
+    along with ``os.name`` and a constructable ``WindowsPath``, so
+    ``C:\\Music`` is checked the same way.
+
+    Yields:
+        None.
+    """
+
+    if os.name == "nt":
+        yield
+        return
+
+    def realpath(path: object) -> str:
+        return str(path).replace("/", "\\")
+
+    def normcase(path: object) -> str:
+        return str(path).replace("/", "\\").lower()
+
+    def make(cls: type, *args: object, **kwargs: object) -> object:
+        del args, kwargs
+        if cls is Path:
+            cls = WindowsPath
+        return object.__new__(cls)
+
+    with (
+        mock.patch("snapshots.os.name", "nt"),
+        mock.patch("snapshots.os.sep", "\\"),
+        mock.patch("snapshots.os.path.realpath", realpath),
+        mock.patch("snapshots.os.path.normcase", normcase),
+        mock.patch.object(WindowsPath, "__new__", staticmethod(make)),
+    ):
+        yield
 
 
 def _geob(description: str, payload: bytes) -> bytes:
@@ -1133,6 +1173,268 @@ class SnapshotTests(unittest.TestCase):
             loaded = store.load(saved["id"])
             paths = [row["path"] for row in loaded["cues"]]
             self.assertTrue(any(str(path).endswith("one-grid.mp3") for path in paths))
+
+    def test_absolute_portable_id_stays_inside_the_music_root(self) -> None:
+        """Snapshot an absolute path, and refuse one that leaves the drive.
+
+        The music root is the temporary directory, not the filesystem
+        root. A relative component that contains a colon is not opened.
+        ``set/file:stream.mp3`` is created on disk when the filesystem
+        allows a colon in a name, which POSIX does. Windows refuses that
+        name; the assertion still runs, and the file is what makes
+        deleting the colon check fail on POSIX.
+
+        Returns:
+            None. The test fails if the absolute file is missed or a
+            colon component is accepted.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            track = root / "set" / "opener.mp3"
+            track.parent.mkdir()
+            track.write_bytes(b"audio")
+            other = root / "other"
+            other.mkdir()
+            colon_file = root / "set" / "file:stream.mp3"
+            if os.name == "nt":
+                try:
+                    colon_file.write_bytes(b"audio")
+                except OSError:
+                    colon_file = None
+            else:
+                colon_file.write_bytes(b"audio")
+            self.assertEqual(snapshots._resolve_track(str(track), root), track.resolve())
+            self.assertEqual(snapshots._resolve_track(track.as_posix(), root), track.resolve())
+            self.assertEqual(snapshots._resolve_track("set/opener.mp3", root), track.resolve())
+            self.assertIsNone(snapshots._resolve_track(str(track), other))
+            self.assertIsNone(snapshots._resolve_track("set/file:stream.mp3", root))
+            if colon_file is not None:
+                self.assertTrue(colon_file.is_file())
+            streamed = root / "file:stream.mp3"
+            streamed.write_bytes(b"audio")
+            self.assertIsNone(snapshots._resolve_track(str(streamed), root))
+
+    def test_extended_drive_prefix_is_the_same_folder(self) -> None:
+        """Drop ``\\\\?\\`` so a drive path compares with the bare path.
+
+        Returns:
+            None. The test fails if ``\\\\?\\C:\\Music\\track.mp3`` is
+            left unchanged.
+        """
+        with mock.patch("snapshots.os.name", "nt"):
+            self.assertEqual(
+                snapshots._strip_extended_prefix(r"\\?\C:\Music\track.mp3"),
+                r"C:\Music\track.mp3",
+            )
+            self.assertEqual(
+                snapshots._strip_extended_prefix("//?/C:/Music/track.mp3"),
+                r"C:\Music\track.mp3",
+            )
+        with _windows_containment():
+            self.assertTrue(
+                snapshots._contained(Path(r"\\?\C:\Music\set\opener.mp3"), Path(r"C:\Music"))
+            )
+
+    def test_extended_unc_prefix_keeps_the_server(self) -> None:
+        """Turn ``\\\\?\\UNC\\server\\share`` into ``\\\\server\\share``.
+
+        Returns:
+            None. The test fails if the UNC branch returns ``UNC\\server\\...``.
+        """
+        with mock.patch("snapshots.os.name", "nt"):
+            self.assertEqual(
+                snapshots._strip_extended_prefix(r"\\?\UNC\server\share\track.mp3"),
+                r"\\server\share\track.mp3",
+            )
+            self.assertEqual(
+                snapshots._strip_extended_prefix("//?/UNC/server/share/track.mp3"),
+                r"\\server\share\track.mp3",
+            )
+
+    def test_windows_containment_ignores_case(self) -> None:
+        """Treat ``c:\\music`` and ``C:\\Music`` as one folder on Windows.
+
+        The folders are not created. ``realpath`` would otherwise rewrite
+        the spelling on a case-insensitive disk and hide a missing
+        ``normcase``.
+
+        Returns:
+            None. The test fails if mixed case is outside the folder.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "Music"
+            child = Path(name) / "music" / "opener.mp3"
+            with _windows_containment():
+                self.assertTrue(snapshots._contained(child, root))
+        with _windows_containment():
+            self.assertTrue(
+                snapshots._contained(Path(r"c:\music\set\opener.mp3"), Path(r"C:\Music"))
+            )
+
+    def test_music2_is_not_inside_music(self) -> None:
+        """Keep ``Music2`` outside ``Music``.
+
+        The check runs on a real temporary folder, and again on the
+        Windows spellings ``C:\\Music2`` and ``C:\\Music``. On Windows the
+        parent check does not reject a sibling once the string prefix
+        matches, so the prefix has to end with a separator. ``os.name``
+        is Windows here so that fallback cannot hide a missing separator.
+
+        Returns:
+            None. The test fails if Music2 counts as inside Music.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            base = Path(name)
+            music = base / "Music"
+            music.mkdir()
+            sibling = base / "Music2" / "opener.mp3"
+            sibling.parent.mkdir()
+            sibling.write_bytes(b"audio")
+            child = music / "opener.mp3"
+            child.write_bytes(b"audio")
+            with _windows_containment():
+                self.assertFalse(snapshots._contained(sibling, music))
+                self.assertTrue(snapshots._contained(child, music))
+            self.assertIsNone(snapshots._resolve_track(str(sibling), music))
+        with _windows_containment():
+            self.assertFalse(
+                snapshots._contained(Path(r"C:\Music2\set\opener.mp3"), Path(r"C:\Music"))
+            )
+            self.assertTrue(
+                snapshots._contained(Path(r"C:\Music\set\opener.mp3"), Path(r"C:\Music"))
+            )
+
+    def test_windows_fallback_accepts_a_prefix_parents_miss(self) -> None:
+        """Accept the file when only the Windows fallback remains.
+
+        POSIX parents do not split backslashes, so they miss ``C:\\Music``.
+        The string prefix matches after case folding. ``return os.name == "nt"``
+        is what accepts the file.
+
+        Returns:
+            None. The test fails if that return is false.
+        """
+        with (
+            mock.patch("snapshots.os.name", "nt"),
+            mock.patch("snapshots.os.sep", "\\"),
+            mock.patch("snapshots.os.path.realpath", lambda path: str(path).replace("/", "\\")),
+            mock.patch("snapshots.os.path.normcase", lambda path: str(path).replace("/", "\\").lower()),
+            mock.patch.object(snapshots, "Path", PurePosixPath),
+        ):
+            self.assertTrue(
+                snapshots._contained(PurePosixPath(r"c:\Music\track.mp3"), PurePosixPath(r"C:\Music"))
+            )
+
+    def test_casefolded_prefix_is_not_containment(self) -> None:
+        """Refuse a case-only prefix when the filesystem keeps the case.
+
+        ``Path.parents`` does not fold case. The fallback after that check
+        is true only on Windows. Changing it to ``return True`` would
+        accept ``/Music`` as inside ``/music`` once case folding has run.
+
+        Returns:
+            None. The test fails if the case-only prefix is inside.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name) / "Music"
+            child = Path(name) / "music" / "opener.mp3"
+            base = Path(os.path.realpath(root))
+            resolved = Path(os.path.realpath(child))
+            if base == resolved or base in resolved.parents:
+                self.skipTest("this filesystem treats the two spellings as one folder")
+
+            original = os.path.normcase
+
+            def fold(value: object) -> str:
+                return original(str(value)).lower()
+
+            with mock.patch("snapshots.os.path.normcase", fold):
+                self.assertFalse(snapshots._contained(child, root))
+
+    def test_connect_read_only_opens_the_rfc_drive_uri_first(self) -> None:
+        """Open SQLite with ``file:///C:/...`` before any other spelling.
+
+        ``resolve`` returns a Windows path so Ubuntu sees the same URI
+        Windows builds with ``Path.as_uri``.
+
+        Returns:
+            None. The test fails if the first URI is not that RFC form.
+        """
+        path = Path(tempfile.gettempdir()) / "serato-ro-probe.sqlite"
+        windows = PureWindowsPath(r"C:\Music\master.sqlite")
+        seen: list[str] = []
+
+        def connect(database: str, *args: object, **kwargs: object) -> object:
+            del args
+            seen.append(database)
+            if not kwargs.get("uri"):
+                raise sqlite3.OperationalError("uri required")
+            return mock.Mock()
+
+        def resolve(_self: Path, strict: bool = False) -> PureWindowsPath:
+            del strict
+            return windows
+
+        with (
+            mock.patch.object(Path, "resolve", resolve),
+            mock.patch("snapshots.sqlite3.connect", side_effect=connect),
+        ):
+            snapshots._connect_read_only(path)
+        self.assertEqual(seen[0], windows.as_uri() + "?mode=ro")
+        self.assertTrue(seen[0].startswith("file:///C:/"))
+
+    def test_file_inside_rejects_the_music_folder(self) -> None:
+        """Do not return the music folder itself as a track.
+
+        Returns:
+            None. The test fails if the folder is a resolved track.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            track = root / "opener.mp3"
+            track.write_bytes(b"audio")
+            self.assertIsNone(snapshots._file_inside(root, root))
+            self.assertIsNone(snapshots._resolve_track(str(root), root))
+            self.assertEqual(snapshots._file_inside(track, root), track.resolve())
+
+    def test_file_inside_rejects_a_symlink_inside_the_root(self) -> None:
+        """Do not follow a shortcut that points at a file inside the root.
+
+        Returns:
+            None. The test fails if the shortcut is returned as the track.
+            The test skips when this process cannot create a shortcut.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            track = root / "opener.mp3"
+            track.write_bytes(b"audio")
+            link = root / "alias.mp3"
+            try:
+                link.symlink_to(track)
+            except OSError:
+                link.write_bytes(b"audio")
+                with mock.patch.object(Path, "is_symlink", lambda self: self.name == "alias.mp3"):
+                    self.assertIsNone(snapshots._file_inside(link, root))
+                    self.assertEqual(snapshots._file_inside(track, root), track.resolve())
+                return
+            self.assertIsNone(snapshots._file_inside(link, root))
+            self.assertIsNone(snapshots._resolve_track(str(link), root))
+
+    def test_stream_colon_beside_the_anchor(self) -> None:
+        """Treat a colon in the first component after the anchor as a stream.
+
+        ``parts[1:]`` sees ``file:stream.mp3`` on ``C:/file:stream.mp3``
+        and on ``/file:stream.mp3``. ``parts[2:]`` does not.
+
+        Returns:
+            None. The test fails if that component is allowed.
+        """
+        for text in ("C:/file:stream.mp3", "/file:stream.mp3"):
+            path = Path(text)
+            self.assertGreaterEqual(len(path.parts), 2, text)
+            self.assertIn(":", path.parts[1], text)
+            self.assertTrue(snapshots._stream_in_path(path), text)
+            self.assertIsNone(snapshots._file_inside(path, path.parent))
 
     def test_manifest_key_keeps_newline_bytes(self) -> None:
         """Store a manifest key that contains newline bytes unchanged.

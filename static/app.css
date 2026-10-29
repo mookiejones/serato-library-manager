@@ -3,11 +3,11 @@
 
   The rail holds the space menu, the view switch, and the crate or history
   list. The sheet holds the track list and the detail pane, including
-  related tracks, or the Files folder list. Dialogs cover sharing,
-  settings, duplicate merge, and a file change. Colors, type, and spacing
-  come from tokens.css. The names below alias those tokens. --row is 36px
-  and must match ROW in app.js. This file does not fetch data or touch
-  the Serato database.
+  related tracks, the Files folder list, or the read-only gig check.
+  Dialogs cover sharing, settings, duplicate merge, and a file change.
+  Colors, type, and spacing come from tokens.css. The names below alias
+  those tokens. --row is 36px and must match ROW in app.js. This file does
+  not fetch data or touch the Serato database.
 */
 
 :root {
@@ -348,6 +348,7 @@ body.is-resizing {
 #export-m3u,
 #export-rekordbox,
 #import-m3u,
+#gig-refresh,
 .text-button,
 .actions button {
   color: var(--ink);
@@ -914,7 +915,8 @@ dialog .check input {
   font: inherit;
 }
 
-.files-panel {
+.files-panel,
+.gig-panel {
   grid-column: 1 / -1;
   min-width: 0;
   min-height: 0;
@@ -953,7 +955,88 @@ dialog .check input {
   margin: 0 0 4px;
 }
 
+#gig-refresh { min-height: calc(var(--space-6) + var(--space-3)); }
+
+.gig-report {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-1) var(--space-5) var(--space-5);
+}
+
+.gig-status {
+  margin: 0 var(--space-5);
+  min-height: var(--space-5);
+}
+
+.gig-score {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  font-family: var(--display);
+  font-size: var(--font-display);
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.gig-verdict {
+  margin: 0;
+  font-size: var(--font-title);
+  font-weight: 600;
+}
+
+.gig-verdict.not-ready { color: var(--missing); }
+
+.gig-kicker {
+  margin: var(--space-4) 0 var(--space-1);
+  font-size: var(--font-caption);
+}
+
+.gig-report h3 {
+  margin: var(--space-2) 0 var(--space-2);
+  font-family: var(--display);
+  font-size: var(--font-title);
+  font-weight: 500;
+}
+
+.gig-report ul { margin: 0; padding-left: var(--space-5); }
+
+.gig-report li { margin: var(--space-1) 0; overflow-wrap: anywhere; }
+
+.gig-note { margin: var(--space-2) 0; }
+
+.gig-group { margin: var(--space-2) 0; }
+
+.gig-show-all,
+.gig-actions button {
+  min-height: calc(var(--space-6) + var(--space-3));
+}
+
+.gig-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
+.gig-primary {
+  flex: 1 1 100%;
+  font-size: var(--font-title);
+  font-weight: 600;
+}
+
+.gig-art-slot {
+  min-height: var(--space-6);
+  margin: var(--space-3) 0;
+}
+
+.gig-done { margin: var(--space-2) 0; font-size: var(--font-title); }
+
 .files-panel[hidden],
+.gig-panel[hidden],
 .browser[hidden],
 .splitter[hidden],
 .detail[hidden],
@@ -1232,6 +1315,7 @@ dialog .check input {
   .list { height: 52vh; flex: none; }
   .files-actions { order: 1; }
   .files-list { order: 2; flex: none; max-height: 46vh; }
+  .gig-report { max-height: 70vh; }
   .splitter { display: none; }
   .detail { border-top: 1px solid var(--rule); }
   .detail h2 { font-size: 32px; }
