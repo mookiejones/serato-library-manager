@@ -44,4 +44,4 @@ The pre-release **v1.1.0-rc2** attaches both files. The release marked Latest is
 
 The window uses the installed WebView2 runtime. The title is **Serato Library**. Close the window to quit. A second open focuses that window.
 
-The page is served on `127.0.0.1`. Next: [Quick Start](Quick-Start.md).
+The page is served on `127.0.0.1`. Next: [Quick Start](Quick-Start).

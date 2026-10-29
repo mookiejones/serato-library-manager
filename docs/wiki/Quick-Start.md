@@ -28,7 +28,7 @@ Grab the build for your machine from [GitHub Releases](https://github.com/mookie
 
 The release marked Latest is **v0.1.1**. It attaches `Serato-Library-macos.zip` (Apple silicon) and `Serato-Library-windows.zip`. The pre-release **v1.1.0-rc2** has the disk images, the installer, the portable zip, and `SHA256SUMS`.
 
-Mac warnings are on [Install on a Mac](Install-macOS.md). Windows warnings are on [Install on Windows](Install-Windows.md).
+Mac warnings are on [Install on a Mac](Install-macOS). Windows warnings are on [Install on Windows](Install-Windows).
 
 ## 2 Open
 

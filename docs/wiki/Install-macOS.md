@@ -1,6 +1,6 @@
 # Install on a Mac
 
-GitHub Releases is the only download. The builds are unsigned. Gatekeeper warns once. The warning is expected.
+GitHub Releases is the only download. Current releases may be unsigned. If macOS blocks the app, use the steps below.
 
 ```mermaid
 flowchart TD
@@ -48,6 +48,14 @@ The pre-release **v1.1.0-rc2** attaches both disk images. The release marked Lat
 2. Choose **Open**.
 3. Choose **Open** again.
 
+## If macOS still blocks the app
+
+Clear the quarantine flag, then open **Serato Library** from Applications:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Serato Library.app"
+```
+
 ## External drives
 
 Music on an external drive needs **Files and Folders > Removable Volumes**. Removable Volumes is not Full Disk Access.
@@ -58,10 +66,10 @@ Music on an external drive needs **Files and Folders > Removable Volumes**. Remo
 4. Select **Serato Library**.
 5. Turn on **Removable Volumes**.
 
-These builds are unsigned, so macOS may ask again after an update. Turn **Removable Volumes** back on for the new copy.
+A current release may be unsigned, so macOS may ask again after an update. Turn **Removable Volumes** back on for the new copy.
 
 ## You are in
 
 A window titled **Serato Library** opens. The page is served on `127.0.0.1`. Close the window to quit. A second open focuses that window.
 
-Next: [Quick Start](Quick-Start.md).
+Next: [Quick Start](Quick-Start).

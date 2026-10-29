@@ -122,6 +122,13 @@ class InstallPageTests(unittest.TestCase):
         self.assertIn("Serato-Library-windows.zip", windows)
         self.assertIn("Open Anyway", mac)
         self.assertIn("right-click", mac.lower())
+        self.assertIn("Current releases may be unsigned.", mac)
+        self.assertNotIn("These builds are unsigned", mac)
+        self.assertNotIn("The builds are unsigned", mac)
+        self.assertIn(
+            'xattr -dr com.apple.quarantine "/Applications/Serato Library.app"',
+            mac,
+        )
         self.assertIn("Removable Volumes", mac)
         self.assertIn("Files and Folders", mac)
         self.assertIn("Full Disk Access", mac)
@@ -134,3 +141,13 @@ class InstallPageTests(unittest.TestCase):
         self.assertIn("PREVIEW", home)
         self.assertIn("Restore never changes audio data.", home)
         self.assertNotIn("never touched", home + mac + windows)
+        quick = (ROOT / "docs" / "wiki" / "Quick-Start.md").read_text(encoding="utf-8")
+        for page in (home, mac, windows, quick):
+            self.assertNotRegex(page, r"\]\([^)]+\.md\)")
+        self.assertIn("](Quick-Start)", home)
+        self.assertIn("](Install-macOS)", home)
+        self.assertIn("](Install-Windows)", home)
+        self.assertIn("](Install-macOS)", quick)
+        self.assertIn("](Install-Windows)", quick)
+        self.assertIn("](Quick-Start)", mac)
+        self.assertIn("](Quick-Start)", windows)

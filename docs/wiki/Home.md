@@ -8,9 +8,9 @@ flowchart LR
 
 A window on your computer for the Serato DJ Pro library. Crates, Cue points, and Backups stay on this machine.
 
-- [Quick Start](Quick-Start.md)
-- [Install on a Mac](Install-macOS.md)
-- [Install on Windows](Install-Windows.md)
+- [Quick Start](Quick-Start)
+- [Install on a Mac](Install-macOS)
+- [Install on Windows](Install-Windows)
 
 The long guide is published at <https://mookiejones.github.io/serato-library-manager/>.
 
