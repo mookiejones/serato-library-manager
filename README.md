@@ -6,6 +6,8 @@
 
 A local window for the Serato DJ Pro library on macOS and Windows. Source on `main` is app version **1.1.0**. The page stays on this computer.
 
+**[Quick Start](docs/wiki/Quick-Start.md).** Five steps: Download, Open, point it at your Serato library, make a Backup, start crate digging.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/hero-dark.svg">
   <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/hero-dark.png">
@@ -23,7 +25,7 @@ The builds are unsigned. The Mac and Windows warnings, including Removable Volum
 
 The release on that page today is **v0.1.1**. It attaches `Serato-Library-macos.zip` and `Serato-Library-windows.zip`.
 
-App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed:
+App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed. The pre-release [v1.1.0-rc2](https://github.com/mookiejones/serato-library-manager/releases/tag/v1.1.0-rc2) already attaches them, and it is not marked Latest.
 
 | Computer | File |
 | --- | --- |
