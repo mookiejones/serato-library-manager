@@ -866,7 +866,29 @@ class GigCheckTests(unittest.TestCase):
                 )
             )
             (music / "_Serato_").mkdir()
-            store.take("manual", "Fixture cues.")
+            for track, _cue_name, _start_ms in stored:
+                portable = track.as_posix()
+                direct = Path(portable)
+                found = snapshots._resolve_track(portable, root)
+                self.assertIsNotNone(
+                    found,
+                    (
+                        f"portable={portable!r} absolute={direct.is_absolute()} "
+                        f"parts={direct.parts!r} stream={snapshots._stream_in_path(direct)} "
+                        f"is_file={track.is_file()} root={root}"
+                    ),
+                )
+            saved = store.take("manual", "Fixture cues.")
+            raw = store.load(saved["id"])
+            manifest_tracks = [
+                str(item.get("path"))
+                for item in store._manifest(saved["id"]).get("tracks", [])
+                if isinstance(item, dict)
+            ]
+            self.assertTrue(
+                raw["cues"],
+                f"manifest tracks={manifest_tracks}",
+            )
             report = gig_check.run_gig_check(database, now=NOW)
             changes = report.changes
             assert changes is not None

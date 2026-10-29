@@ -2294,6 +2294,44 @@ def _audio_paths(master: Path, spec: DriveSpec, drives: Sequence[Mapping[str, ob
     return paths
 
 
+def _connect_read_only(path: Path) -> sqlite3.Connection:
+    """Open a SQLite file in read-only URI mode.
+
+    Windows needs ``file:///C:/...``. A backslash in ``file:C:\\...`` does
+    not open. The plain ``file:`` form is tried after the RFC URI so a
+    platform that already accepted it still opens.
+
+    Args:
+        path: Database file. It must be absolute.
+
+    Returns:
+        An open connection. The caller closes it.
+
+    Raises:
+        sqlite3.Error: If every URI spelling fails.
+    """
+    uris: list[str] = []
+    try:
+        uris.append(path.resolve().as_uri() + "?mode=ro")
+    except (OSError, ValueError):
+        pass
+    posix = f"file:{path.as_posix()}?mode=ro"
+    if posix not in uris:
+        uris.append(posix)
+    plain = f"file:{path}?mode=ro"
+    if plain not in uris:
+        uris.append(plain)
+    last: sqlite3.Error | None = None
+    for uri in uris:
+        try:
+            return sqlite3.connect(uri, uri=True)
+        except sqlite3.Error as exc:
+            last = exc
+    if last is None:
+        raise sqlite3.OperationalError("The database URI could not be opened.")
+    raise last
+
+
 def _sqlite_audio_paths(master: Path, music_root: Path) -> list[Path]:
     """Resolve library tracks that live under one drive's music root.
 
@@ -2310,7 +2348,7 @@ def _sqlite_audio_paths(master: Path, music_root: Path) -> list[Path]:
         return []
     found: list[Path] = []
     try:
-        with closing(sqlite3.connect(f"file:{master}?mode=ro", uri=True)) as conn:
+        with closing(_connect_read_only(master)) as conn:
             rows = conn.execute("SELECT portable_id FROM asset").fetchall()
     except sqlite3.Error:
         return []
@@ -2834,6 +2872,27 @@ def _realpath_within(root: Path, *parts: str) -> Path:
     return resolved_path
 
 
+def _strip_extended_prefix(path: str) -> str:
+    """Drop a Windows ``\\\\?\\`` prefix so two spellings of one file compare.
+
+    Args:
+        path: A path from ``realpath`` or from a stored id.
+
+    Returns:
+        The path without the extended prefix. UNC keeps its ``\\\\server``
+        form. Other platforms return the text unchanged.
+    """
+    if os.name != "nt":
+        return path
+    text = path.replace("/", "\\")
+    upper = text.upper()
+    if upper.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[8:]
+    if upper.startswith("\\\\?\\"):
+        return text[4:]
+    return text
+
+
 def _contained(path: Path, root: Path) -> bool:
     """Return whether a path stays inside a directory.
 
@@ -2843,18 +2902,26 @@ def _contained(path: Path, root: Path) -> bool:
 
     Returns:
         True when the resolved path is the directory or a child of it.
+        On Windows the check ignores case and an extended ``\\\\?\\`` prefix,
+        because that filesystem treats those spellings as the same file.
     """
     try:
-        base = os.path.realpath(root)
-        resolved = os.path.realpath(path)
+        base = _strip_extended_prefix(os.path.realpath(root))
+        resolved = _strip_extended_prefix(os.path.realpath(path))
     except OSError:
         return False
-    prefix = base if base.endswith(os.sep) else base + os.sep
-    if resolved != base and not resolved.startswith(prefix):
+    base_cmp = os.path.normcase(base)
+    resolved_cmp = os.path.normcase(resolved)
+    prefix = base_cmp if base_cmp.endswith(os.sep) else base_cmp + os.sep
+    if resolved_cmp != base_cmp and not resolved_cmp.startswith(prefix):
         return False
     base_path = Path(base)
     resolved_path = Path(resolved)
-    return resolved_path == base_path or base_path in resolved_path.parents
+    if resolved_path == base_path or base_path in resolved_path.parents:
+        return True
+    # Path.parents is case-sensitive. The prefix check already applied
+    # Windows' own case folding.
+    return os.name == "nt"
 
 
 def _chunks(data: bytes) -> list[tuple[str, bytes]]:

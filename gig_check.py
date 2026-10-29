@@ -1293,7 +1293,8 @@ class _SavedFrames:
         self.by_key: dict[str, str] = {}
         self.by_name: dict[str, list[str]] = {}
         for path in self.seen:
-            self.by_key.setdefault(_path_key(path), path)
+            for key in _path_keys(path):
+                self.by_key.setdefault(key, path)
             self.by_name.setdefault(_base_name(path), []).append(path)
 
     def _find(self, portable_id: str) -> str | None:
@@ -1309,13 +1310,15 @@ class _SavedFrames:
         """
         if not portable_id:
             return None
-        found = self.by_key.get(_path_key(portable_id))
-        if found is not None:
-            return found
-        for candidate in _candidates(portable_id, None):
-            found = self.by_key.get(_path_key(str(candidate)))
+        for key in _path_keys(portable_id):
+            found = self.by_key.get(key)
             if found is not None:
                 return found
+        for candidate in _candidates(portable_id, None):
+            for key in _path_keys(str(candidate)):
+                found = self.by_key.get(key)
+                if found is not None:
+                    return found
         tail = portable_id.replace("\\", "/").lstrip("/")
         head = tail.split("/", 1)[0]
         if not tail or ":" in head:
@@ -1379,6 +1382,35 @@ def _path_key(path: str) -> str:
     if os.name == "nt":
         return text.casefold()
     return text
+
+
+def _path_keys(path: str) -> tuple[str, ...]:
+    """Return every spelling that should hit one saved frame.
+
+    Args:
+        path: A portable id or a path recorded in a snapshot.
+
+    Returns:
+        Keys for the stored text, without a Windows ``\\\\?\\`` prefix,
+        and for the resolved file when it can be resolved. A missing file
+        still contributes the text key.
+    """
+    keys: list[str] = []
+
+    def add(value: str) -> None:
+        key = _path_key(snapshots._strip_extended_prefix(value))
+        if key not in keys:
+            keys.append(key)
+
+    add(path)
+    stripped = snapshots._strip_extended_prefix(path)
+    try:
+        resolved = Path(stripped)
+        if resolved.is_absolute() and not resolved.is_symlink():
+            add(str(resolved.resolve()))
+    except (OSError, ValueError):
+        pass
+    return tuple(keys)
 
 
 def default_reader(database: Path | None, space: str) -> StoreSnapshots:
