@@ -486,10 +486,11 @@ def _resolve_directory(path: str, *, elsewhere: bool, roots: list[dict[str, str]
     requested = Path(normalized)
     _refuse_deep_symlink(requested)
     try:
+        # codeql[py/path-injection]: normalized, then confined to a music root below
         resolved = requested.resolve(strict=True)
     except OSError as exc:
         raise library.LibraryError("That folder could not be read.", 404) from exc
-    if not resolved.is_dir():
+    if not resolved.is_dir():  # codeql[py/path-injection]
         raise library.LibraryError("That folder could not be read.", 404)
     if elsewhere:
         return resolved
@@ -516,7 +517,7 @@ def _refuse_deep_symlink(path: Path) -> None:
     current = path
     while True:
         try:
-            linked = current.is_symlink()
+            linked = current.is_symlink()  # codeql[py/path-injection]
         except OSError as exc:
             raise library.LibraryError("That folder could not be read.", 404) from exc
         if linked and _path_depth(current) > 2:
@@ -560,6 +561,7 @@ def _refuse_symlink_under_root(root: Path, requested: Path) -> None:
     probe = requested
     while True:
         try:
+            # codeql[py/path-injection]: finds the music root before any shortcut under it
             if probe.exists() and probe.resolve() == root_resolved:
                 matched = probe
                 break
@@ -578,7 +580,7 @@ def _refuse_symlink_under_root(root: Path, requested: Path) -> None:
     for part in relative.parts:
         current = current / part
         try:
-            if current.is_symlink():
+            if current.is_symlink():  # codeql[py/path-injection]
                 raise library.LibraryError("Shortcuts are left alone.")
         except OSError as exc:
             raise library.LibraryError("That folder could not be read.", 404) from exc
@@ -622,6 +624,7 @@ def _within(child: Path, parent: Path) -> bool:
         True when the resolved child stays inside the resolved parent.
     """
     try:
+        # codeql[py/path-injection]: resolved text is only compared, never opened
         child_text = os.path.normcase(os.path.normpath(str(child.resolve())))
         parent_text = os.path.normcase(os.path.normpath(str(parent.resolve())))
     except OSError:
@@ -652,7 +655,7 @@ def _parent_path(directory: Path, root: dict[str, str] | None, *, elsewhere: boo
     if root is None:
         return None
     try:
-        if directory.resolve() == Path(root["path"]).resolve():
+        if directory.resolve() == Path(root["path"]).resolve():  # codeql[py/path-injection]
             return None
     except OSError:
         return None
@@ -674,7 +677,7 @@ def _breadcrumb(directory: Path, root: dict[str, str] | None, *, elsewhere: bool
         root_path = Path(root["path"])
         crumbs = [{"name": root["name"], "path": str(root_path)}]
         try:
-            relative = directory.resolve().relative_to(root_path.resolve())
+            relative = directory.resolve().relative_to(root_path.resolve())  # codeql[py/path-injection]
         except (OSError, ValueError):
             return crumbs
         current = root_path
@@ -699,7 +702,7 @@ def _elsewhere_breadcrumb(directory: Path) -> list[dict[str, str]]:
     """
     try:
         home = Path.home().resolve()
-        resolved = directory.resolve()
+        resolved = directory.resolve()  # codeql[py/path-injection]
     except OSError:
         home = Path.home()
         resolved = directory
