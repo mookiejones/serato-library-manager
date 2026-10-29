@@ -37,7 +37,6 @@ export function versionLabel(info: VersionPayload): string {
 
 function formatVersion(version: string): string {
   const trimmed = version.trim();
-  if (/^v/i.test(trimmed)) return trimmed;
   if (/^\d+\.\d+\.\d+/.test(trimmed)) return `v${trimmed}`;
   return trimmed;
 }
@@ -124,8 +123,6 @@ export async function copyVersion(): Promise<void> {
  */
 export function wireVersion(): void {
   el("copy-version").addEventListener("click", () => {
-    copyVersion().catch(() => {
-      el("version-copy-status").textContent = COPY_FAILED;
-    });
+    void copyVersion();
   });
 }

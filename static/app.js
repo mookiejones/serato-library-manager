@@ -3377,7 +3377,6 @@
   }
   function formatVersion(version) {
     const trimmed = version.trim();
-    if (/^v/i.test(trimmed)) return trimmed;
     if (/^\d+\.\d+\.\d+/.test(trimmed)) return `v${trimmed}`;
     return trimmed;
   }
@@ -3436,9 +3435,7 @@
   }
   function wireVersion() {
     el("copy-version").addEventListener("click", () => {
-      copyVersion().catch(() => {
-        el("version-copy-status").textContent = COPY_FAILED;
-      });
+      void copyVersion();
     });
   }
 
