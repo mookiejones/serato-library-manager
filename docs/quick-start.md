@@ -102,7 +102,7 @@ If Serato is still open, the page says **Close Serato DJ to continue**.
 
 **No, don't share** leaves anonymous stats off. **Yes, share** is the other choice. Then choose **Open my library**.
 
-Later, open **Snapshots**. **Review restore** shows the plan before anything is written. Restore never changes audio data. It can put the saved Cue point frames back.
+Later, open **Snapshots**. **Review restore** shows the plan before anything is written. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 
 ## 5 Start crate digging
 
