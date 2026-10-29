@@ -7,17 +7,20 @@
   merge a group into the copy you keep. Export writes an M3U playlist.
   Rekordbox writes rekordbox.xml. The Files view browses folders
   and previews a rename, move, replace, or delete before it is saved.
-  app.css and app.js are local files. The page talks only to the library
-  server on 127.0.0.1. It does not open master.sqlite itself.
+  The Snapshots view lists hash-checked library snapshots and previews a
+  restore before it is confirmed. tokens.css, app.css, and app.js are local
+  files. The page talks only to the library server on 127.0.0.1. It does not
+  open master.sqlite itself.
 -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Serato library</title>
+  <title>Serato Library</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,500;9..144,620&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/tokens.css">
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -43,6 +46,7 @@
         <button type="button" data-view="duplicates" role="tab">Duplicates</button>
         <button type="button" data-view="stems" role="tab">Stems</button>
         <button type="button" data-view="files" role="tab">Files</button>
+        <button type="button" data-view="snapshots" role="tab">Snapshots</button>
       </div>
       <div id="crate-tools">
         <label class="rail-field">
@@ -74,7 +78,7 @@
     </aside>
 
     <main class="sheet">
-      <section class="browser">
+      <section id="browser" class="browser">
         <div class="browser-bar">
           <label class="search">
             <span class="visually-hidden">Search tracks</span>
@@ -83,10 +87,19 @@
           <p id="count" class="count" aria-live="polite">Loading the library</p>
           <button id="export-m3u" type="button">Export</button>
           <button id="export-rekordbox" type="button" title="Download rekordbox.xml">Rekordbox</button>
-          <label class="rekordbox-option">
-            <input id="rekordbox-memory" type="checkbox" checked>
-            Memory cues
-          </label>
+          <span class="rekordbox-options">
+            <label class="rekordbox-option">
+              <input id="rekordbox-memory" type="checkbox" checked>
+              Memory cues
+            </label>
+            <span class="rekordbox-option rekordbox-hot-loops">
+              <label>
+                <input id="rekordbox-hot-loops" type="checkbox" aria-describedby="rekordbox-hot-loops-help">
+                Hot loops
+              </label>
+              <span id="rekordbox-hot-loops-help" class="rekordbox-help">Uses a free hot-cue pad</span>
+            </span>
+          </span>
           <label class="rekordbox-option">
             <span class="visually-hidden">Rekordbox key notation</span>
             <select id="rekordbox-key" aria-label="Rekordbox key notation">
@@ -109,6 +122,8 @@
         </div>
         <div id="list" class="list" tabindex="0" role="listbox" aria-label="Tracks"></div>
       </section>
+
+      <div id="track-splitter" class="splitter" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="browser" aria-label="Resize the track list" title="Drag to resize. Double-click to reset."></div>
 
       <section id="detail" class="detail" aria-live="polite">
         <p class="detail-empty">Select a track to read its attributes.</p>
@@ -133,6 +148,21 @@
           <button id="files-pick-cancel" type="button" hidden>Cancel</button>
         </div>
       </section>
+
+      <section id="snapshots-panel" class="files-panel" hidden>
+        <div class="browser-bar">
+          <p id="snapshots-heading" class="files-path">Snapshots</p>
+          <button id="snapshots-refresh" type="button">Refresh</button>
+          <button id="snapshots-take" type="button">Take a snapshot</button>
+        </div>
+        <p id="snapshots-block" class="notice" role="status" hidden></p>
+        <div id="snapshots-undo" class="snapshot-undo" hidden>
+          <p id="snapshots-undo-text"></p>
+          <button id="snapshots-undo-button" type="button">Review undo</button>
+        </div>
+        <p id="snapshots-status" class="notice" role="status" aria-live="polite"></p>
+        <div id="snapshots-list" class="files-list" role="list" aria-label="Snapshots" aria-busy="false" tabindex="0"></div>
+      </section>
     </main>
   </div>
   <dialog id="consent-dialog" aria-labelledby="consent-title" aria-describedby="consent-body">
@@ -152,6 +182,7 @@
     </label>
     <p id="telemetry-note" class="dialog-note"></p>
     <div class="dialog-actions">
+      <button id="rerun-wizard" class="wizard-quiet" type="button">Run setup again</button>
       <button id="open-logs" type="button">Open logs folder</button>
       <button id="copy-logs" type="button">Copy logs</button>
       <button id="settings-close" type="button">Close</button>
@@ -209,6 +240,57 @@
       <button id="files-confirm" type="button">Confirm</button>
     </div>
   </dialog>
+  <dialog id="snapshot-dialog" aria-labelledby="snapshot-title" aria-describedby="snapshot-intro">
+    <h2 id="snapshot-title">Restore this snapshot</h2>
+    <p id="snapshot-intro">Nothing is changed until you confirm. A new snapshot is saved first, so this restore can be undone.</p>
+    <div id="snapshot-plan" aria-live="polite"></div>
+    <p id="snapshot-block" class="dialog-note" role="status"></p>
+    <div class="dialog-actions">
+      <button id="snapshot-cancel" type="button">Cancel</button>
+      <button id="snapshot-confirm" type="button">Restore</button>
+    </div>
+    <p id="snapshot-status" class="dialog-status" role="status" aria-live="polite"></p>
+  </dialog>
+  <!-- Designer: put an SVG or img in the matching wizard-art slot. Empty slots stay hidden. -->
+  <dialog id="wizard" aria-labelledby="wizard-title" aria-describedby="wizard-body">
+    <p id="wizard-step" class="wizard-step">
+      <span id="wizard-step-label"></span>
+      <span id="wizard-segments" class="wizard-segments" aria-hidden="true"></span>
+    </p>
+    <p id="wizard-announce" class="visually-hidden" aria-live="polite"></p>
+    <div class="wizard-art" data-art-slot="welcome" hidden></div>
+    <div class="wizard-art" data-art-slot="library" hidden></div>
+    <div class="wizard-art" data-art-slot="snapshot" hidden></div>
+    <div class="wizard-art" data-art-slot="consent" hidden></div>
+    <div class="wizard-art" data-art-slot="done" hidden></div>
+    <h2 id="wizard-title" tabindex="-1"></h2>
+    <p id="wizard-body"></p>
+    <p id="wizard-next" class="dialog-note" hidden></p>
+    <p id="wizard-status" class="wizard-status" role="status" aria-live="polite"></p>
+    <progress id="wizard-progress" max="1" aria-label="Saving a safety copy" hidden></progress>
+    <div id="wizard-folders" hidden>
+      <p id="wizard-folder-name" class="wizard-folder-name"></p>
+      <div id="wizard-folder-list" class="wizard-folders" role="group" aria-label="Folders"></div>
+      <div class="wizard-folder-actions">
+        <button id="wizard-folder-up" class="wizard-quiet" type="button">Up</button>
+        <button id="wizard-folder-use" type="button">Use this folder</button>
+        <button id="wizard-folder-close" class="wizard-quiet" type="button">Close folder list</button>
+      </div>
+    </div>
+    <div id="wizard-consent" class="wizard-choices" hidden>
+      <button id="wizard-no" class="wizard-choice" type="button">No, don't share</button>
+      <button id="wizard-yes" class="wizard-choice" type="button">Yes, share</button>
+    </div>
+    <div class="wizard-actions">
+      <div class="wizard-actions-start">
+        <button id="wizard-back" class="wizard-quiet" type="button">Back</button>
+        <button id="wizard-cancel" class="wizard-quiet" type="button">Cancel</button>
+        <button id="wizard-secondary" class="wizard-quiet" type="button">Choose a folder</button>
+      </div>
+      <button id="wizard-primary" type="button">Get started</button>
+    </div>
+  </dialog>
+  <script src="/wizard.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

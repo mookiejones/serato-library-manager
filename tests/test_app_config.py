@@ -58,13 +58,16 @@ class SettingsTests(unittest.TestCase):
         settings = app_config.load_settings()
         self.assertIsNone(settings.telemetry_consent)
         self.assertIsNone(settings.install_id)
+        self.assertFalse(settings.rekordbox.hot_loops)
+        self.assertTrue(settings.rekordbox.memory_cues)
+        self.assertEqual(settings.rekordbox.key_notation, "asis")
         self.assertFalse(self.config.joinpath(app_config.SETTINGS_NAME).exists())
 
     def test_false_is_kept(self) -> None:
         """Keep a saved False instead of treating it as missing.
 
         Writes the choice, loads it again, and checks the file contains
-        both the boolean and an install id.
+        the boolean, an install id, and an unfinished setup flag.
 
         Returns:
             None. The test fails if False comes back as None or True.
@@ -73,10 +76,19 @@ class SettingsTests(unittest.TestCase):
         self.assertIs(saved.telemetry_consent, False)
         loaded = app_config.load_settings()
         self.assertIs(loaded.telemetry_consent, False)
+        self.assertIs(loaded.wizard_complete, False)
         self.assertEqual(loaded.install_id, saved.install_id)
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertIs(payload["telemetry_consent"], False)
-        self.assertEqual(set(payload), {"install_id", "telemetry_consent"})
+        self.assertIs(payload["wizard_complete"], False)
+        self.assertEqual(
+            set(payload),
+            {"install_id", "telemetry_consent", "wizard_complete", "rekordbox"},
+        )
+        self.assertEqual(
+            payload["rekordbox"],
+            {"hot_loops": False, "memory_cues": True, "key_notation": "asis"},
+        )
 
     def test_true_is_kept(self) -> None:
         """Keep a saved True and reuse the install id.
@@ -139,19 +151,105 @@ class SettingsTests(unittest.TestCase):
         app_config.set_telemetry_consent(False)
         saved = json.loads(path.read_text(encoding="utf-8"))
         self.assertNotIn("library_path", saved)
+        self.assertIn("rekordbox", saved)
 
-    def test_partial_object_is_not_written(self) -> None:
-        """Refuse to persist a settings object that omits the choice.
+    def test_missing_consent_is_not_written_as_a_choice(self) -> None:
+        """Omit a sharing choice that has not been made.
 
-        ``as_json`` is the write boundary. A missing consent must raise
-        rather than create a file the loader would treat as final.
+        The export bar can be stored on its own. The next load still has
+        no consent, so the prompt is still due.
 
         Returns:
-            None. The test fails if a partial object serializes.
+            None. The test fails if consent is written as false or null.
         """
-        partial = app_config.Settings(install_id="11111111-1111-4111-8111-111111111111", telemetry_consent=None)
         with self.assertRaises(ValueError):
-            partial.as_json()
+            app_config.Settings(
+                install_id="11111111-1111-4111-8111-111111111111",
+                telemetry_consent=None,
+            ).as_json()
+        body = app_config.Settings(install_id=None, telemetry_consent=None).as_json()
+        self.assertNotIn("telemetry_consent", body)
+        self.assertIn("rekordbox", body)
+        saved = app_config.update_rekordbox(hot_loops=True)
+        self.assertIsNone(saved.telemetry_consent)
+        self.assertIsNone(saved.install_id)
+        loaded = app_config.load_settings()
+        self.assertIsNone(loaded.telemetry_consent)
+        self.assertTrue(loaded.rekordbox.hot_loops)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertNotIn("telemetry_consent", payload)
+
+    def test_rekordbox_defaults_round_trip_and_reject_bad_types(self) -> None:
+        """Keep false, merge one field, and refuse integers and bad keys.
+
+        A saved memory-cues false stays false when only hot loops is
+        updated. A sharing choice saved afterwards keeps the export bar.
+        An integer, an unknown field, and a notation outside the three
+        words raise before the file changes.
+
+        Returns:
+            None. The test fails if false becomes the default or a bad
+            value is stored.
+        """
+        import rekordbox
+
+        self.assertEqual(app_config.REKORDBOX_KEY_NOTATIONS, rekordbox._KEY_NOTATIONS)
+        saved = app_config.update_rekordbox(
+            hot_loops=True,
+            memory_cues=False,
+            key_notation="camelot",
+        )
+        self.assertTrue(saved.rekordbox.hot_loops)
+        self.assertFalse(saved.rekordbox.memory_cues)
+        self.assertEqual(saved.rekordbox.key_notation, "camelot")
+        app_config.update_rekordbox(hot_loops=False)
+        loaded = app_config.load_settings()
+        self.assertFalse(loaded.rekordbox.hot_loops)
+        self.assertFalse(loaded.rekordbox.memory_cues)
+        self.assertEqual(loaded.rekordbox.key_notation, "camelot")
+        path = self.config / "settings.json"
+        before = path.read_text(encoding="utf-8")
+        with self.assertRaises(ValueError):
+            app_config.update_rekordbox(hot_loops=1)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            app_config.update_rekordbox(memory_cues=0)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            app_config.update_rekordbox(key_notation="open")
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes({"nope": True})
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes({})
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes("yes")
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+        path.write_text(
+            json.dumps(
+                {
+                    "rekordbox": {
+                        "hot_loops": 1,
+                        "memory_cues": False,
+                        "key_notation": "classical",
+                        "library_path": "/tmp",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            repaired = app_config.load_settings()
+        self.assertFalse(repaired.rekordbox.hot_loops)
+        self.assertFalse(repaired.rekordbox.memory_cues)
+        self.assertEqual(repaired.rekordbox.key_notation, "classical")
+        text = " ".join(caught.output)
+        self.assertIn("rekordbox.hot_loops", text)
+        self.assertIn("rekordbox.library_path", text)
+        app_config.set_telemetry_consent(False)
+        kept = app_config.load_settings()
+        self.assertIs(kept.telemetry_consent, False)
+        self.assertFalse(kept.rekordbox.memory_cues)
+        self.assertEqual(kept.rekordbox.key_notation, "classical")
+        written = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("library_path", written["rekordbox"])
 
     def test_unreadable_file_is_kept_aside(self) -> None:
         """Rename a corrupt file when a new choice is saved.
@@ -230,6 +328,305 @@ class DirectoryTests(unittest.TestCase):
         self.assertEqual(logs, Path.home() / ".local" / "state" / "serato-library" / "logs")
 
 
+class WindowSettingsTests(unittest.TestCase):
+    """Check the desktop window frame stored beside the sharing choice.
+
+    Each test uses a fresh config directory. Nothing is sent over the network.
+    """
+
+    def setUp(self) -> None:
+        """Create an empty config directory for one test.
+
+        Returns:
+            None.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = Path(self._tmp.name) / "config"
+        self.config.mkdir()
+        self._env = mock.patch.dict(os.environ, {app_config.CONFIG_ENV: str(self.config)})
+        self._env.start()
+
+    def tearDown(self) -> None:
+        """Remove the temporary config directory.
+
+        Returns:
+            None.
+        """
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_origin_zero_is_kept_and_consent_is_preserved(self) -> None:
+        """Keep x=0 and a saved decline across both writers.
+
+        The window is saved first, then the choice, then the window again.
+        Neither write drops the other. ``0`` stays ``0``.
+
+        Returns:
+            None. The test fails if a corner at the origin becomes missing.
+        """
+        frame = app_config.WindowGeometry(0, 0, 640, 480)
+        app_config.save_window_geometry(frame)
+        saved = app_config.set_telemetry_consent(False)
+        self.assertEqual(saved.window, frame)
+        self.assertIs(saved.telemetry_consent, False)
+        moved = app_config.save_window_geometry(app_config.WindowGeometry(8, 0, 800, 600))
+        self.assertIs(moved.telemetry_consent, False)
+        self.assertEqual(moved.install_id, saved.install_id)
+        assert moved.window is not None
+        self.assertEqual(moved.window.x, 8)
+        self.assertEqual(moved.window.y, 0)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(payload),
+            {"install_id", "telemetry_consent", "window", "wizard_complete", "rekordbox"},
+        )
+        self.assertIs(payload["wizard_complete"], False)
+        self.assertEqual(set(payload["window"]), set(app_config.WINDOW_FIELDS))
+
+    def test_wizard_complete_keeps_the_window_and_a_rerun_keeps_the_choice(self) -> None:
+        """Keep a negative origin when setup is finished and run again.
+
+        False before a sharing choice does not write a file. After the
+        choice and the frame exist, True and False both keep them.
+
+        Returns:
+            None. The test fails if setup drops the window or the choice.
+        """
+        untouched = app_config.set_wizard_complete(False)
+        self.assertIsNone(untouched.window)
+        self.assertFalse((self.config / "settings.json").exists())
+        frame = app_config.WindowGeometry(-40, 0, 1280, 800)
+        app_config.save_window_geometry(frame)
+        saved = app_config.set_telemetry_consent(True)
+        done = app_config.set_wizard_complete(True)
+        self.assertEqual(done.window, frame)
+        self.assertIs(done.telemetry_consent, True)
+        self.assertEqual(done.install_id, saved.install_id)
+        again = app_config.set_wizard_complete(False)
+        self.assertIs(again.wizard_complete, False)
+        self.assertEqual(again.window, frame)
+        self.assertIs(again.telemetry_consent, True)
+        self.assertEqual(again.install_id, saved.install_id)
+        finished = app_config.set_wizard_complete(True)
+        self.assertEqual(finished.window, frame)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["window"]["x"], -40)
+        self.assertIs(payload["telemetry_consent"], True)
+        self.assertEqual(payload["install_id"], saved.install_id)
+
+    def test_bool_coordinate_is_rejected(self) -> None:
+        """Ignore a boolean coordinate instead of storing it as 1.
+
+        The warning names ``window.x``. The sharing choice is still loaded.
+        The constructor also refuses a bool.
+
+        Returns:
+            None. The test fails if ``True`` is stored as an origin.
+        """
+        path = self.config / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "install_id": "11111111-1111-4111-8111-111111111111",
+                    "telemetry_consent": False,
+                    "window": {"x": True, "y": 0, "width": 800, "height": 600},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertIsNone(loaded.window)
+        self.assertIs(loaded.telemetry_consent, False)
+        self.assertTrue(any("window.x" in line for line in caught.output))
+        with self.assertRaises(ValueError):
+            app_config.WindowGeometry(True, 0, 800, 600)  # type: ignore[arg-type]
+
+    def test_partial_window_and_unknown_nested_key_are_dropped(self) -> None:
+        """Drop a frame that is missing a field, and warn on an extra key.
+
+        A complete frame with an unknown nested key keeps the four known
+        fields. The next save does not write the extra key.
+
+        Returns:
+            None. The test fails if a three-field frame is opened later.
+        """
+        path = self.config / "settings.json"
+        path.write_text(
+            json.dumps({"window": {"x": 1, "y": 2, "width": 800}}),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertIsNone(loaded.window)
+        self.assertTrue(any("window.height" in line for line in caught.output))
+        path.write_text(
+            json.dumps(
+                {
+                    "window": {
+                        "x": 4,
+                        "y": 5,
+                        "width": 900,
+                        "height": 700,
+                        "monitor": "left",
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertEqual(loaded.window, app_config.WindowGeometry(4, 5, 900, 700))
+        self.assertTrue(any("window.monitor" in line for line in caught.output))
+        app_config.save_window_geometry(loaded.window)
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("monitor", saved["window"])
+        self.assertNotIn("install_id", saved)
+
+    def test_out_of_range_frame_is_ignored(self) -> None:
+        """Ignore a width below the minimum the window can open.
+
+        Returns:
+            None. The test fails if a 200px frame is returned.
+        """
+        path = self.config / "settings.json"
+        path.write_text(
+            json.dumps({"window": {"x": 0, "y": 0, "width": 200, "height": 600}}),
+            encoding="utf-8",
+        )
+        with self.assertLogs("serato.library.config", level="WARNING") as caught:
+            loaded = app_config.load_settings()
+        self.assertIsNone(loaded.window)
+        self.assertTrue(any("window.width" in line for line in caught.output))
+
+    def test_settings_keys_match_a_full_file(self) -> None:
+        """Declare every key a full settings file contains.
+
+        Returns:
+            None. The test fails if a stored key is missing from the schema.
+        """
+        app_config.set_telemetry_consent(False)
+        app_config.save_window_geometry(app_config.WindowGeometry(1, 2, 640, 480))
+        app_config.set_track_list_width(520)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(payload), set(app_config.SETTINGS_KEYS))
+
+
+class LayoutSettingsTests(unittest.TestCase):
+    """Check the track list width stored beside the other settings.
+
+    Each test uses a fresh config directory. Nothing is sent over the network.
+    """
+
+    def setUp(self) -> None:
+        """Create an empty config directory for one test.
+
+        Returns:
+            None.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = Path(self._tmp.name) / "config"
+        self.config.mkdir()
+        self._env = mock.patch.dict(os.environ, {app_config.CONFIG_ENV: str(self.config)})
+        self._env.start()
+
+    def tearDown(self) -> None:
+        """Remove the temporary config directory.
+
+        Returns:
+            None.
+        """
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_width_round_trips_and_keeps_the_other_fields(self) -> None:
+        """Save a width after the sharing choice and the window.
+
+        Returns:
+            None. The test fails if a later save drops a field.
+        """
+        app_config.set_telemetry_consent(False)
+        frame = app_config.WindowGeometry(0, 0, 1280, 800)
+        app_config.save_window_geometry(frame)
+        app_config.set_track_list_width(520)
+        loaded = app_config.load_settings()
+        self.assertEqual(loaded.track_list_width, 520)
+        self.assertIs(loaded.telemetry_consent, False)
+        self.assertEqual(loaded.window, frame)
+        app_config.set_wizard_complete(True)
+        app_config.save_window_geometry(frame)
+        app_config.set_telemetry_consent(True)
+        self.assertEqual(app_config.load_settings().track_list_width, 520)
+        stored = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["layout"], {"track_list_width": 520})
+
+    def test_width_before_a_choice_does_not_invent_one(self) -> None:
+        """Store a width on a first launch, then clear it.
+
+        Returns:
+            None. The test fails if a consent appears or the layout stays.
+        """
+        app_config.update_rekordbox(hot_loops=True)
+        app_config.set_track_list_width(400)
+        path = self.config / "settings.json"
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(set(stored), {"rekordbox", "layout"})
+        self.assertEqual(stored["layout"], {"track_list_width": 400})
+        self.assertIs(stored["rekordbox"]["hot_loops"], True)
+        self.assertIsNone(app_config.load_settings().telemetry_consent)
+        app_config.set_track_list_width(None)
+        stored = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotIn("layout", stored)
+        self.assertIs(stored["rekordbox"]["hot_loops"], True)
+        self.assertIsNone(app_config.load_settings().track_list_width)
+        app_config.update_rekordbox(memory_cues=False)
+        app_config.set_track_list_width(500)
+        app_config.update_rekordbox(key_notation="camelot")
+        loaded = app_config.load_settings()
+        self.assertEqual(loaded.track_list_width, 500)
+        self.assertIs(loaded.rekordbox.memory_cues, False)
+
+    def test_reset_keeps_the_window(self) -> None:
+        """Clear the width while a window frame is stored.
+
+        Returns:
+            None. The test fails if the reset drops the frame.
+        """
+        frame = app_config.WindowGeometry(4, 5, 900, 700)
+        app_config.save_window_geometry(frame)
+        app_config.set_track_list_width(600)
+        app_config.set_track_list_width(None)
+        stored = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertNotIn("layout", stored)
+        self.assertEqual(app_config.load_settings().window, frame)
+
+    def test_bad_widths_are_rejected(self) -> None:
+        """Refuse a bool, a float, and widths out of range.
+
+        Returns:
+            None. The test fails if one is written.
+        """
+        for value in (True, 512.0, "512", app_config.TRACK_LIST_MIN_WIDTH - 1,
+                      app_config.TRACK_LIST_MAX_WIDTH + 1):
+            with self.assertRaises(ValueError, msg=repr(value)):
+                app_config.set_track_list_width(value)  # type: ignore[arg-type]
+        self.assertFalse((self.config / "settings.json").exists())
+
+    def test_bad_stored_width_is_ignored(self) -> None:
+        """Drop a hand-edited width that is not an integer in range.
+
+        Returns:
+            None. The test fails if the loader keeps it.
+        """
+        path = self.config / "settings.json"
+        for layout in ({"track_list_width": True}, {"track_list_width": 10},
+                       {"track_list_width": "wide"}, [], {"other": 1}):
+            path.write_text(json.dumps({"layout": layout}), encoding="utf-8")
+            with self.assertLogs("serato.library.config", level="WARNING"):
+                loaded = app_config.load_settings()
+            self.assertIsNone(loaded.track_list_width, layout)
+
+
 class VersionTests(unittest.TestCase):
     """The app version has one definition.
 
@@ -244,7 +641,7 @@ class VersionTests(unittest.TestCase):
             None. The test fails when the alias is a second literal.
         """
         self.assertEqual(app_config.__version__, app_config.APP_VERSION)
-        self.assertEqual(app_config.APP_VERSION, "0.1.1")
+        self.assertEqual(app_config.APP_VERSION, "1.1.0")
 
     def test_docs_quote_the_same_version(self) -> None:
         """Keep the privacy and architecture notes on ``APP_VERSION``.

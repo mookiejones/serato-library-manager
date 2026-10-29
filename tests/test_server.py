@@ -17,7 +17,17 @@ from http.server import ThreadingHTTPServer
 from xml.etree import ElementTree
 
 import server
-from server import blank, format_bpm, format_bool, format_color, format_when, require_space
+from server import (
+    blank,
+    display_beatgrid,
+    encode_json,
+    format_beat_position,
+    format_bpm,
+    format_bool,
+    format_color,
+    format_when,
+    require_space,
+)
 from tests.fixture import TempLibrary, open_database
 import library
 from library import LibraryError
@@ -51,6 +61,60 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(format_when(0), "—")
         self.assertEqual(format_when(False), "—")
 
+    def test_beat_position_rounds_for_display(self) -> None:
+        """Show a beatgrid position to the millisecond and hide binary noise.
+
+        ``1.2300000190734863`` is the float32 value of 1.23 seconds. The
+        panel string is ``1.230``. A non-finite value is blank. Nothing
+        is written, and this string is not the export.
+
+        Returns:
+            None. The test fails if the long float is shown or a NaN becomes 0.
+        """
+        self.assertEqual(format_beat_position(1.2300000190734863), "1.230")
+        self.assertEqual(format_beat_position(float("nan")), "")
+        self.assertEqual(format_beat_position(float("inf")), "")
+        script = Path(__file__).resolve().parents[1].joinpath("static", "app.js").read_text(encoding="utf-8")
+        self.assertIn("beatSeconds(mark.position)", script)
+        self.assertIn("toFixed(3)", script)
+        self.assertIn("Number.isFinite(bpmNumber)", script)
+
+    def test_nonfinite_bpm_is_null_in_json(self) -> None:
+        """Send a non-finite beatgrid BPM as null, never as the token NaN.
+
+        ``display_beatgrid`` clears the BPM. ``encode_json`` also replaces
+        a non-finite float anywhere in a payload and refuses ``allow_nan``.
+        A finite BPM and a marker that has no BPM are left alone. Nothing
+        is written.
+
+        Returns:
+            None. The test fails if the JSON contains NaN or Infinity.
+        """
+        shown = display_beatgrid(
+            [
+                {"position": 1.2300000190734863, "bpm": float("nan")},
+                {"position": 2.0, "bpm": float("inf")},
+                {"position": 3.0, "bpm": float("-inf")},
+                {"position": 4.0, "bpm": 128.0},
+                {"position": 0.0, "beats": 4},
+            ]
+        )
+        self.assertIsNone(shown[0]["bpm"])
+        self.assertIsNone(shown[1]["bpm"])
+        self.assertIsNone(shown[2]["bpm"])
+        self.assertEqual(shown[3]["bpm"], 128.0)
+        self.assertNotIn("bpm", shown[4])
+        self.assertEqual(shown[0]["position"], "1.230")
+        body = encode_json({"beatgrid": shown, "raw": float("nan"), "huge": float("inf")})
+        text = body.decode("utf-8")
+        self.assertNotIn("NaN", text)
+        self.assertNotIn("Infinity", text)
+        parsed = json.loads(text)
+        self.assertIsNone(parsed["beatgrid"][0]["bpm"])
+        self.assertIsNone(parsed["raw"])
+        self.assertIsNone(parsed["huge"])
+        self.assertEqual(parsed["beatgrid"][3]["bpm"], 128.0)
+
     def test_require_space(self) -> None:
         """Default a missing space to Serato Library and reject an unknown one.
 
@@ -63,6 +127,26 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(require_space(None), "Serato Library")
         with self.assertRaises(LibraryError):
             require_space("Streaming")
+
+    def test_export_option_warns_on_an_unknown_value(self) -> None:
+        """Log a warning and keep the default when the query word is unknown.
+
+        ``yes`` is on and ``no`` is off. ``banana`` and ``nope`` are not
+        switches, so the warning names the parameter and the default.
+
+        Returns:
+            None. The test fails if the warning is missing or the default changes.
+        """
+        self.assertTrue(server.export_option("yes", default=False, name="memory"))
+        self.assertFalse(server.export_option("no", default=True, name="memory"))
+        with self.assertLogs("serato", level="WARNING") as caught:
+            self.assertTrue(server.export_option("banana", default=True, name="memory"))
+            self.assertFalse(server.export_option("nope", default=False, name="hot_loops"))
+        text = " ".join(caught.output)
+        self.assertIn("memory='banana'", text)
+        self.assertIn("Using on", text)
+        self.assertIn("hot_loops='nope'", text)
+        self.assertIn("Using off", text)
 
 
 class ApiTests(unittest.TestCase):
@@ -147,6 +231,7 @@ class ApiTests(unittest.TestCase):
         """
         status, page = self.request("/")
         self.assertEqual(status, 200)
+        self.assertIn("<title>Serato Library</title>", page)
         self.assertIn("Serato library", page)
         status, payload = self.request("/api/library")
         self.assertEqual(status, 200)
@@ -182,6 +267,28 @@ class ApiTests(unittest.TestCase):
         connection.close()
         self.assertEqual(response.status, 200)
         self.assertIn(b"--walnut", body)
+
+    def test_tokens_css_is_a_stylesheet(self) -> None:
+        """Serve /tokens.css as text/css from static/.
+
+        The page links this file before app.css. The body is the walnut
+        and manila sheet, not the dark reference under design/.
+
+        Returns:
+            None. The test fails if the status, media type, or palette differs.
+        """
+        host, port = self.httpd.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.putrequest("GET", "/tokens.css")
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        content_type = response.getheader("Content-Type")
+        connection.close()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(content_type, "text/css; charset=utf-8")
+        self.assertIn(b"--color-bg: #231910", body)
+        self.assertNotIn(b"#0d0f14", body)
 
     def test_save_and_read_track(self) -> None:
         """Save a comment through POST ``/api/track`` and read it back.
@@ -292,6 +399,52 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(json.loads(known)["xml"].startswith("<?xml"))
         self.assertEqual(json.loads(weird)["xml"], json.loads(defaults)["xml"])
 
+    def test_hot_loops_reaches_the_export(self) -> None:
+        """Pass hot loops through to the export for on, off, and omitted.
+
+        ``true`` and ``1`` are on. ``false`` and ``0`` are off. A request
+        that omits ``hot_loops`` is off. The export function is replaced,
+        so the fixture audio is not read.
+
+        Returns:
+            None. The test fails if the boolean passed to the export differs.
+        """
+        sentinel = ('<?xml version="1.0" encoding="UTF-8"?>\n<DJ_PLAYLISTS/>', [])
+        cases = (
+            ("&hot_loops=true", True),
+            ("&hot_loops=false", False),
+            ("&hot_loops=1", True),
+            ("&hot_loops=0", False),
+            ("", False),
+        )
+        with unittest.mock.patch.object(server.rekordbox, "export_rekordbox", return_value=sentinel) as export:
+            for query, expected in cases:
+                with self.subTest(query=query or "missing"):
+                    status, body = self.request(
+                        "/api/export.rekordbox.xml?crate=all&report=1" + query
+                    )
+                    self.assertEqual(status, 200)
+                    self.assertTrue(str(body).startswith('{"'))
+                    self.assertIs(export.call_args.kwargs["hot_loops"], expected)
+                    self.assertIs(export.call_args.kwargs["memory_cues"], True)
+
+    def test_served_page_renders_hot_loops(self) -> None:
+        """Serve the Hot loops control with its label and help line.
+
+        GET ``/`` is the page file. The checkbox is present and unchecked.
+
+        Returns:
+            None. The test fails if the served page omits the control.
+        """
+        status, page = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(page, str)
+        assert isinstance(page, str)
+        self.assertIn("Hot loops", page)
+        self.assertIn("Uses a free hot-cue pad", page)
+        self.assertRegex(page, r'id="rekordbox-hot-loops"[^>]*type="checkbox"')
+        self.assertNotRegex(page, r'id="rekordbox-hot-loops"[^>]*\bchecked\b')
+
     def test_merge_preview_and_confirm(self) -> None:
         """Preview a duplicate merge, then confirm it over HTTP.
 
@@ -370,6 +523,129 @@ class ApiTests(unittest.TestCase):
             server.sys, "_MEIPASS", "/bundle", create=True
         ):
             self.assertEqual(server.app_root(), Path("/bundle"))
+
+    def test_health_does_not_read_the_library(self) -> None:
+        """Answer ``/api/health`` when the master database is missing.
+
+        ``serve`` is called with ``require_library`` false and a free port.
+        The body is ``{"ok": true}``. Shutdown without a token is 404.
+
+        Returns:
+            None. The test fails if health touches the database or stays bound.
+        """
+        missing = Path("/tmp/serato-library-missing-master.sqlite")
+        with unittest.mock.patch.object(server, "db_path", return_value=missing):
+            httpd = server.serve(port=0, require_library=False)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/api/health", timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read().decode("utf-8")), {"ok": True})
+            request = urllib.request.Request(
+                f"http://{host}:{port}/api/shutdown",
+                data=b"{}",
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=5)
+            self.assertEqual(caught.exception.code, 404)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(3)
+
+    def test_shutdown_requires_the_token(self) -> None:
+        """Accept shutdown only with the token stored on the server.
+
+        A wrong token returns 403 and leaves the server running. The
+        matching token returns 200 and stops ``serve_forever``.
+
+        Returns:
+            None. The test fails if a wrong token stops the server.
+        """
+        httpd = server.serve(port=0, require_library=False)
+        httpd.shutdown_token = "token-value"
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        base = f"http://{host}:{port}/api/shutdown"
+        try:
+            wrong = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.SHUTDOWN_HEADER: "nope"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(wrong, timeout=5)
+            self.assertEqual(caught.exception.code, 403)
+            self.assertTrue(thread.is_alive())
+            right = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.SHUTDOWN_HEADER: "token-value"},
+                method="POST",
+            )
+            with urllib.request.urlopen(right, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+        finally:
+            if thread.is_alive():
+                httpd.shutdown()
+                thread.join(3)
+            httpd.server_close()
+
+    def test_focus_requires_the_token(self) -> None:
+        """Bring the window forward only with the desktop focus token.
+
+        A missing token returns 404. A wrong token returns 403 and does
+        not call the callback. The matching token returns 200 and calls
+        it. The server keeps running.
+
+        Returns:
+            None. The test fails if a wrong token focuses the window.
+        """
+        httpd = server.serve(port=0, require_library=False)
+        focused: list[str] = []
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address
+        base = f"http://{host}:{port}/api/focus"
+        try:
+            missing = urllib.request.Request(base, data=b"{}", method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(missing, timeout=5)
+            self.assertEqual(caught.exception.code, 404)
+            httpd.focus_token = "focus-token"
+            httpd.focus_window = lambda: focused.append("focused")
+            wrong = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.FOCUS_HEADER: "nope"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(wrong, timeout=5)
+            self.assertEqual(caught.exception.code, 403)
+            self.assertEqual(focused, [])
+            right = urllib.request.Request(
+                base,
+                data=b"{}",
+                headers={server.FOCUS_HEADER: "focus-token"},
+                method="POST",
+            )
+            with urllib.request.urlopen(right, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read().decode("utf-8")), {"ok": True})
+            self.assertEqual(focused, ["focused"])
+            self.assertTrue(thread.is_alive())
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(3)
 
     def test_taken_port_names_the_other_server(self) -> None:
         """Name the other server when port 8765 is already bound.

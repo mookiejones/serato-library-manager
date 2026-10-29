@@ -1,0 +1,114 @@
+/**
+ * Typed lookups for the elements index.html ships.
+ *
+ * A missing id throws before the caller reads a property. The real page
+ * includes every id, so the lookup still returns that element.
+ */
+
+export interface ElementIds {
+  "crate-list": HTMLDivElement;
+  "session-list": HTMLDivElement;
+  list: HTMLDivElement;
+  count: HTMLParagraphElement;
+  search: HTMLInputElement;
+  detail: HTMLElement;
+  browser: HTMLElement;
+  "track-splitter": HTMLDivElement;
+  status: HTMLParagraphElement;
+  notice: HTMLParagraphElement;
+  "crate-foot": HTMLParagraphElement;
+  "mode-note": HTMLParagraphElement;
+  space: HTMLSelectElement;
+  "crate-tools": HTMLDivElement;
+  "crate-actions": HTMLDivElement;
+  "files-panel": HTMLElement;
+  "snapshots-panel": HTMLElement;
+  "crate-new": HTMLButtonElement;
+  "crate-rename": HTMLButtonElement;
+  "crate-color": HTMLButtonElement;
+  "crate-delete": HTMLButtonElement;
+  "snapshots-status": HTMLParagraphElement;
+  "snapshots-block": HTMLParagraphElement;
+  "snapshots-undo": HTMLDivElement;
+  "snapshots-list": HTMLDivElement;
+  "snapshots-undo-text": HTMLParagraphElement;
+  "snapshot-plan": HTMLDivElement;
+  "snapshot-block": HTMLParagraphElement;
+  "snapshot-confirm": HTMLButtonElement;
+  "snapshot-dialog": HTMLDialogElement;
+  "snapshot-status": HTMLParagraphElement;
+  "snapshots-take": HTMLButtonElement;
+  "crate-search": HTMLInputElement;
+  reload: HTMLButtonElement;
+  "export-m3u": HTMLButtonElement;
+  "rekordbox-memory": HTMLInputElement;
+  "rekordbox-hot-loops": HTMLInputElement;
+  "rekordbox-key": HTMLSelectElement;
+  "rekordbox-report": HTMLUListElement;
+  "export-rekordbox": HTMLButtonElement;
+  "rekordbox-status": HTMLParagraphElement;
+  "rekordbox-dialog": HTMLDialogElement;
+  "rekordbox-cancel": HTMLButtonElement;
+  "rekordbox-download": HTMLButtonElement;
+  "import-m3u": HTMLButtonElement;
+  "import-file": HTMLInputElement;
+  views: HTMLDivElement;
+  "snapshots-refresh": HTMLButtonElement;
+  "snapshots-undo-button": HTMLButtonElement;
+  "snapshot-cancel": HTMLButtonElement;
+  "merge-duplicates": HTMLButtonElement;
+  "merge-cancel": HTMLButtonElement;
+  "merge-confirm": HTMLButtonElement;
+  "merge-trash": HTMLInputElement;
+  "duplicate-actions": HTMLDivElement;
+  "merge-dialog": HTMLDialogElement;
+  "merge-choices": HTMLDivElement;
+  "merge-preview": HTMLDivElement;
+  "merge-status": HTMLParagraphElement;
+  "merge-file-note": HTMLParagraphElement;
+  "consent-dialog": HTMLDialogElement;
+  "settings-dialog": HTMLDialogElement;
+  "telemetry-toggle": HTMLInputElement;
+  "telemetry-note": HTMLParagraphElement;
+  "consent-status": HTMLParagraphElement;
+  "settings-status": HTMLParagraphElement;
+  "log-fallback": HTMLTextAreaElement;
+  "consent-decline": HTMLButtonElement;
+  "consent-accept": HTMLButtonElement;
+  "open-settings": HTMLButtonElement;
+  "rerun-wizard": HTMLButtonElement;
+  "settings-close": HTMLButtonElement;
+  "open-logs": HTMLButtonElement;
+  "copy-logs": HTMLButtonElement;
+  "files-dialog": HTMLDialogElement;
+  "files-list": HTMLDivElement;
+  "files-status": HTMLParagraphElement;
+  "files-name": HTMLInputElement;
+  "files-replacement": HTMLInputElement;
+  "files-pick": HTMLParagraphElement;
+  "files-move-here": HTMLButtonElement;
+  "files-pick-cancel": HTMLButtonElement;
+  "files-path": HTMLParagraphElement;
+  "files-up": HTMLButtonElement;
+  "files-rename": HTMLButtonElement;
+  "files-move": HTMLButtonElement;
+  "files-move-folder": HTMLButtonElement;
+  "files-replace": HTMLButtonElement;
+  "files-delete": HTMLButtonElement;
+  "files-name-label": HTMLLabelElement;
+  "files-replace-label": HTMLLabelElement;
+  "files-summary": HTMLParagraphElement;
+  "files-warning": HTMLParagraphElement;
+  "files-dialog-status": HTMLParagraphElement;
+  "files-changes": HTMLUListElement;
+  "files-confirm": HTMLButtonElement;
+  "files-cancel": HTMLButtonElement;
+  "files-review": HTMLButtonElement;
+  "files-refresh": HTMLButtonElement;
+}
+
+export function el<K extends keyof ElementIds>(id: K): ElementIds[K] {
+  const node = document.getElementById(id);
+  if (node == null) throw new Error(`Missing #${id}`);
+  return node as ElementIds[K];
+}
