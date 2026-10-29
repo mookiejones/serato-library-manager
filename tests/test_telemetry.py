@@ -743,6 +743,53 @@ class ApiPrivacyTests(unittest.TestCase):
         self.assertIs(consented["rekordbox"]["memory_cues"], False)
         self.assertEqual(consented["rekordbox"]["key_notation"], "camelot")
 
+    def test_integer_rekordbox_field_is_rejected_without_saving(self) -> None:
+        """Refuse an integer export-bar field and leave the file untouched.
+
+        A body that pairs the integer with a real boolean, or with a
+        sharing choice, is still a 400. The integer must not be stored,
+        and the other field in that body must not be stored either.
+
+        Returns:
+            None. The test fails if the response is 200 or the file changes.
+        """
+        import urllib.error
+
+        status, saved = self._request(
+            "/api/settings",
+            {"rekordbox": {"hot_loops": False, "memory_cues": False, "key_notation": "camelot"}},
+        )
+        self.assertEqual(status, 200)
+        self.assertIs(saved["rekordbox"]["hot_loops"], False)
+        path = app_config.settings_path()
+        original = path.read_bytes()
+        bodies = (
+            {"rekordbox": {"hot_loops": 1}},
+            {"rekordbox": {"memory_cues": 0}},
+            {"rekordbox": {"hot_loops": 1, "memory_cues": True}},
+            {"rekordbox": {"memory_cues": 1, "hot_loops": True}},
+            {"rekordbox": {"key_notation": 1, "hot_loops": True}},
+            {"telemetry_consent": False, "rekordbox": {"hot_loops": 1}},
+        )
+        for body in bodies:
+            request = urllib.request.Request(
+                self.base + "/api/settings",
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.assertRaises(urllib.error.HTTPError, msg=repr(body)) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(caught.exception.code, 400, body)
+            caught.exception.read()
+            caught.exception.close()
+            self.assertEqual(path.read_bytes(), original, body)
+        status, still = self._request("/api/settings")
+        self.assertEqual(status, 200)
+        self.assertIs(still["rekordbox"]["hot_loops"], False)
+        self.assertIs(still["rekordbox"]["memory_cues"], False)
+        self.assertEqual(still["rekordbox"]["key_notation"], "camelot")
+        self.assertIsNone(still["telemetry_consent"])
+
     def test_crate_create_does_not_send_the_name_without_consent(self) -> None:
         """Create a crate without an analytics event when sharing is off.
 
