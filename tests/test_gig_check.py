@@ -17,6 +17,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
@@ -45,6 +46,45 @@ from tests.test_snapshots import _audio_file, _autotags, _geob, _grid, _id3, _ma
 
 NOW = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _classified(
+    *,
+    missing: int = 0,
+    drives: int = 0,
+    streaming: int = 0,
+    empty: int = 0,
+) -> gig_check._Classified:
+    """Build a classified group with the given counts.
+
+    Args:
+        missing: Missing files.
+        drives: Absent drives.
+        streaming: Streaming tracks.
+        empty: Empty crates.
+
+    Returns:
+        A group ``_score`` can read. The rows are distinct and carry no files.
+    """
+    return gig_check._Classified(
+        missing=tuple(
+            gig_check.MissingFile(f"missing-{index}.mp3", "Title", "Artist", "Crate")
+            for index in range(missing)
+        ),
+        drives=tuple(
+            gig_check.UnavailableDrive(f"DRIVE{index}", 1, ("Crate",))
+            for index in range(drives)
+        ),
+        streaming=tuple(
+            gig_check.StreamingTrack("Apple Music", f"stream-{index}", "Title", "Artist", "Crate")
+            for index in range(streaming)
+        ),
+        empty=tuple(
+            gig_check.EmptyCrate(f"Empty {index}", gig_check.EMPTY_CRATE_WARNING)
+            for index in range(empty)
+        ),
+        present_paths={},
+    )
 
 
 def _digest(path: Path) -> str:
@@ -942,6 +982,146 @@ class GigCheckTests(unittest.TestCase):
             "/Volumes/Tour/Music/set/opener.mp3",
         )
         self.assertIsNone(volume._find(""))
+
+    def test_saved_frames_do_not_suffix_match_a_drive(self) -> None:
+        """Do not attach a frame by suffix when the id starts with a drive.
+
+        ``C:/Music/opener.mp3`` is not a relative tail of another path.
+        A relative id that starts with a folder name still matches.
+
+        Returns:
+            None. The test fails if the drive id receives the other track's
+            frame.
+        """
+        saved = "D:/elsewhere/C:/Music/opener.mp3"
+        frames = gig_check._SavedFrames(
+            {
+                "cues": [{"path": saved, "cues": [], "loops": []}],
+                "grids": [],
+                "tags": [],
+            }
+        )
+        self.assertEqual(frames._find("elsewhere/C:/Music/opener.mp3"), saved)
+        self.assertIsNone(frames._find("C:/Music/opener.mp3"))
+
+    def test_saved_frames_suffix_match_ignores_case_on_windows(self) -> None:
+        """Match a relative tail without regard to case on Windows.
+
+        The saved path and the stored id use different case, so both
+        ``casefold`` calls have to run. The same-case tail matches on
+        every platform.
+
+        Returns:
+            None. The test fails if the Windows match keeps the original case.
+        """
+        saved = "/Volumes/Tour/Music/Set/Opener.mp3"
+        frames = gig_check._SavedFrames(
+            {
+                "cues": [{"path": saved, "cues": [], "loops": []}],
+                "grids": [],
+                "tags": [],
+            }
+        )
+        self.assertEqual(frames._find("Music/Set/Opener.mp3"), saved)
+        with (
+            mock.patch("gig_check.os.name", "nt"),
+            mock.patch("gig_check._candidates", return_value=()),
+        ):
+            self.assertEqual(frames._find("music/set/OPENER.mp3"), saved)
+
+    def test_score_of_exactly_70_is_ready(self) -> None:
+        """Treat a score of 70 as ready when nothing is a hard red.
+
+        Eight streaming tracks are 16 points, one empty crate is 4, and
+        a stale snapshot is 10. That is 30 points off 100. The counts sit
+        on the caps, not past them.
+
+        Returns:
+            None. The test fails if 70 is not ready.
+        """
+        score, ready, hard, lines = gig_check._score(
+            _classified(streaming=8, empty=1),
+            fresh=False,
+            changes=None,
+            scope_crate=None,
+        )
+        self.assertEqual(score, gig_check.READY_AT)
+        self.assertFalse(hard)
+        self.assertTrue(ready)
+        points = {line.code: line.points for line in lines}
+        self.assertEqual(points["streaming"], gig_check.STREAM_CAP)
+        self.assertEqual(points["empty_crates"], gig_check.EMPTY_POINTS)
+        self.assertEqual(points["snapshot_stale"], gig_check.STALE_POINTS)
+
+    def test_score_floors_at_zero(self) -> None:
+        """Keep the score at 0 when the deductions pass 100.
+
+        Six absent drives are 120 points. No other line is added.
+
+        Returns:
+            None. The test fails if the score is negative.
+        """
+        score, ready, hard, lines = gig_check._score(
+            _classified(drives=6),
+            fresh=True,
+            changes=None,
+            scope_crate=None,
+        )
+        self.assertEqual(score, 0)
+        self.assertTrue(hard)
+        self.assertFalse(ready)
+        self.assertEqual(lines[0].points, gig_check.DRIVE_POINTS * 6)
+
+    def test_missing_points_are_capped(self) -> None:
+        """Stop missing-file points at 40.
+
+        Six files would be 48 points without the cap.
+
+        Returns:
+            None. The test fails if the deduction is not 40.
+        """
+        _score, _ready, _hard, lines = gig_check._score(
+            _classified(missing=6),
+            fresh=True,
+            changes=None,
+            scope_crate=None,
+        )
+        missing = next(line for line in lines if line.code == "missing_files")
+        self.assertEqual(missing.points, gig_check.MISSING_CAP)
+
+    def test_streaming_points_are_capped(self) -> None:
+        """Stop streaming points at 16.
+
+        Nine tracks would be 18 points without the cap.
+
+        Returns:
+            None. The test fails if the deduction is not 16.
+        """
+        _score, _ready, _hard, lines = gig_check._score(
+            _classified(streaming=9),
+            fresh=True,
+            changes=None,
+            scope_crate=None,
+        )
+        streaming = next(line for line in lines if line.code == "streaming")
+        self.assertEqual(streaming.points, gig_check.STREAM_CAP)
+
+    def test_empty_crate_points_are_capped(self) -> None:
+        """Stop empty-crate points at 12.
+
+        Four crates would be 16 points without the cap.
+
+        Returns:
+            None. The test fails if the deduction is not 12.
+        """
+        _score, _ready, _hard, lines = gig_check._score(
+            _classified(empty=4),
+            fresh=True,
+            changes=None,
+            scope_crate=None,
+        )
+        empty = next(line for line in lines if line.code == "empty_crates")
+        self.assertEqual(empty.points, gig_check.EMPTY_CAP)
 
     def test_unreadable_snapshot_store_is_reported(self) -> None:
         """A store whose manifest key is broken says so and counts as stale.
