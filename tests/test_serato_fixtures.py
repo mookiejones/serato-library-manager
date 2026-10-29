@@ -158,6 +158,23 @@ class FixtureManifestTests(unittest.TestCase):
             self.assertIn("https://github.com/Holzhaus/", str(item["citation"]))
             self.assertLess(int(item["bytes"]), 8192)
 
+    def test_fixtures_hold_no_real_library_database(self) -> None:
+        """Keep a real user's library out of the synthetic fixture tree.
+
+        Returns:
+            None. The test fails if ``master.sqlite``, ``root.sqlite``, or
+            another SQLite library file is stored under ``tests/fixtures``.
+        """
+        found = [
+            path.relative_to(FIXTURES).as_posix()
+            for path in FIXTURES.rglob("*")
+            if path.is_file()
+            and path.name.lower().endswith(
+                (".sqlite", ".sqlite-wal", ".sqlite-shm", ".sqlite-journal")
+            )
+        ]
+        self.assertEqual(found, [])
+
     def test_readme_lists_each_fixture(self) -> None:
         """Point the README at every committed fixture and its status.
 
