@@ -458,6 +458,47 @@ def _roots_payload(roots: list[dict[str, str]], info: dict[str, object]) -> dict
     }
 
 
+def _bare_root(path: str) -> bool:
+    """Return whether ``path`` is a root the browse must not open.
+
+    Args:
+        path: Requested or normalized path.
+
+    Returns:
+        True for ``/``, ``/Volumes``, a drive root such as ``C:\\``, and
+        the root of a UNC share such as ``\\\\server\\share``.
+    """
+    if path.startswith("\\\\") or path.startswith("//"):
+        parts = [part for part in path.replace("/", "\\").split("\\") if part]
+        return len(parts) <= 2
+    folded = os.path.normpath(path).replace("\\", "/").rstrip("/").casefold()
+    if folded in {"", "/"} or folded == "/volumes":
+        return True
+    if len(path) >= 2 and path[1] == ":":
+        rest = os.path.normpath(path)[2:].replace("/", "\\").strip("\\")
+        return rest == ""
+    return False
+
+
+def _is_missing_root(path: str, roots: list[dict[str, str]]) -> bool:
+    """Return whether ``path`` is a root whose drive is not connected.
+
+    Args:
+        path: Requested folder.
+        roots: Named roots. A root with ``missing`` true cannot be opened.
+
+    Returns:
+        True when the normalized path matches a missing root.
+    """
+    folded = os.path.normcase(os.path.normpath(path))
+    for root in roots:
+        if not root.get("missing"):
+            continue
+        if os.path.normcase(os.path.normpath(str(root.get("path") or ""))) == folded:
+            return True
+    return False
+
+
 def _resolve_directory(path: str, *, elsewhere: bool, roots: list[dict[str, str]]) -> Path:
     """Normalize a browse path and keep it inside a music root.
 
@@ -478,7 +519,14 @@ def _resolve_directory(path: str, *, elsewhere: bool, roots: list[dict[str, str]
     """
     if not isinstance(path, str) or "\x00" in path or len(path) > 4096 or not path.strip():
         raise library.LibraryError("That request is not valid.")
+    if _bare_root(path) or _is_missing_root(path, roots):
+        raise library.LibraryError(
+            "That folder could not be read." if _is_missing_root(path, roots) else "That folder is outside the music folders.",
+            404 if _is_missing_root(path, roots) else 403,
+        )
     normalized = os.path.normpath(os.path.abspath(path))
+    if _bare_root(normalized):
+        raise library.LibraryError("That folder is outside the music folders.", 403)
     drive, _rest = os.path.splitdrive(normalized)
     anchor = drive + os.sep if drive else os.path.abspath(os.sep)
     probe = os.path.normcase(normalized)
@@ -496,6 +544,8 @@ def _resolve_directory(path: str, *, elsewhere: bool, roots: list[dict[str, str]
             raise library.LibraryError("That folder could not be read.", 404) from exc
         if not resolved.is_dir():
             raise library.LibraryError("That folder could not be read.", 404)
+        if _bare_root(str(resolved)):
+            raise library.LibraryError("That folder is outside the music folders.", 403)
         if elsewhere:
             return resolved
         match = _matching_root(resolved, roots)
@@ -525,6 +575,9 @@ def _refuse_deep_symlink(path: Path) -> None:
             linked = current.is_symlink()
         except OSError as exc:
             raise library.LibraryError("That folder could not be read.", 404) from exc
+        # Depth 1 is /tmp or /var. Depth 2 is the next system alias, such as
+        # /var/folders. A shortcut deeper than that is inside a folder the
+        # user named, so following it would leave the path on screen.
         if linked and _path_depth(current) > 2:
             raise library.LibraryError("Shortcuts are left alone.")
         if current.parent == current:
@@ -840,7 +893,7 @@ def _index_assets() -> dict[Path, list[int]]:
     indexed: dict[Path, list[int]] = {}
     try:
         conn_cm = closing(library.read_conn())
-    except library.LibraryError:
+    except (library.LibraryError, sqlite3.Error, OSError):
         return indexed
     with conn_cm as conn:
         if not _has(conn, "main", "asset"):

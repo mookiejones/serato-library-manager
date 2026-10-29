@@ -1022,8 +1022,7 @@ class FileManagerTests(unittest.TestCase):
         self.assertFalse(listed["elsewhere"])
         self.assertEqual(listed["entries"], [])
         match = next(item for item in listed["roots"] if item["path"] == str(self.music.resolve()))
-        self.assertIn("·", str(match["name"]))
-        self.assertTrue(str(match["name"]).endswith("/music"))
+        self.assertEqual(match["name"], "music")
 
     def test_browse_stays_inside_the_music_root(self) -> None:
         """Refuse a parent, a prefixed sibling, and a path that climbs out.
@@ -1048,7 +1047,7 @@ class FileManagerTests(unittest.TestCase):
         opened = files.list_directory(str(self.music))
         self.assertIsNone(opened["parent"])
         self.assertEqual(opened["breadcrumb"][0]["path"], str(self.music.resolve()))
-        self.assertIn("·", str(opened["breadcrumb"][0]["name"]))
+        self.assertEqual(opened["breadcrumb"][0]["name"], "music")
         child = self.music / "Crates"
         child.mkdir()
         inner = files.list_directory(str(child))

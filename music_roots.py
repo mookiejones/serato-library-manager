@@ -113,11 +113,12 @@ def name_roots(
     *,
     exists: Callable[[Path], bool] | None = None,
 ) -> list[dict[str, object]]:
-    """Name each music folder with its volume and the path on that volume.
+    """Name each music folder and drive without repeating a label.
 
-    The label looks like ``GIGDRIVE · /Music``. A drive is not added again
-    when a music folder on that drive is already a root. A folder that is
-    not on disk is kept and marked missing.
+    The label is the folder or volume name. When two roots share that
+    name, ``(parent)`` is added until the labels differ. A drive is not
+    added again when a music folder on that drive is already a root. A
+    folder that is not on disk is kept and marked missing.
 
     Args:
         folders: Collapsed track folders, including ones on an unmounted drive.
@@ -138,7 +139,7 @@ def name_roots(
             continue
         on_disk = bool(present(folder))
         found[key] = {
-            "name": _display_name(folder, drives),
+            "name": _folder_name(folder),
             "path": _path_text(folder) if on_disk else str(folder),
             "kind": "folder",
             "missing": not on_disk,
@@ -149,17 +150,19 @@ def name_roots(
             continue
         if _drive_already_listed(mount, kept):
             continue
-        key = _path_key(mount)
+        key = _real_key(mount)
         if key in found:
             continue
         found[key] = {
-            "name": _display_name(mount, [(mount, label)]),
+            "name": _clean_label(label) or _folder_name(mount),
             "path": _path_text(mount),
             "kind": "drive",
             "missing": False,
         }
+    rows = list(found.values())
+    _make_labels_unique(rows)
     return sorted(
-        found.values(),
+        rows,
         key=lambda item: (item["kind"] != "folder", str(item["missing"]), str(item["name"]).casefold()),
     )
 
@@ -167,8 +170,9 @@ def name_roots(
 def invalidate() -> None:
     """Drop the cached music roots.
 
-    The next :func:`music_roots` call reads the library again. Settings
-    and library writes call this, and so does an explicit refresh.
+    The next read computes them again. A change to ``master.sqlite`` or
+    its WAL does not do this by itself. Callers use this, or
+    ``refresh=1``, when the drives should be read again.
     """
     global _cache
     with _cache_lock:
@@ -176,7 +180,10 @@ def invalidate() -> None:
 
 
 def cache_stamp() -> tuple[object, ...]:
-    """Return the stamp that invalidates the music-root cache.
+    """Return a stamp for the library path index, not the root cache.
+
+    The root list ignores this stamp. Folder clicks still use it so the
+    in-library marks can notice a database write without listing roots again.
 
     Returns:
         The master database path and modification times, plus the
@@ -200,11 +207,33 @@ def cache_stamp() -> tuple[object, ...]:
     return (str(master), tuple(stamps), settings_stamp)
 
 
+def _load_cached(*, refresh: bool) -> tuple[list[dict[str, object]], str]:
+    """Return the cached roots and the time they were computed.
+
+    The lock covers the check and the compute, so concurrent misses run
+    ``_discover`` once. ``refresh`` replaces that cache.
+
+    Args:
+        refresh: When true, drop the cache and read the library again.
+
+    Returns:
+        A copy of the root list and ``computed_at``.
+    """
+    global _cache
+    with _cache_lock:
+        if refresh:
+            _cache = None
+        if _cache is None:
+            _cache = (_discover(), _computed_at())
+        rows, computed = _cache
+        return [dict(item) for item in rows], computed
+
+
 def music_roots(*, refresh: bool = False) -> list[dict[str, object]]:
     """Discover the roots for the open library and the mounted drives.
 
-    The result is cached until the library or settings change, or until
-    ``refresh`` is true.
+    The result stays cached until :func:`invalidate` or ``refresh``.
+    Writing ``master.sqlite`` or its WAL does not recompute it.
 
     Args:
         refresh: When true, ignore the cache and read the library again.
@@ -214,24 +243,15 @@ def music_roots(*, refresh: bool = False) -> list[dict[str, object]]:
         folders. A platform other than macOS or Windows contributes no
         drives. An unmounted track folder is included with ``missing`` true.
     """
-    global _cache
-    if refresh:
-        invalidate()
-    stamp = cache_stamp()
-    with _cache_lock:
-        if _cache is not None and _cache[0] == stamp:
-            return [dict(item) for item in _cache[1]]
-    found = _discover()
-    with _cache_lock:
-        _cache = (stamp, found, _computed_at())
-        return [dict(item) for item in found]
+    rows, _computed = _load_cached(refresh=refresh)
+    return rows
 
 
 def library_roots(*, refresh: bool = False) -> dict[str, object]:
     """Return the Files roots in the public library-roots shape.
 
-    The list is the same cache as :func:`music_roots`. ``refresh`` reads
-    the library again. ``computed_at`` stays put until that happens.
+    The list is the same cache as :func:`music_roots`, read in one locked
+    step with ``computed_at``.
 
     Args:
         refresh: When true, ignore the cache and read the library again.
@@ -240,11 +260,10 @@ def library_roots(*, refresh: bool = False) -> dict[str, object]:
         ``roots`` and ``computed_at``. Each root has ``id``, ``path``,
         ``label``, ``detail``, ``kind``, ``serato``, ``removable``, and
         ``missing``. ``id`` is the SHA-256 of the real path. ``kind`` is
-        ``music_library``, ``serato_drive``, or ``user_folder``.
+        ``music_library`` for a folder taken from the Serato library,
+        ``serato_drive`` for a drive, or ``user_folder``.
     """
-    rows = music_roots(refresh=refresh)
-    with _cache_lock:
-        computed = _cache[2] if _cache is not None else _computed_at()
+    rows, computed = _load_cached(refresh=refresh)
     return {"roots": [to_library_root(item) for item in rows], "computed_at": computed}
 
 
@@ -264,7 +283,7 @@ def to_library_root(item: dict[str, object]) -> dict[str, object]:
         "id": root_id(path),
         "path": path,
         "label": str(item.get("name") or path or "Folder"),
-        "detail": path,
+        "detail": _display_path(path),
         "kind": kind,
         "serato": kind != "user_folder",
         "removable": _removable(path),
@@ -298,19 +317,42 @@ def _computed_at() -> str:
 def _public_kind(item: dict[str, object]) -> str:
     """Classify a discovered root for the library-roots contract.
 
+    A folder found from tracks in the Serato library is
+    ``music_library`` even when it is not named Music. A mounted
+    ``_Serato_`` drive is ``serato_drive``. Anything else is a
+    ``user_folder``.
+
     Args:
         item: A root from :func:`name_roots`.
 
     Returns:
-        ``serato_drive`` for a drive row, ``music_library`` for a folder
-        named Music, otherwise ``user_folder``.
+        ``music_library``, ``serato_drive``, or ``user_folder``.
     """
-    if item.get("kind") == "drive":
+    raw = item.get("kind")
+    if raw in {"drive", "serato_drive"}:
         return "serato_drive"
-    path = str(item.get("path") or "").replace("\\", "/")
-    if PurePosixPath(path).name.casefold() == "music":
+    if raw == "user_folder":
+        return "user_folder"
+    if raw == "folder":
         return "music_library"
     return "user_folder"
+
+
+def _path_pure(path: str) -> PurePath:
+    """Return a Windows or POSIX pure path, including UNC shares.
+
+    Args:
+        path: Root path text.
+
+    Returns:
+        ``PureWindowsPath`` for a drive letter or a ``\\\\server\\share``
+        path. Other paths stay POSIX.
+    """
+    if path.startswith("\\\\") or path.startswith("//"):
+        return PureWindowsPath(path)
+    if len(path) >= 2 and path[1] == ":":
+        return PureWindowsPath(path)
+    return PurePosixPath(path)
 
 
 def _removable(path: str) -> bool:
@@ -320,15 +362,16 @@ def _removable(path: str) -> bool:
         path: Root path.
 
     Returns:
-        True for a macOS ``/Volumes/<name>`` path and for a Windows drive
-        that is not the home drive.
+        True for a macOS ``/Volumes/<name>`` path, a UNC share, and a
+        Windows drive that is not the home drive.
     """
-    windows = len(path) >= 2 and path[1] == ":"
-    pure = PureWindowsPath(path) if windows else PurePosixPath(path)
+    pure = _path_pure(path)
     parts = pure.parts
     for index, part in enumerate(parts):
         if part == "Volumes" and index + 1 < len(parts):
             return True
+    if path.startswith("\\\\") or path.startswith("//"):
+        return True
     if pure.drive:
         home_drive = PureWindowsPath(str(Path.home())).drive
         return os.path.normcase(pure.drive) != os.path.normcase(home_drive)
@@ -382,30 +425,33 @@ def track_directories() -> list[Path]:
 
     try:
         connection = closing(library.read_conn())
-    except library.LibraryError:
+    except (library.LibraryError, sqlite3.Error, OSError):
         return []
     found: list[Path] = []
     seen: set[str] = set()
-    with connection as conn:
-        try:
-            rows = conn.execute(
-                "SELECT portable_id FROM asset WHERE portable_id IS NOT NULL AND portable_id != ''"
-            )
-        except sqlite3.Error:
-            return []
-        for row in rows:
-            portable = row[0]
-            if not isinstance(portable, str) or not portable.strip():
-                continue
-            resolved = files.resolve_stored(portable)
-            if resolved is None:
-                continue
-            parent = resolved.parent
-            key = os.path.normcase(os.path.normpath(str(parent)))
-            if key in seen:
-                continue
-            seen.add(key)
-            found.append(parent)
+    try:
+        with connection as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT portable_id FROM asset WHERE portable_id IS NOT NULL AND portable_id != ''"
+                )
+            except sqlite3.Error:
+                return []
+            for row in rows:
+                portable = row[0]
+                if not isinstance(portable, str) or not portable.strip():
+                    continue
+                resolved = files.resolve_stored(portable)
+                if resolved is None:
+                    continue
+                parent = resolved.parent
+                key = os.path.normcase(os.path.normpath(str(parent)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(parent)
+    except (sqlite3.Error, OSError):
+        return []
     return found
 
 
@@ -550,6 +596,120 @@ def _norm(path: PurePath) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
 
 
+def _folder_name(path: Path) -> str:
+    """Return the folder or drive name used as a root label.
+
+    Args:
+        path: Music folder or drive root.
+
+    Returns:
+        The last path component, or the drive letter when the path is a
+        drive root with no folder name.
+    """
+    text = path.name or (path.drive[:1] if path.drive else "")
+    return _clean_label(text or "Folder")
+
+
+def _display_path(path: str) -> str:
+    """Return ``path`` with slashes a person can read.
+
+    Args:
+        path: Stored root path.
+
+    Returns:
+        The same path with backslashes shown as slashes.
+    """
+    return path.replace("\\", "/")
+
+
+def _label_with_parents(path: Path, depth: int) -> str:
+    """Return the folder name plus ``depth`` ancestor names.
+
+    Args:
+        path: Root path.
+        depth: How many parents to include. Zero is the folder name.
+
+    Returns:
+        ``Music`` or ``Music (a/x)`` once parents are needed.
+    """
+    name = _folder_name(path)
+    if depth <= 0:
+        return name
+    bits: list[str] = []
+    current = path
+    for _ in range(depth):
+        parent = current.parent
+        if parent == current:
+            break
+        bit = parent.name or (parent.drive.rstrip("\\/") if parent.drive else "")
+        if not bit:
+            break
+        bits.append(bit)
+        current = parent
+    if not bits:
+        return name
+    return f"{name} ({'/'.join(reversed(bits))})"
+
+
+def _make_labels_unique(rows: list[dict[str, object]]) -> None:
+    """Rewrite ``name`` so two roots do not share a label.
+
+    Args:
+        rows: Root dicts. Each ``name`` starts as the folder or volume
+            name. A clash gains ``(parent)``, then the next parent, until
+            the labels differ.
+    """
+    paths = [Path(str(item.get("path") or "")) for item in rows]
+    labels = [str(item.get("name") or _folder_name(path)) for item, path in zip(rows, paths)]
+    depth = 0
+    while depth < 64:
+        counts: dict[str, int] = {}
+        for label in labels:
+            key = label.casefold()
+            counts[key] = counts.get(key, 0) + 1
+        if all(count == 1 for count in counts.values()):
+            break
+        depth += 1
+        for index, path in enumerate(paths):
+            if counts[labels[index].casefold()] == 1:
+                continue
+            labels[index] = _label_with_parents(path, depth)
+    for item, label in zip(rows, labels):
+        item["name"] = label
+
+
+def _real_key(path: Path) -> str:
+    """Return the resolved comparison key for a drive or folder.
+
+    Args:
+        path: Path that may be a shortcut.
+
+    Returns:
+        The normcase text of the real path. A path that cannot be
+        resolved uses its normalized text.
+    """
+    try:
+        return os.path.normcase(os.path.normpath(str(path.resolve())))
+    except OSError:
+        return os.path.normcase(os.path.normpath(str(path)))
+
+
+def _key_contains(child: str, parent: str) -> bool:
+    """Return whether ``child`` is ``parent`` or a path inside it.
+
+    Args:
+        child: Normalized path text.
+        parent: Normalized path text.
+
+    Returns:
+        True when ``parent`` is a prefix of ``child`` on the same drive.
+    """
+    try:
+        return os.path.commonpath([child, parent]) == parent
+    except ValueError:
+        return False
+
+
 def _display_name(path: Path, drives: Sequence[tuple[Path, str]]) -> str:
     """Return ``volume · /path`` for one root.
 
@@ -628,8 +788,10 @@ def _drive_already_listed(mount: Path, folders: Sequence[Path]) -> bool:
         True when one of those folders is on the drive, so a second USB
         row would be a duplicate.
     """
+    mount_key = _real_key(mount)
     for folder in folders:
-        if _path_contains(folder, mount) or _path_contains(mount, folder):
+        folder_key = _real_key(folder)
+        if _key_contains(folder_key, mount_key) or _key_contains(mount_key, folder_key):
             return True
     return False
 

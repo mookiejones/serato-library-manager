@@ -19,8 +19,12 @@ from unittest import mock
 import app_config
 import app_log
 import library
-import sentry_sdk
 import telemetry
+
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
 from posthog import Posthog
 from tests.fixture import TempLibrary, open_database
 
@@ -58,6 +62,7 @@ class FakePosthog:
         self.closed = True
 
 
+@unittest.skipUnless(sentry_sdk is not None, "sentry_sdk is not installed")
 class TelemetryCase(unittest.TestCase):
     """Share a temporary settings directory and a fake PostHog client.
 

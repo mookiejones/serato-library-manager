@@ -552,6 +552,20 @@ def query_text(
     return values[0]
 
 
+def _flag(query: dict[str, list[str]], key: str) -> bool:
+    """Return whether a query flag is ``1``, ``true``, or ``yes``.
+
+    Args:
+        query: Parsed query string.
+        key: Parameter name.
+
+    Returns:
+        True when the first value is one of those words, ignoring case.
+    """
+    raw = query_text(query, key, "") or ""
+    return raw.lower() in {"1", "true", "yes"}
+
+
 def connect() -> sqlite3.Connection:
     """Open the master database for a read-only query.
 
@@ -1571,15 +1585,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"space": space, "groups": groups, "count": len(groups)})
                 return
             if parsed.path == "/api/library-roots":
-                raw_refresh = query_text(query, "refresh", "") or ""
-                refresh = raw_refresh.lower() in {"1", "true", "yes"}
-                self.send_json(music_roots.library_roots(refresh=refresh))
+                self.send_json(music_roots.library_roots(refresh=_flag(query, "refresh")))
                 return
             if parsed.path == "/api/files":
-                raw_elsewhere = query_text(query, "elsewhere", "") or ""
-                elsewhere = raw_elsewhere.lower() in {"1", "true", "yes"}
-                raw_refresh = query_text(query, "refresh", "") or ""
-                refresh = raw_refresh.lower() in {"1", "true", "yes"}
+                elsewhere = _flag(query, "elsewhere")
+                refresh = _flag(query, "refresh")
                 self.send_json(
                     files.list_directory(
                         query_text(query, "path", "") or "",

@@ -12,7 +12,7 @@ export const libraryRootsFixture: LibraryRootsPayload = {
     {
       id: "home-music",
       path: "/Users/dj/Music",
-      label: "Home · /Music",
+      label: "Music (dj)",
       detail: "/Users/dj/Music",
       kind: "music_library",
       serato: true,
@@ -22,7 +22,7 @@ export const libraryRootsFixture: LibraryRootsPayload = {
     {
       id: "gig-music",
       path: "/Volumes/GIGDRIVE/Music",
-      label: "GIGDRIVE · /Music",
+      label: "Music (GIGDRIVE)",
       detail: "/Volumes/GIGDRIVE/Music",
       kind: "music_library",
       serato: true,
@@ -32,7 +32,7 @@ export const libraryRootsFixture: LibraryRootsPayload = {
     {
       id: "old-music",
       path: "/Volumes/OLDDRIVE/Music",
-      label: "OLDDRIVE · /Music",
+      label: "Music (OLDDRIVE)",
       detail: "/Volumes/OLDDRIVE/Music",
       kind: "music_library",
       serato: true,

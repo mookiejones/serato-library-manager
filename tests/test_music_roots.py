@@ -337,8 +337,8 @@ class NameTests(unittest.TestCase):
     def test_music_and_a_usb_drive_are_named_for_a_dj(self) -> None:
         """Label a folder with its volume and path, and skip a duplicate drive.
 
-        A music folder on GIGDRIVE is ``GIGDRIVE · /Music``. The drive root
-        is not a second row. A drive with no tracks is still listed once.
+        A music folder on GIGDRIVE is ``Music``. The drive root is not a
+        second row. A drive with no tracks is still listed once.
 
         Returns:
             None. The test fails if two rows say Music or the drive is repeated.
@@ -359,12 +359,12 @@ class NameTests(unittest.TestCase):
             )
             self.assertEqual(
                 [item["name"] for item in roots],
-                ["GIGDRIVE · /Music", "BACKUP · /", "STICK · /"],
+                ["Music", "BACKUP", "STICK"],
             )
             self.assertEqual([item["kind"] for item in roots], ["folder", "drive", "drive"])
             self.assertEqual(roots[0]["path"], str(music.resolve()))
             self.assertFalse(roots[0]["missing"])
-            self.assertEqual(sum(1 for item in roots if "GIGDRIVE" in str(item["name"])), 1)
+            self.assertEqual(sum(1 for item in roots if "GIGDRIVE" in str(item["path"])), 1)
 
     def test_a_present_folder_keeps_the_resolved_path(self) -> None:
         """Store the resolved folder when the request path is not canonical.
@@ -440,13 +440,13 @@ class NameTests(unittest.TestCase):
                 roots,
                 [
                     {
-                        "name": "BACKUP · /",
+                        "name": "BACKUP",
                         "path": str(backup.resolve()),
                         "kind": "drive",
                         "missing": False,
                     },
                     {
-                        "name": "STICK · /",
+                        "name": "STICK",
                         "path": str(stick.resolve()),
                         "kind": "drive",
                         "missing": False,
@@ -473,7 +473,7 @@ class NameTests(unittest.TestCase):
                 roots,
                 [
                     {
-                        "name": "STICK · /",
+                        "name": "STICK",
                         "path": str(stick.resolve()),
                         "kind": "drive",
                         "missing": False,
@@ -501,7 +501,7 @@ class NameTests(unittest.TestCase):
                 [],
                 exists=lambda path: path == present,
             )
-            self.assertEqual([item["name"] for item in roots], ["ZZZDRIVE · /Music", "AAA · /Music"])
+            self.assertEqual([item["name"] for item in roots], ["Music (ZZZDRIVE)", "Music (AAA)"])
             self.assertEqual([item["missing"] for item in roots], [False, True])
 
     def test_library_tracks_collapse_to_the_music_folder(self) -> None:
@@ -524,8 +524,7 @@ class NameTests(unittest.TestCase):
             music_roots.invalidate()
             roots = [item for item in music_roots.music_roots(refresh=True) if item["kind"] == "folder"]
             match = next(item for item in roots if item["path"] == str(music.resolve()))
-            self.assertIn("·", str(match["name"]))
-            self.assertTrue(str(match["name"]).endswith("/Music"))
+            self.assertEqual(match["name"], "Music")
             self.assertFalse(match["missing"])
             self.assertFalse(any(str(item["path"]).endswith("House") or str(item["path"]).endswith("Techno") for item in roots))
 
@@ -566,15 +565,14 @@ class DirectoryTests(unittest.TestCase):
 
 
 class CacheTests(unittest.TestCase):
-    """Roots stay cached until settings or an explicit refresh."""
+    """Roots stay cached until invalidate or an explicit refresh."""
 
-    def test_a_settings_write_reads_the_library_again(self) -> None:
-        """Drop the cache when settings.json changes.
+    def test_a_database_write_does_not_reread_the_roots(self) -> None:
+        """Keep the cache when master.sqlite changes.
 
         Returns:
-            None. The test fails if the second read is skipped after the write.
+            None. The test fails if a database write reads the library again.
         """
-        import app_config
         from unittest import mock
 
         music_roots.invalidate()
@@ -588,11 +586,40 @@ class CacheTests(unittest.TestCase):
             music_roots.music_roots()
             music_roots.music_roots()
             self.assertEqual(calls["n"], 1)
-            path = app_config.settings_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text('{"telemetry_consent": false}\n', encoding="utf-8")
+            music_roots.invalidate()
             music_roots.music_roots()
             self.assertEqual(calls["n"], 2)
+            music_roots.music_roots(refresh=True)
+            self.assertEqual(calls["n"], 3)
+
+    def test_concurrent_misses_compute_once(self) -> None:
+        """Run one discovery when several readers miss the cache together.
+
+        Returns:
+            None. The test fails if each thread reads the library.
+        """
+        import threading
+        from unittest import mock
+
+        music_roots.invalidate()
+        calls = {"n": 0}
+        started = threading.Barrier(4)
+
+        def counted() -> list[Path]:
+            calls["n"] += 1
+            return []
+
+        def read() -> None:
+            started.wait()
+            music_roots.music_roots()
+
+        with mock.patch.object(music_roots, "track_directories", counted):
+            threads = [threading.Thread(target=read) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+        self.assertEqual(calls["n"], 1)
 
 
 class MissingDriveTests(unittest.TestCase):
@@ -659,10 +686,10 @@ class MissingDriveTests(unittest.TestCase):
                     self.assertGreaterEqual(calls["n"], 2)
             self.assertEqual(roots, again)
             names = [str(item["name"]) for item in roots]
-            self.assertEqual(names.count("GIGDRIVE · /Music"), 1)
+            self.assertEqual(names.count("Music (GIGDRIVE)"), 1)
             self.assertFalse(any(name.startswith("USB:") for name in names))
             lost = next(item for item in roots if "OLDDRIVE" in str(item["name"]))
-            self.assertEqual(lost["name"], "OLDDRIVE · /Music")
+            self.assertEqual(lost["name"], "Music (OLDDRIVE)")
             self.assertTrue(lost["missing"])
             self.assertTrue(str(lost["path"]).replace("\\", "/").endswith("OLDDRIVE/Music"))
             with self.assertRaises(library.LibraryError):
@@ -701,14 +728,19 @@ class LibraryRootsContractTests(unittest.TestCase):
             "missing": True,
         }
         public = [music_roots.to_library_root(item) for item in (music, drive, downloads)]
-        self.assertEqual([item["kind"] for item in public], ["music_library", "serato_drive", "user_folder"])
+        self.assertEqual([item["kind"] for item in public], ["music_library", "serato_drive", "music_library"])
         self.assertEqual([item["label"] for item in public], ["Home · /Music", "GIGDRIVE · /", "Home · /Downloads"])
+        user = music_roots.to_library_root(
+            {"name": "Sets", "path": "/Users/dj/Sets", "kind": "user_folder", "missing": False}
+        )
+        self.assertEqual(user["kind"], "user_folder")
+        self.assertFalse(user["serato"])
         self.assertEqual(public[0]["detail"], "/Users/dj/Music")
         self.assertEqual(public[0]["serato"], True)
         self.assertEqual(public[0]["removable"], False)
         self.assertEqual(public[1]["serato"], True)
         self.assertEqual(public[1]["removable"], True)
-        self.assertEqual(public[2]["serato"], False)
+        self.assertEqual(public[2]["serato"], True)
         self.assertEqual(public[2]["missing"], True)
         expected = hashlib.sha256(os.path.normcase(os.path.normpath("/Users/dj/Music")).encode("utf-8")).hexdigest()
         self.assertEqual(public[0]["id"], expected)
@@ -766,6 +798,162 @@ class LibraryRootsContractTests(unittest.TestCase):
             httpd.shutdown()
             httpd.server_close()
             thread.join(timeout=3)
+
+
+class ReviewTests(unittest.TestCase):
+    """Labels, bare roots, UNC paths, and a database that cannot be read."""
+
+    def test_clashing_music_folders_gain_a_parent(self) -> None:
+        """Keep /a/x/Music and /b/x/Music from sharing one label.
+
+        Returns:
+            None. The test fails if both rows are named Music or x · /Music.
+        """
+        roots = music_roots.name_roots(
+            [Path("/a/x/Music"), Path("/b/x/Music")],
+            [],
+            exists=lambda _path: False,
+        )
+        self.assertEqual(
+            [item["name"] for item in roots],
+            ["Music (a/x)", "Music (b/x)"],
+        )
+        public = [music_roots.to_library_root(item) for item in roots]
+        self.assertEqual(public[0]["detail"], "/a/x/Music")
+        self.assertEqual(public[1]["detail"], "/b/x/Music")
+        self.assertEqual(public[0]["kind"], "music_library")
+        self.assertNotEqual(public[0]["label"], public[1]["label"])
+
+    def test_a_single_music_folder_keeps_its_name(self) -> None:
+        """Leave the label as Music when nothing else uses it.
+
+        Returns:
+            None. The test fails if a parent is added with no clash.
+        """
+        roots = music_roots.name_roots([Path("/a/x/Music")], [], exists=lambda _path: False)
+        self.assertEqual(roots[0]["name"], "Music")
+
+    def test_unc_share_root_is_removable_and_refused(self) -> None:
+        """Treat \\\\server\\share as a bare root and a removable path.
+
+        Returns:
+            None. The test fails if the share root can be opened.
+        """
+        import files
+        import library
+
+        self.assertTrue(music_roots._removable("\\\\server\\share\\Music"))
+        self.assertTrue(files._bare_root("\\\\server\\share"))
+        self.assertTrue(files._bare_root("//server/share"))
+        self.assertFalse(files._bare_root("\\\\server\\share\\Music"))
+        self.assertTrue(files._bare_root("C:\\"))
+        self.assertFalse(files._bare_root("C:\\Music"))
+        with self.assertRaises(library.LibraryError) as caught:
+            files.list_directory("\\\\server\\share", elsewhere=True)
+        self.assertEqual(caught.exception.status, 403)
+
+    def test_elsewhere_still_refuses_the_computer_root(self) -> None:
+        """Refuse /, /Volumes, and a missing root even when browsing elsewhere.
+
+        A normal folder outside the music roots can still be listed.
+
+        Returns:
+            None. The test fails if / is listed.
+        """
+        import tempfile
+
+        import files
+        import library
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Sets"
+            folder.mkdir()
+            opened = files.list_directory(str(folder), elsewhere=True)
+            self.assertEqual(opened["path"], str(folder.resolve()))
+        for blocked in ("/", "/Volumes", "C:\\"):
+            with self.assertRaises(library.LibraryError) as caught:
+                files.list_directory(blocked, elsewhere=True)
+            self.assertEqual(caught.exception.status, 403)
+        missing = {
+            "name": "Music (OLDDRIVE)",
+            "path": "/Volumes/OLDDRIVE/Music",
+            "kind": "folder",
+            "missing": True,
+        }
+        with self.assertRaises(library.LibraryError) as lost:
+            files._resolve_directory(
+                "/Volumes/OLDDRIVE/Music",
+                elsewhere=True,
+                roots=[missing],
+            )
+        self.assertEqual(lost.exception.status, 404)
+
+    def test_a_locked_library_contributes_no_roots(self) -> None:
+        """Return no track folders when the database cannot be opened.
+
+        Returns:
+            None. The test fails if sqlite3.Error or OSError escapes.
+        """
+        import sqlite3
+        from unittest import mock
+
+        import library
+
+        music_roots.invalidate()
+        with mock.patch.object(library, "read_conn", side_effect=sqlite3.OperationalError("locked")):
+            self.assertEqual(music_roots.track_directories(), [])
+        with mock.patch.object(library, "read_conn", side_effect=OSError("unreadable")):
+            self.assertEqual(music_roots.track_directories(), [])
+
+    def test_permission_errors_on_volumes_and_listing_do_not_crash(self) -> None:
+        """Skip a volume list that cannot be read, and report a folder the same way.
+
+        Returns:
+            None. The test fails if PermissionError leaves the function.
+        """
+        import tempfile
+        from unittest import mock
+
+        import files
+        import library
+
+        root = Path(tempfile.mkdtemp())
+        try:
+            with mock.patch.object(Path, "iterdir", side_effect=PermissionError("volumes")):
+                found = music_roots.serato_volumes("darwin", volumes_root=root)
+            self.assertEqual(found, [])
+        finally:
+            root.rmdir()
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Sets"
+            folder.mkdir()
+            with mock.patch("files.os.scandir", side_effect=PermissionError("listing")):
+                with self.assertRaises(library.LibraryError) as caught:
+                    files.list_directory(str(folder), elsewhere=True)
+            self.assertEqual(caught.exception.message, "That folder could not be read.")
+
+    def test_two_drives_with_the_same_real_path_are_one_row(self) -> None:
+        """Skip a second drive row when it resolves to the first.
+
+        Returns:
+            None. The test fails if the shortcut is a second root.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stick = Path(tmp) / "STICK"
+            stick.mkdir()
+            link = Path(tmp) / "LINK"
+            try:
+                link.symlink_to(stick, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlinks are not available")
+            roots = music_roots.name_roots(
+                [],
+                [(stick, "STICK"), (link, "ALIAS")],
+                exists=lambda _path: True,
+            )
+            self.assertEqual([item["name"] for item in roots], ["STICK"])
 
 
 if __name__ == "__main__":

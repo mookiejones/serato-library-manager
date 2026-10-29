@@ -59,9 +59,9 @@ describe("files view", () => {
     renderFiles();
 
     const rows = [...document.querySelectorAll<HTMLElement>("#files-list .files-row")].map((row) => row.textContent ?? "");
-    expect(rows[0]).toContain("Home · /Music");
+    expect(rows[0]).toContain("Music (dj)");
     expect(rows[0]).toContain("/Users/dj/Music");
-    expect(rows[1]).toContain("GIGDRIVE · /Music");
+    expect(rows[1]).toContain("Music (GIGDRIVE)");
     expect(rows[1]).toContain("/Volumes/GIGDRIVE/Music");
     expect(rows[0]).not.toBe(rows[1]);
     expect(document.querySelectorAll(".files-root-detail")).toHaveLength(2);
@@ -74,9 +74,9 @@ describe("files view", () => {
 
     const list = document.querySelector("#files-list") as HTMLElement;
     list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    expect(document.activeElement?.textContent).toContain("GIGDRIVE · /Music");
+    expect(document.activeElement?.textContent).toContain("Music (GIGDRIVE)");
     list.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-    expect(document.activeElement?.textContent).toContain("Home · /Music");
+    expect(document.activeElement?.textContent).toContain("Music (dj)");
     expect(document.activeElement?.textContent).not.toContain("GIGDRIVE");
   });
 
@@ -120,9 +120,9 @@ describe("files view", () => {
 
   it("shows a missing drive and does not open it", async () => {
     state.filesAtRoots = true;
-    state.filesRoots = libraryRootsFixture.roots.filter((root) => root.label !== "Home · /Music");
+    state.filesRoots = libraryRootsFixture.roots.filter((root) => root.label !== "Music (dj)");
     renderFiles();
-    const missing = document.querySelector("[aria-label='OLDDRIVE · /Music, Drive not connected']") as HTMLButtonElement;
+    const missing = document.querySelector("[aria-label='Music (OLDDRIVE), Drive not connected']") as HTMLButtonElement;
     expect(missing.textContent).toContain("Drive not connected");
     expect(missing.textContent).toContain("/Volumes/OLDDRIVE/Music");
     expect(missing.getAttribute("aria-disabled")).toBe("true");

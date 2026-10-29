@@ -16,7 +16,7 @@ Quit Serato DJ Pro before any of these actions. The buttons stay off while Serat
 ## Browse
 
 1. Click **Files**.
-2. The first screen lists the music folders Serato uses. Each row is the drive or volume plus the path, such as **GIGDRIVE · /Music**, with the folder path underneath. A drive is not listed again when one of those folders is already on it. A folder whose drive is unmounted is greyed out, says **Drive not connected**, and does not open. **Refresh** reads the drives again after you plug one in.
+2. The first screen lists the music folders Serato uses. The name is the folder or volume, such as **Music**. When two folders share that name, the parent is added, such as **Music (GIGDRIVE)**. The path sits underneath the name. A drive is not listed again when one of those folders is already on it. A folder whose drive is unmounted is greyed out, says **Drive not connected**, and does not open. **Refresh** reads the drives again after you plug one in. **Browse elsewhere…** still cannot open the computer, `/Volumes`, or a bare drive.
 3. Click a name to open it. The path line starts at that name. **Up** does not go above it.
 4. Click a folder name to open it. The button reads **Open** plus the folder name.
 5. Click **Up** to go to the parent folder, until you are back at the music folder.
