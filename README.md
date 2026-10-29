@@ -132,8 +132,8 @@ CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/wor
 
 ## Guides
 
-- [Panic page](docs/panic.md). Red tracks, missing crates, a drive that will not mount, or a library that looks wrong after a Serato update. The steps use Serato's own tools.
-- [Is my library safe?](docs/is-my-library-safe.md). How snapshots, restore, and the other safety rules are meant to work. The pictures are example data.
+- [Panic page](docs/panic.md). Red tracks, missing crates, a drive that will not mount, or a library that looks wrong after a Serato update. Restore in the app is **Snapshots**, then **Review restore**.
+- [Is my library safe?](docs/is-my-library-safe.md). Snapshots, restore, undo, and the outside-change watcher. The gig check is **PREVIEW** until [#41](https://github.com/mookiejones/serato-library-manager/issues/41) merges. The pictures are example layouts.
 - [Moving between Serato and Rekordbox](docs/coming-from-rekordbox.md). What the export keeps.
 - [User guide](docs/index.md). The rest of the app.
 

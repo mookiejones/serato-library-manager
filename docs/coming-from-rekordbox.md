@@ -1,5 +1,7 @@
 # Moving between Serato and Rekordbox
 
+> **Status: preview.** Rekordbox XML export is in the app ([PR #39](https://github.com/mookiejones/serato-library-manager/pull/39) is merged). The export is one-way. It does not write the Serato library back.
+
 ## How it works
 
 1. **Rekordbox** reads the Serato library and the cue data in the audio files. This export leaves the library and the audio files unchanged.
@@ -7,7 +9,7 @@
 3. In Rekordbox 6 and 7 the import control is at **Preferences**, **Advanced**, **Database**, **rekordbox xml**. Since Rekordbox 5.6.1, importing that file leaves a track that is already in the collection unchanged. To replace its cues, beatgrid, and tags, open the **rekordbox xml** list, select all, right-click, choose **Import to Collection**, and answer **Yes** to **load information from imported library**. That replaces what Rekordbox already stored. A cue that exists only in Rekordbox is removed.
 4. To play on CDJs, export the USB from Rekordbox. This export does not write a USB drive, Device Library Plus, OneLibrary, or `master.db`.
 
-The page shows a loss report before the download. `python3 rekordbox.py -o rekordbox.xml` prints the same lines. The report is a list of sentences for the whole export. It names a file when the path cannot be encoded, or when the file cannot be opened.
+The page shows a loss report before the download. `python3 rekordbox.py -o rekordbox.xml` prints the same lines. The report is a list of sentences for the whole export. It names a file when the path cannot be encoded, when the file cannot be opened, or when the path contains a null character.
 
 The steps in the app are on the [Playlists](guide/playlists.md) page.
 
@@ -20,16 +22,17 @@ The steps in the app are on the [Playlists](guide/playlists.md) page.
 | Key | Text such as "8A" or "Am" | Free-text `Tonality` | Kept as Serato stored it. **Key as stored** is the default, so a library can contain both Camelot and classical names. **Camelot key** or **Classical key** rewrites names this export recognizes. Anything else is left unchanged and counted in the loss report. |
 | Hot cues 1–8 | Named, coloured pads | Hot cues A–H | Kept. Serato's first eight pads are indices 0–7, which Rekordbox numbers A–H. **Memory cues** is on until you clear it, so each of these cues is also written again as a memory cue. The loss report counts those copies. A CDJ shows about the first 20 characters of the name. |
 | Extra hot cues past 8 | Pads after the eighth | No hot-cue slot | Written only as memory cues. That happens whether or not **Memory cues** is on. The loss report counts them as cues outside slots 0–7. |
-| Saved loops | Named and coloured | Loops | Kept as loops with a start and an end. They are memory loops, so they do not take a hot cue pad. A free pad is used only when hot loops is turned on. The loss report says which. |
+| Saved loops | Named and coloured | Loops | Kept as loops with a start and an end. They are memory loops, so they do not take a hot cue pad. **Hot loops** starts off, and the app remembers that checkbox in its settings. Uses a free hot-cue pad. A loop whose own pad is already taken stays a memory loop, including when other pads are free. The loss report says which. |
 | Cue and loop colours | Serato marker colours | Red, green, and blue | Written as channels from 0 to 255. Rekordbox may snap them to its palette. The loss report says so when cues were written. |
 | Track colour | Serato track colour | `Colour` `0xRRGGBB` | Written in that form, for example `0xFF007F`. White is left out. Rekordbox's palette is eight colors, so another value may be ignored. The loss report says so. |
-| Beatgrid | Fixed grid | `TEMPO` markers | Kept. One marker becomes one `TEMPO`. The bar is 4/4. |
-| Flexible or Lucid grids (Serato 5) | Several markers | One `TEMPO` per marker | Written. The BPM uses the marker times stored in the file. Those times are not rounded to three decimals before the calculation. The written BPM is two decimal places, so the grid can drift. The first marker is treated as a downbeat. If it is not, the bars in Rekordbox are shifted. The loss report names these tracks. A grid with more than 4096 markers, a truncated grid, or a version other than 1 is left out and named in the loss report. |
-| Audio files | On disk | On disk | This export reads them and does not modify them. |
+| Beatgrid | Fixed grid | `TEMPO` markers | Kept. One marker becomes one `TEMPO`. The bar is 4/4. A marker whose time or BPM is not a real number is left out and counted in the loss report. The other markers on that grid are still written. |
+| Flexible or Lucid grids (Serato 5) | Several markers | One `TEMPO` per marker | Written. The BPM uses the marker times stored in the file. Those times are not rounded to three decimals before the calculation. The written BPM is two decimal places, so the grid can drift. The first marker is treated as a downbeat. If it is not, the bars in Rekordbox are shifted. The loss report names these tracks. A grid with more than 4096 markers, a truncated grid, or a version other than 1 is left out and named in the loss report. A marker whose time or BPM is not a real number is left out and counted. |
+| Audio files | On disk | On disk | This export reads them and does not modify them. A raw `.aac` file is labelled `AAC File`. An `.m4a` file is labelled `M4A File`. |
 
 ## Known limits
 
 - **Cue timing on some MP3s.** The LAME/Xing header is read per file. No Xing header, and a LAME tag whose CRC matches, keep the cue time Serato stored. Xing or Info without a LAME tag, and a LAME tag whose CRC is missing or does not match, move cues, loops, and the beatgrid start 26 ms earlier. AAC, WAV, AIFF, and FLAC are not shifted. A time that would fall before the start is written at 0. The loss report counts each of these.
 - **A file that cannot be opened.** The track stays in the XML without its cue points. The loss report names the file, and the rest of the export continues.
+- **A path containing a null character.** The track is exported as a missing file, without cue points. The loss report names it, a warning is logged, and the rest of the export continues.
 - **Flips.** Rekordbox has no flip markers, so flips are left out. The loss report counts them.
 - Rekordbox does not write this file back into Serato, so the export is one-way.
