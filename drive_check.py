@@ -485,31 +485,40 @@ def _drive_path(drive: Path | str) -> Path:
         The expanded absolute path.
 
     Raises:
-        library.LibraryError: The path contains a NUL. Status 400.
+        library.LibraryError: The path contains a NUL, or it is a shortcut
+            to another folder. Status 400.
     """
     text = os.fspath(drive)
     if "\x00" in text or not text.strip():
         raise library.LibraryError("Choose a drive.", 400)
-    # realpath, then the drive prefix. CodeQL treats that pair as a checked path.
-    normalized = os.path.realpath(os.path.expanduser(text))
-    if not normalized.startswith(_absolute_prefix(normalized)):
-        raise library.LibraryError("Choose a drive.", 400)
-    return Path(normalized)
+    expanded = os.path.abspath(os.path.expanduser(text))
+    normalized = os.path.realpath(expanded)
+    # The leaf the caller named, after resolving shortcuts in its parents.
+    # A leaf that is itself a shortcut to another folder does not start there.
+    boundary = _caller_boundary(expanded)
+    checked = normalized if normalized.endswith(os.sep) else normalized + os.sep
+    if os.path.normcase(checked).startswith(os.path.normcase(boundary)):
+        return Path(normalized)
+    raise library.LibraryError("That drive path is a shortcut. The check will not follow it.", 400)
 
 
-def _absolute_prefix(normalized: str) -> str:
-    """Return the drive prefix a normalized absolute path must keep.
+def _caller_boundary(expanded: str) -> str:
+    """Return the folder a resolved drive path must stay inside.
 
     Args:
-        normalized: Output of ``os.path.realpath``.
+        expanded: Absolute path, with ``..`` collapsed and shortcuts not followed.
 
     Returns:
-        ``E:\\`` for a Windows drive, the UNC share root, or ``/``.
+        The real path of the parent plus the leaf name, with a trailing
+        separator. The filesystem root is itself.
     """
-    drive, _rest = os.path.splitdrive(normalized)
-    if drive:
-        return drive + os.sep
-    return os.sep
+    trimmed = expanded.rstrip("\\/")
+    parent = os.path.dirname(trimmed)
+    name = os.path.basename(trimmed)
+    if not trimmed or parent == trimmed:
+        return expanded if expanded.endswith(os.sep) else expanded + os.sep
+    expected = os.path.join(os.path.realpath(parent), name) if name else os.path.realpath(parent)
+    return expected if expected.endswith(os.sep) else expected + os.sep
 
 
 def _volume_label(raw: str) -> str:

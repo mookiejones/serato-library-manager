@@ -269,7 +269,7 @@ Sentry uses `server_name` `local`, environment `local`, release `app_config.APP_
 
 `drive_check.py` reads one portable drive and reports what to fix on the laptop before the gig. The drive is a folder with `_Serato_` at its root, or that `_Serato_` folder itself. `python3 drive_check.py DRIVE` prints the report. `GET /api/drive-check` returns the same JSON. The page does not show this check. The Gig view is still the open gig-check pull request, and the Files page owns the drive list.
 
-The check does not open `master.sqlite`. It does not write. Crate bytes are read with `O_RDONLY`. Audio files are not opened; a file size comes from `stat`. `database V2` is not a crate, so a track that appears only there is not a finding. `Export Backups` and `Lexicon` are not entered. A sibling such as `Export Backups-extra` is. A shortcut `_Serato_` folder is refused and not followed. A missing drive is a report with `missing_drive` true and no per-track rows. The folder is not created.
+The check does not open `master.sqlite`. It does not write. Crate bytes are read with `O_RDONLY`. Audio files are not opened; a file size comes from `stat`. `database V2` is not a crate, so a track that appears only there is not a finding. `Export Backups` and `Lexicon` are not entered. A sibling such as `Export Backups-extra` is. A shortcut `_Serato_` folder is refused and not followed. A drive path whose leaf is a shortcut to another folder is refused too. A crate file that is a shortcut to somewhere outside `_Serato_` is not read. A directory shortcut inside `Subcrates` or `SmartCrates` is not entered. A missing drive is a report with `missing_drive` true and no per-track rows. The folder is not created.
 
 Track paths come from `snapshots.parse_serato_bytes`. A crate entry with no path is skipped, because that parser only returns paths. A path is on the drive when it resolves to a file inside the drive, including a case-insensitive match. A Mac path with no leading slash is also tried at the filesystem root and under the home directory, which is how a laptop track is stored. A Windows drive letter or a UNC path is that absolute path. The first place the file exists off the drive is `off_drive`. A path that exists nowhere we look is `missing`. The search does not scan the disk.
 
@@ -328,7 +328,7 @@ A crate row has `name`, `smart`, `tracks`, `off_drive`, `missing`, `unsafe_names
 
 ## HTTP API
 
-The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413. Invalid JSON returns 400. Serato open or a database lock returns 409 with a `serato` object: `open`, `writable`, `pid`, `process`, `message`, and `file_manager`.
+The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413. Invalid JSON returns 400. Serato open or a database lock returns 409 with a `serato` object: `open`, `writable`, `pid`, `process`, `message`, and `file_manager`. Every request is refused with 403 unless `Host` is `localhost`, `127.0.0.1`, or `[::1]`, with or without a port. An `Origin` header, when the client sends one, must name one of those hosts. That blocks a DNS rebinding page from calling this computer. The message is "This page only answers on this computer."
 
 | Method | Path | Query or body | Result |
 |--------|------|---------------|--------|

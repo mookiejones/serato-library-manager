@@ -9,6 +9,7 @@ Nothing here is a copy of a real Serato library.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -55,26 +56,34 @@ def _builder():
 BUILDER = _builder()
 
 
-def _fingerprint(root: Path) -> list[tuple[str, str, int]]:
+def _fingerprint(root: Path) -> list[tuple[str, str, int, int]]:
     """Hash a tree without following directory shortcuts.
 
     Args:
         root: Directory to hash.
 
     Returns:
-        Relative path, content hash or link target, and size.
+        Relative path, content hash or link target, size, and mtime in
+        nanoseconds. Directories are included, so a new empty folder changes
+        the result. ``os.utime`` changes it too.
     """
-    rows: list[tuple[str, str, int]] = []
+    rows: list[tuple[str, str, int, int]] = []
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         dirnames.sort()
+        directory = Path(dirpath)
+        folder = directory.relative_to(root).as_posix()
+        if folder == ".":
+            folder = ""
+        rows.append((folder + "/", "dir", 0, directory.lstat().st_mtime_ns))
         for name in sorted(filenames):
-            path = Path(dirpath) / name
+            path = directory / name
             relative = path.relative_to(root).as_posix()
+            info = path.lstat()
             if path.is_symlink():
-                rows.append((relative, "link:" + os.readlink(path), 0))
+                rows.append((relative, "link:" + os.readlink(path), 0, info.st_mtime_ns))
                 continue
             data = path.read_bytes()
-            rows.append((relative, hashlib.sha256(data).hexdigest(), len(data)))
+            rows.append((relative, hashlib.sha256(data).hexdigest(), len(data), info.st_mtime_ns))
     return rows
 
 
@@ -455,29 +464,39 @@ class DriveCheckTests(unittest.TestCase):
         """One byte over 4 GB is a finding. The last legal size is not.
 
         Returns:
-            None.
+            None. The sizes are reported by ``stat``. The files themselves
+            stay a few bytes, so Windows does not allocate 4 GB.
         """
         limit = drive_check.FAT32_MAX_BYTES
         drive = self._drive(
             ["Music/max.wav", "Music/over.wav", "Music/small.mp3"],
-            {"Music/small.mp3": b"x"},
+            {"Music/max.wav": b"x", "Music/over.wav": b"y", "Music/small.mp3": b"z"},
         )
-        self._sparse(drive / "Music" / "max.wav", limit)
-        self._sparse(drive / "Music" / "over.wav", limit + 1)
-        before = (drive / "Music" / "over.wav").stat().st_size
-        fat = drive_check.check_drive(drive, filesystem="FAT32")
-        self.assertEqual((drive / "Music" / "over.wav").stat().st_size, before)
+        real_stat = os.stat
+
+        def sized(path: object, *args: object, **kwargs: object) -> os.stat_result:
+            result = real_stat(path, *args, **kwargs)
+            name = os.fspath(path)
+            if name.endswith("max.wav"):
+                return _stat_size(result, limit)
+            if name.endswith("over.wav"):
+                return _stat_size(result, limit + 1)
+            return result
+
+        with patch("drive_check.os.stat", sized):
+            fat = drive_check.check_drive(drive, filesystem="FAT32")
+            exfat = drive_check.check_drive(drive, filesystem="exFAT")
+            with patch.object(drive_check, "detect_filesystem", return_value=None):
+                unknown = drive_check.check_drive(drive)
         found = _kinds(fat)
         self.assertNotIn("Music/max.wav", found)
         self.assertNotIn("Music/small.mp3", found)
         self.assertEqual(found["Music/over.wav"], {"file_size"})
-        self.assertIn(str(limit + 1), fat.findings[0].fix)
-        self.assertIn("This drive is FAT32", fat.findings[0].fix)
+        self.assertIn(str(limit + 1), next(item.fix for item in fat.findings if item.kind == "file_size"))
+        self.assertIn("This drive is FAT32", next(item.fix for item in fat.findings if item.kind == "file_size"))
         self.assertEqual(fat.counts["file_size"], 1)
-        exfat = drive_check.check_drive(drive, filesystem="exFAT")
+        self.assertEqual((drive / "Music" / "over.wav").stat().st_size, 1)
         self.assertNotIn("file_size", {item.kind for item in exfat.findings})
-        with patch.object(drive_check, "detect_filesystem", return_value=None):
-            unknown = drive_check.check_drive(drive)
         self.assertIsNone(unknown.filesystem)
         self.assertNotIn("file_size", {item.kind for item in unknown.findings})
 
@@ -583,6 +602,112 @@ class DriveCheckTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 400)
         self.assertIn("shortcut", caught.exception.message)
         self.assertEqual(_fingerprint(real), before)
+
+    def test_crate_symlink_outside_serato_is_not_read(self) -> None:
+        """A crate file that points outside ``_Serato_`` is not a crate.
+
+        Returns:
+            None.
+        """
+        outside = Path(self._tmp.name) / "outside-crate"
+        outside.mkdir()
+        secret = "Music/from-outside-crate.mp3"
+        (outside / "House.crate").write_bytes(BUILDER.crate_bytes([secret]))
+        drive = Path(self._tmp.name) / "crate-link"
+        sub = drive / "_Serato_" / "Subcrates"
+        sub.mkdir(parents=True)
+        try:
+            os.symlink(outside / "House.crate", sub / "House.crate")
+        except OSError as exc:
+            self.skipTest(f"this OS cannot create a shortcut: {exc}")
+        before = (outside / "House.crate").read_bytes()
+        report = drive_check.check_drive(drive)
+        self.assertNotIn(secret, _kinds(report))
+        self.assertTrue(any("could not be read" in error.message for error in report.errors))
+        self.assertFalse(report.ready)
+        self.assertEqual((outside / "House.crate").read_bytes(), before)
+
+    def test_subcrates_directory_symlink_is_not_followed(self) -> None:
+        """A directory shortcut inside Subcrates is skipped, not entered.
+
+        Returns:
+            None.
+        """
+        outside = Path(self._tmp.name) / "outside-dir"
+        outside.mkdir()
+        secret = "Music/from-linked-dir.mp3"
+        (outside / "Hidden.crate").write_bytes(BUILDER.crate_bytes([secret]))
+        drive = self._drive(["Music/on.mp3"], {"Music/on.mp3": b"x"}, name="dir-link")
+        link = drive / "_Serato_" / "Subcrates" / "Linked"
+        try:
+            os.symlink(outside, link, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"this OS cannot create a shortcut: {exc}")
+        report = drive_check.check_drive(drive)
+        self.assertNotIn(secret, _kinds(report))
+        self.assertTrue(any("shortcut" in error.message for error in report.errors))
+        self.assertEqual(report.counts["tracks"], 1)
+        self.assertEqual(report.counts["missing"], 0)
+        self.assertFalse(report.ready)
+
+    def test_export_backups_inside_subcrates_is_not_entered(self) -> None:
+        """Export Backups and Lexicon inside the crate folders are not crates.
+
+        Returns:
+            None.
+        """
+        drive = self._drive(["Music/on.mp3"], {"Music/on.mp3": b"x"}, name="excluded-inside")
+        hidden = "Music/from-inside-export-backups.mp3"
+        folder = drive / "_Serato_" / "Subcrates" / "Export Backups"
+        folder.mkdir()
+        (folder / "Skip.crate").write_bytes(BUILDER.crate_bytes([hidden]))
+        lexicon = drive / "_Serato_" / "Subcrates" / "Lexicon"
+        lexicon.mkdir()
+        (lexicon / "Skip.crate").write_bytes(BUILDER.crate_bytes(["Music/from-inside-lexicon.mp3"]))
+        report = drive_check.check_drive(drive)
+        self.assertNotIn(hidden, _kinds(report))
+        self.assertNotIn("Music/from-inside-lexicon.mp3", _kinds(report))
+        self.assertEqual(report.counts["tracks"], 1)
+        self.assertTrue(report.ready)
+
+    def test_drive_path_shortcut_is_not_followed(self) -> None:
+        """A drive path that points at another folder is refused.
+
+        Returns:
+            None.
+        """
+        real = self._drive(["Music/hidden.mp3"], name="real-drive")
+        link = Path(self._tmp.name) / "drive-shortcut"
+        try:
+            os.symlink(real, link, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"this OS cannot create a shortcut: {exc}")
+        before = _fingerprint(real)
+        with self.assertRaises(library.LibraryError) as caught:
+            drive_check.check_drive(link)
+        self.assertEqual(caught.exception.status, 400)
+        self.assertIn("shortcut", caught.exception.message)
+        self.assertEqual(_fingerprint(real), before)
+
+    def test_fingerprint_sees_mtime_and_directories(self) -> None:
+        """A timestamp change or a new folder changes the fingerprint.
+
+        Returns:
+            None.
+        """
+        drive = self._copy_fixture()
+        before = _fingerprint(drive)
+        target = drive / "Music" / "on-drive.mp3"
+        os.utime(target, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+        stamped = _fingerprint(drive)
+        self.assertNotEqual(stamped, before)
+        before_mtime = next(row[3] for row in before if row[0] == "Music/on-drive.mp3")
+        after_mtime = next(row[3] for row in stamped if row[0] == "Music/on-drive.mp3")
+        self.assertNotEqual(after_mtime, before_mtime)
+        created = drive / "Music" / "New Folder"
+        created.mkdir()
+        self.assertNotEqual(_fingerprint(drive), stamped)
+        self.assertTrue(any(row[0] == "Music/New Folder/" for row in _fingerprint(drive)))
 
     def test_symlink_track_pointing_outside_is_off_drive(self) -> None:
         """A file on the drive that points at the laptop is not on the drive.
@@ -800,6 +925,54 @@ class DriveCheckTests(unittest.TestCase):
                 body = json.loads(response.read().decode("utf-8"))
             self.assertEqual([item["kind"] for item in body["findings"]], ["smart_crate"])
             self.assertEqual(body["crates"][0]["name"], "Warmup")
+            self.assertEqual(
+                set(body),
+                {
+                    "drive",
+                    "name",
+                    "filesystem",
+                    "ready",
+                    "missing_drive",
+                    "summary",
+                    "counts",
+                    "crates",
+                    "findings",
+                    "errors",
+                },
+            )
+            self.assertEqual(
+                set(body["counts"]),
+                {
+                    "tracks",
+                    "off_drive",
+                    "missing",
+                    "smart_crates",
+                    "unsafe_names",
+                    "path_length",
+                    "file_size",
+                },
+            )
+            self.assertEqual(
+                set(body["findings"][0]),
+                {"kind", "crate", "track", "path", "found", "fix"},
+            )
+            self.assertEqual(
+                set(body["crates"][0]),
+                {
+                    "name",
+                    "smart",
+                    "tracks",
+                    "off_drive",
+                    "missing",
+                    "unsafe_names",
+                    "path_length",
+                    "file_size",
+                },
+            )
+            self.assertEqual(
+                set(body["errors"][0]) if body["errors"] else set(),
+                set() if not body["errors"] else {"crate", "message"},
+            )
             missing = urlencode({"drive": str(Path(self._tmp.name) / "absent")}, quote_via=quote)
             with urllib.request.urlopen(f"http://{host}:{port}/api/drive-check?{missing}", timeout=10) as response:
                 absent = json.loads(response.read().decode("utf-8"))
@@ -819,26 +992,57 @@ class DriveCheckTests(unittest.TestCase):
             httpd.server_close()
         self.assertEqual(expected["counts"]["smart_crates"], 1)
 
-    def _sparse(self, path: Path, size: int) -> None:
-        """Create a sparse file of a logical size.
-
-        Args:
-            path: Destination. The parent must exist.
-            size: Logical size in bytes.
+    def test_foreign_host_is_refused(self) -> None:
+        """A DNS rebinding host cannot call the server. This computer can.
 
         Returns:
             None.
-
-        Raises:
-            AssertionError: The file's reported size is not ``size``.
         """
-        fd = os.open(path, os.O_CREAT | os.O_RDWR)
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        host, port = httpd.server_address[:2]
         try:
-            os.ftruncate(fd, size)
+            def status_for(headers: dict[str, str]) -> int:
+                connection = http.client.HTTPConnection(str(host), int(port), timeout=5)
+                connection.request("GET", "/api/health", headers=headers)
+                response = connection.getresponse()
+                response.read()
+                code = response.status
+                connection.close()
+                return code
+
+            self.assertEqual(status_for({"Host": f"127.0.0.1:{port}"}), 200)
+            self.assertEqual(status_for({"Host": f"localhost:{port}"}), 200)
+            self.assertEqual(status_for({"Host": f"[::1]:{port}"}), 200)
+            self.assertEqual(status_for({"Host": "evil.example"}), 403)
+            self.assertEqual(status_for({"Host": "127.0.0.1.evil.example"}), 403)
+            self.assertEqual(
+                status_for({"Host": f"127.0.0.1:{port}", "Origin": "http://evil.example"}),
+                403,
+            )
+            self.assertEqual(
+                status_for({"Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}"}),
+                200,
+            )
         finally:
-            os.close(fd)
-        actual = path.stat().st_size
-        self.assertEqual(actual, size)
+            httpd.shutdown()
+            httpd.server_close()
+
+
+def _stat_size(result: os.stat_result, size: int) -> os.stat_result:
+    """Return a stat result with a different size.
+
+    Args:
+        result: The real stat result.
+        size: Replacement ``st_size``.
+
+    Returns:
+        A stat result whose size is ``size`` and whose other fields match.
+    """
+    values = list(result)
+    values[6] = size
+    return result.__class__(tuple(values))
 
 
 class FilesystemNameTests(unittest.TestCase):
@@ -856,6 +1060,8 @@ class FilesystemNameTests(unittest.TestCase):
         self.assertEqual(drive_check._volume_label("/media/ada/stick"), "stick")
         self.assertEqual(drive_check._volume_label("/run/media/ada/stick"), "stick")
         self.assertEqual(drive_check._volume_label("/tmp/pytest/GIGDRIVE"), "GIGDRIVE")
+        letters = drive_check._other_drive_letters("Music/a.mp3", ("D:",))
+        self.assertEqual([os.fspath(item) for item in letters], ["D:\\Music\\a.mp3"])
 
 
 if __name__ == "__main__":
