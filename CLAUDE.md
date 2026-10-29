@@ -69,7 +69,26 @@ npm run build
 2. Update `CLAUDE.md` and `AGENTS.md` together. They are copies of the same text. Update them when the run command or the layout summary changes.
 3. Update `docs/github.md` when a workflow, a release check, or a GitHub setting changes.
 4. Update `PRIVACY.md` and the README when sharing, local logs, or telemetry keys change.
-5. Commit the change. Do not push unless asked.
+5. Tests. Every behavior change or bug fix ships with tests in the same PR: Python `unittest` under `tests/`, page code as Vitest `*.test.ts` in `src/`. A bug fix needs a test that fails before the fix. Use only synthetic fixtures (`tests/fixtures/`), never a real `master.sqlite`, `root.sqlite`, or audio file.
+6. Before opening a PR, run all checks locally and paste the results in the PR:
+   ```bash
+   python3 -m unittest discover -s tests -t . -v
+   npm ci
+   npx tsc --noEmit
+   npx eslint src
+   npm test
+   npm run build
+   ```
+   Commit the rebuilt `static/app.js` and `static/wizard.js`.
+7. Push to a branch and open a PR. Never push to `main`.
+
+## Test bar
+
+QA (Gatekeeper, account `mookiejones-qa`) blocks a PR whose tests do not meet this bar:
+
+- Tests must fail if the logic is broken. QA may mutation-test; weak tests that pass anyway get blocked.
+- Cover the edge cases that apply to the change: Windows and macOS paths, symlinks and unmounted drives, Serato 4 vs Serato 5 data, and an empty or missing library.
+- Never write extra files inside the Serato folder.
 
 ## Merge rules
 
@@ -84,8 +103,9 @@ npm run build
   - `analyze Python` (CodeQL)
 - Do not force-push to `main`.
 - Admins can bypass these rules, but should not.
-- The team (including agents) may merge a PR once `mookiejones-qa` has approved its latest commit and all required checks are green (the six listed: Ubuntu + Windows tests, frontend, and `analyze Python` (CodeQL)). Agents never tag or publish a release (including pre-releases) without Charles (@mookiejones)'s explicit OK.
-- QA reviews every pull request and blocks any pull request lacking tests for its changes.
+- The team, including agents, may merge once `mookiejones-qa` approved the latest commit and all six required checks are green. Only releases and tags (including pre-releases) need Charles's (@mookiejones) explicit OK.
+- `dependency audit` and `review dependency changes` also run. They are not required checks.
+- QA reviews every pull request and blocks any pull request lacking tests for its changes. See [Test bar](#test-bar).
 - Follow [Library safety](#library-safety) and [strict TypeScript](#strict-typescript).
 
 ## Library safety
