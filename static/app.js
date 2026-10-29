@@ -34,6 +34,26 @@
       computed_at: typeof payload.computed_at === "string" ? payload.computed_at : ""
     };
   }
+  function isVersionSource(value) {
+    return value === "release" || value === "git" || value === "dev";
+  }
+  function isVersionPayload(value) {
+    if (!value || typeof value !== "object") return false;
+    const record = value;
+    return typeof record.version === "string" && record.version.trim() !== "" && (record.commit === null || typeof record.commit === "string") && isVersionSource(record.source);
+  }
+  async function getVersion() {
+    const response = await fetch("/api/version");
+    const payload = await readJSONOr(response, null);
+    if (!response.ok || !isVersionPayload(payload)) {
+      throw new Error("Version unavailable");
+    }
+    return {
+      version: payload.version.trim(),
+      commit: payload.commit,
+      source: payload.source
+    };
+  }
   async function postJSON(url, body) {
     const response = await fetch(url, {
       method: "POST",
@@ -82,7 +102,7 @@
     const available = () => container.clientWidth - handle.offsetWidth;
     const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
     const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
-    function paint() {
+    function paint2() {
       if (current == null) container.style.removeProperty(property);
       else container.style.setProperty(property, `${fitted(current)}px`);
       const room = available();
@@ -92,7 +112,7 @@
     }
     function move(width) {
       current = fitted(width);
-      paint();
+      paint2();
     }
     handle.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -134,17 +154,17 @@
     });
     handle.addEventListener("dblclick", () => {
       current = null;
-      paint();
+      paint2();
       onCommit(null);
     });
-    paint();
+    paint2();
     return {
       set(width) {
         current = width == null ? null : Math.round(width);
-        paint();
+        paint2();
       },
       width: () => current,
-      refit: paint
+      refit: paint2
     };
   }
 
@@ -1538,7 +1558,7 @@
     form.className = "related-form";
     form.hidden = true;
     block.append(label, results, form);
-    const paint = () => {
+    const paint2 = () => {
       results.replaceChildren();
       form.hidden = true;
       form.replaceChildren();
@@ -1569,8 +1589,8 @@
         results.append(item);
       }
     };
-    input.addEventListener("input", paint);
-    paint();
+    input.addEventListener("input", paint2);
+    paint2();
     return block;
   }
   function relatedLinkForm(track, section, form, hit, query) {
@@ -3344,6 +3364,84 @@
   }
   bridge.openSetup = openSetup;
 
+  // src/version.ts
+  var VERSION_UNAVAILABLE = "Version unavailable";
+  var COPY_FAILED = "Couldn't copy the version.";
+  var copyText = "";
+  function versionLabel(info) {
+    const version = formatVersion(info.version);
+    if (info.source === "release") return version;
+    const commit = shortCommit(info.commit);
+    if (!commit || version.toLowerCase().includes(commit)) return version;
+    return `${version} · ${commit}`;
+  }
+  function formatVersion(version) {
+    const trimmed = version.trim();
+    if (/^v/i.test(trimmed)) return trimmed;
+    if (/^\d+\.\d+\.\d+/.test(trimmed)) return `v${trimmed}`;
+    return trimmed;
+  }
+  function shortCommit(commit) {
+    if (commit === null) return null;
+    const trimmed = commit.trim().toLowerCase();
+    if (!/^[0-9a-f]{7,40}$/.test(trimmed)) return null;
+    return trimmed.slice(0, 7);
+  }
+  function paint(label) {
+    const footer = el("app-version");
+    const about = el("about-version");
+    el("version-copy-status").textContent = "";
+    if (!label) {
+      copyText = "";
+      footer.hidden = true;
+      footer.replaceChildren();
+      about.textContent = VERSION_UNAVAILABLE;
+      return;
+    }
+    copyText = label;
+    footer.hidden = false;
+    footer.replaceChildren();
+    const name = document.createElement("span");
+    name.className = "visually-hidden";
+    name.textContent = "App version ";
+    const value = document.createElement("span");
+    value.textContent = label;
+    footer.append(name, value);
+    about.textContent = label;
+  }
+  async function loadVersion() {
+    try {
+      paint(versionLabel(await getVersion()));
+    } catch {
+      paint(null);
+    }
+  }
+  async function copyVersion() {
+    const status = el("version-copy-status");
+    if (!copyText) {
+      status.textContent = VERSION_UNAVAILABLE;
+      return;
+    }
+    const writeText = navigator.clipboard?.writeText;
+    if (!writeText || !window.isSecureContext) {
+      status.textContent = COPY_FAILED;
+      return;
+    }
+    try {
+      await writeText.call(navigator.clipboard, copyText);
+      status.textContent = "Copied";
+    } catch {
+      status.textContent = COPY_FAILED;
+    }
+  }
+  function wireVersion() {
+    el("copy-version").addEventListener("click", () => {
+      copyVersion().catch(() => {
+        el("version-copy-status").textContent = COPY_FAILED;
+      });
+    });
+  }
+
   // src/app.ts
   function wireSnapshots() {
     el("snapshots-refresh").addEventListener("click", () => {
@@ -3370,6 +3468,8 @@
   wireDialogs();
   wireSnapshots();
   wireLayout();
+  wireVersion();
+  void loadVersion();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
 })();

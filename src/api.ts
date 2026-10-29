@@ -19,6 +19,7 @@ import type {
   RestorePlan,
   SeratoStatus,
   SettingsPayload,
+  VersionPayload,
 } from "./api-types";
 
 export type ServerReply =
@@ -106,6 +107,50 @@ export async function fetchLibraryRoots(refresh = false): Promise<LibraryRootsPa
   return {
     roots: Array.isArray(payload.roots) ? payload.roots.filter(isLibraryRoot) : [],
     computed_at: typeof payload.computed_at === "string" ? payload.computed_at : "",
+  };
+}
+
+function isVersionSource(value: unknown): value is VersionPayload["source"] {
+  return value === "release" || value === "git" || value === "dev";
+}
+
+/**
+ * Return whether a JSON value is the GET /api/version object.
+ *
+ * The three fields are version, commit, and source. commit may be null.
+ * A wrong type is not a version, including an error object from another route.
+ *
+ * @param value Parsed JSON.
+ * @returns True when the contract fields have the right types.
+ */
+export function isVersionPayload(value: unknown): value is VersionPayload {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.version === "string"
+    && record.version.trim() !== ""
+    && (record.commit === null || typeof record.commit === "string")
+    && isVersionSource(record.source);
+}
+
+/**
+ * Read the app version from GET /api/version.
+ *
+ * A failed response, a non-JSON body, and a body that is not the version
+ * object all reject. The rejection message is the same plain sentence the
+ * page shows. It is not the server's error text.
+ *
+ * @returns version, commit, and source.
+ */
+export async function getVersion(): Promise<VersionPayload> {
+  const response = await fetch("/api/version");
+  const payload: unknown = await readJSONOr<unknown>(response, null);
+  if (!response.ok || !isVersionPayload(payload)) {
+    throw new Error("Version unavailable");
+  }
+  return {
+    version: payload.version.trim(),
+    commit: payload.commit,
+    source: payload.source,
   };
 }
 

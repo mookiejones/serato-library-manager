@@ -24,7 +24,8 @@ The two buttons have the same weight. The line **Saving…** means the choice is
 2. Tick **Share anonymous usage stats and crash reports** to turn sharing on. Clear the tick to turn it off.
 3. Read the line under the tick.
 4. Choose **Run setup again** to see the first-run steps another time. **Cancel** on that run leaves the library as it is and does not forget that you already finished setup.
-5. Click **Close**.
+5. Read **About**. The line is the version of this copy, such as **v1.4.2**. A development copy can also show a short commit. Click **Copy version** to put that line on the clipboard. The next line says **Copied**. When the version cannot be read, About says **Version unavailable** and the footer of the sidebar stays blank. The page does not show an error code.
+6. Click **Close**.
 
 | Line under the tick | Meaning |
 | --- | --- |
