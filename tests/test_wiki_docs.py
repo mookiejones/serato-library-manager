@@ -86,7 +86,18 @@ class QuickStartTests(unittest.TestCase):
         self.assertIn("wiki/images/step-1-light.png", text)
         self.assertIn("wiki/images/step-1-dark.png", text)
         self.assertIn("wiki/images/step-4-dark.png", text)
+        self.assertIn("wiki/images/step-4-dark.svg", text)
+        self.assertIn("wiki/images/step-4-light.svg", text)
         self.assertIn("wiki/images/step-5-dark.png", text)
+        self.assertIn("wiki/images/step-5-dark.svg", text)
+        self.assertIn("wiki/images/step-5-light.svg", text)
+        for name in (
+            "step-4-light.svg",
+            "step-4-dark.svg",
+            "step-5-light.svg",
+            "step-5-dark.svg",
+        ):
+            self.assertTrue((ROOT / "docs" / "wiki" / "images" / name).is_file())
         self.assertIn("Restore never changes audio data.", text)
         self.assertNotIn("never touched", text)
         for caption in CAPTIONS:

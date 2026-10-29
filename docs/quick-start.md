@@ -86,7 +86,9 @@ Nothing there yet? Open Serato DJ once, quit it, and choose **Check again**.
 
 <figure>
   <picture>
+    <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="wiki/images/step-4-dark.svg">
     <source media="(prefers-color-scheme: dark)" type="image/png" srcset="wiki/images/step-4-dark.png">
+    <source type="image/svg+xml" srcset="wiki/images/step-4-light.svg">
     <img alt="Step 4. A check mark on a record inside a shield." src="wiki/images/step-4-light.png" width="180">
   </picture>
   <figcaption>4 Make a Backup</figcaption>
@@ -106,7 +108,9 @@ Later, open **Snapshots**. **Review restore** shows the plan before anything is 
 
 <figure>
   <picture>
+    <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="wiki/images/step-5-dark.svg">
     <source media="(prefers-color-scheme: dark)" type="image/png" srcset="wiki/images/step-5-dark.png">
+    <source type="image/svg+xml" srcset="wiki/images/step-5-light.svg">
     <img alt="Step 5. Two records in a crate." src="wiki/images/step-5-light.png" width="180">
   </picture>
   <figcaption>5 Start crate digging</figcaption>
