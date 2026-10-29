@@ -762,9 +762,12 @@ class GigCheckTests(unittest.TestCase):
                             drive_id="tour",
                             label="Tour",
                             serato_root=music / "_Serato_",
-                            # The stored path is absolute, so the drive's
-                            # music root is the filesystem root.
-                            music_root=Path(track.anchor),
+                            # The stored path is absolute, the way a file
+                            # outside the home directory is stored. The music
+                            # root is this temporary directory, not the
+                            # filesystem root, so a drive letter has to be
+                            # resolved rather than joined on as a relative name.
+                            music_root=root,
                             role="external",
                             present=True,
                         )
@@ -812,6 +815,111 @@ class GigCheckTests(unittest.TestCase):
             self.assertEqual(len(changes.tags_edited), 1)
             self.assertNotIn("snapshot_stale", {line.code for line in report.holding_it_back})
             self.assertTrue(saved["id"])
+
+    def test_fixture_audio_keeps_cues_when_the_path_is_absolute(self) -> None:
+        """Read Serato 4 and 5 fixture cues through an absolute portable id.
+
+        The clips are the spec-derived files in ``tests/fixtures``. The
+        music root is the temporary directory. The stored path uses
+        forward slashes, including a Windows drive letter. The cue names
+        come from each tree's ``golden.json``, so a snapshot that never
+        captured the file cannot pass.
+
+        Returns:
+            None. The test fails if a fixture cue is missing or the
+            unchanged file is reported as edited.
+        """
+        fixtures = ROOT / "tests" / "fixtures"
+        sources = (
+            (fixtures / "serato4" / "audio" / "one-grid.mp3", "Drop", 1500),
+            (fixtures / "serato5" / "audio" / "tempo.mp3", "Intro", 1500),
+        )
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            music = root / "music"
+            music.mkdir()
+            stored: list[tuple[Path, str, int]] = []
+            for source, cue_name, start_ms in sources:
+                dest = music / source.name
+                dest.write_bytes(source.read_bytes())
+                stored.append((dest, cue_name, start_ms))
+
+            def setup(conn: sqlite3.Connection) -> None:
+                _add_crate(conn, 5, "Friday")
+                for index, (track, _cue_name, _start_ms) in enumerate(stored, start=1):
+                    _add_track(conn, index, track.as_posix(), title="Fixture", crate_id=5)
+
+            database = _write_db(root, setup)
+            store = _quiet(
+                snapshots.SnapshotStore(
+                    database,
+                    [
+                        snapshots.DriveSpec(
+                            drive_id="tour",
+                            label="Tour",
+                            serato_root=music / "_Serato_",
+                            music_root=root,
+                            role="external",
+                            present=True,
+                        )
+                    ],
+                )
+            )
+            (music / "_Serato_").mkdir()
+            store.take("manual", "Fixture cues.")
+            report = gig_check.run_gig_check(database, now=NOW)
+            changes = report.changes
+            assert changes is not None
+            self.assertEqual(changes.cues_edited, ())
+            self.assertEqual(changes.grids_edited, ())
+            reader = gig_check.StoreSnapshots(store)
+            listed = reader.list_snapshots()
+            self.assertEqual(len(listed), 1)
+            loaded = reader.load(listed[0].snapshot_id)
+            for track, cue_name, start_ms in stored:
+                match = next(item for item in loaded.tracks if Path(item.path).name == track.name)
+                self.assertTrue(match.cues_known, track.name)
+                self.assertTrue(
+                    any(mark.kind == "cue" and mark.name == cue_name and mark.start_ms == start_ms for mark in match.cues),
+                    track.name,
+                )
+
+    def test_saved_frames_match_either_separator(self) -> None:
+        """Match a saved frame when only the separators differ.
+
+        On Windows the same lookup also ignores case. A relative id still
+        matches a saved path that ends with it.
+
+        Returns:
+            None. The test fails if a separator or a relative tail misses
+            the saved path.
+        """
+        saved = r"C:\Music\set\opener.mp3"
+        frames = gig_check._SavedFrames(
+            {
+                "cues": [{"path": saved, "cues": [], "loops": []}],
+                "grids": [],
+                "tags": [],
+            }
+        )
+        self.assertEqual(frames._find("C:/Music/set/opener.mp3"), saved)
+        folded = frames._find("c:/music/set/opener.mp3")
+        if os.name == "nt":
+            self.assertEqual(folded, saved)
+        else:
+            self.assertIsNone(folded)
+        volume = gig_check._SavedFrames(
+            {
+                "cues": [{"path": "/Volumes/Tour/Music/set/opener.mp3", "cues": [], "loops": []}],
+                "grids": [],
+                "tags": [],
+            }
+        )
+        self.assertEqual(
+            volume._find("Music/set/opener.mp3"),
+            "/Volumes/Tour/Music/set/opener.mp3",
+        )
+        self.assertIsNone(volume._find(""))
 
     def test_unreadable_snapshot_store_is_reported(self) -> None:
         """A store whose manifest key is broken says so and counts as stale.

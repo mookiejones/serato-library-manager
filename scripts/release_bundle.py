@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 import desktop  # noqa: E402
 import server  # noqa: E402
 import static_assets  # noqa: E402
+import version_info  # noqa: E402
 
 APP_NAME = "Serato Library"
 MACOS_APP = "Serato Library.app"
@@ -919,22 +920,68 @@ def sha256_file(path: Path) -> str:
 
 
 def app_version() -> str:
-    """Return the version declared in ``app_config.APP_VERSION``.
+    """Return the version passed to the Windows installer.
+
+    A release tag is used without its leading ``v``, so ``v1.2.3-rc1``
+    becomes ``1.2.3-rc1``. Any other resolved version contributes its
+    leading ``MAJOR.MINOR.PATCH``.
 
     Returns:
-        ``MAJOR.MINOR.PATCH``.
+        ``MAJOR.MINOR.PATCH``, or that plus ``-rcN`` / ``-betaN``.
 
     Raises:
-        SystemExit: If the constant is any other shape.
+        SystemExit: If the version is any other shape.
 
-    Imports ``app_config``. Does not parse the file as text.
+    Reads ``_version.py`` through :func:`version_info.installer_version`.
+    Does not parse that file as text.
     """
-    import app_config
-
-    version = app_config.APP_VERSION
-    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) is None:
-        raise SystemExit(f"APP_VERSION must look like 1.2.3, got {version!r}")
+    try:
+        version = version_info.installer_version()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-(?:rc|beta)[0-9]+)?", version) is None:
+        raise SystemExit(f"Installer version must look like 1.2.3 or 1.2.3-rc1, got {version!r}")
     return version
+
+
+def assert_frozen_version(dist: Path) -> None:
+    """Require the Windows executable's version resource to match the bake.
+
+    Args:
+        dist: Directory that contains ``Serato Library``.
+
+    Raises:
+        SystemExit: If the tree is not a Windows build, no version was
+            baked, ``RELEASE_TAG`` is set and does not match the bake,
+            or the executable's file version, product version, company
+            name, or product name disagrees.
+
+    ``RELEASE_TAG`` empty compares the executable with ``_version.py``.
+    A tag also requires that file to have been stamped from that tag.
+    Reads the executable. Does not launch it.
+    """
+    bundle = find_bundle(dist)
+    if bundle.kind != "windows":
+        raise SystemExit("The version resource check is for the Windows executable.")
+    tag = os.environ.get("RELEASE_TAG", "").strip()
+    baked = version_info.baked_identity()
+    if tag:
+        if not version_info.is_release_tag(tag):
+            raise SystemExit(
+                f"RELEASE_TAG must look like v1.2.3, v1.2.3-rc1, or v1.2.3-beta1, got {tag!r}"
+            )
+        if baked is None or baked.version != tag or baked.source != "release":
+            found = None if baked is None else f"{baked.version} ({baked.source})"
+            raise SystemExit(f"Baked version {found} does not match the tag {tag}.")
+        expected = tag
+    else:
+        if baked is None:
+            raise SystemExit("No version was baked. Run scripts/write_version.py before PyInstaller.")
+        expected = baked.version
+    try:
+        version_info.assert_windows_resource(bundle.exe.read_bytes(), expected)
+    except ValueError as exc:
+        raise SystemExit(f"{bundle.exe.name}: {exc}") from exc
 
 
 def pe_machine_bytes(data: bytes, name: str) -> int:
@@ -1374,7 +1421,10 @@ def build_setup(dist: Path, dest: Path) -> None:
         SystemExit: If this is not Windows, the script or the build is
             missing, or the compiler does not write ``dest``.
 
-    The version passed to the script is :func:`app_version`.
+    The version passed to the script is :func:`app_version`, taken from
+    the same identity as ``GET /api/version``. A release tag is used
+    without its leading ``v``. Any other version contributes its leading
+    ``MAJOR.MINOR.PATCH``.
     """
     if sys.platform != "win32":
         raise SystemExit("The Windows installer is built on Windows.")
@@ -1501,6 +1551,9 @@ def main(argv: list[str] | None = None) -> None:
     installed = sub.add_parser("smoke-setup", help="install the Windows installer and smoke it")
     installed.add_argument("exe", type=Path)
 
+    version = sub.add_parser("assert-version", help="require the Windows version resource to match the bake")
+    version.add_argument("dist", type=Path)
+
     args = parser.parse_args(argv)
     if args.command == "verify":
         verify_tree(args.dist)
@@ -1529,6 +1582,8 @@ def main(argv: list[str] | None = None) -> None:
         build_setup(args.dist, args.exe)
     elif args.command == "smoke-setup":
         smoke_setup(args.exe)
+    elif args.command == "assert-version":
+        assert_frozen_version(args.dist)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@
 
 A local window for the Serato DJ Pro library on macOS and Windows. Source on `main` is app version **1.1.0**. The page stays on this computer.
 
+**[Quick Start](docs/wiki/Quick-Start.md).** Five steps: Download, Open, point it at your Serato library, make a Backup, start crate digging.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/hero-dark.svg">
   <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/hero-dark.png">
@@ -23,7 +25,7 @@ The builds are unsigned. The Mac and Windows warnings, including Removable Volum
 
 The release on that page today is **v0.1.1**. It attaches `Serato-Library-macos.zip` and `Serato-Library-windows.zip`.
 
-App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed:
+App version **1.1.0** is in source and is not a GitHub Release yet. The [release workflow](.github/workflows/release.yml) builds these unsigned files when a `vMAJOR.MINOR.PATCH` tag is pushed. The pre-release [v1.1.0-rc2](https://github.com/mookiejones/serato-library-manager/releases/tag/v1.1.0-rc2) already attaches them, and it is not marked Latest.
 
 | Computer | File |
 | --- | --- |
@@ -43,7 +45,7 @@ These are on `main` (1.1.0).
 - Import and export M3U. Export `rekordbox.xml`. **Hot loops** starts off, and the app remembers that checkbox in its settings. Uses a free hot-cue pad. What that file keeps is in [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md).
 - Save related tracks in `related.sqlite` next to the app settings, not in Serato's library.
 - Rename, move, replace, and trash audio, and update the library path.
-- Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied.
+- Keep hash-checked snapshots of the database, the crates on each drive, and the Serato frames inside audio files. Preview a restore, then confirm. Confirm saves a snapshot first. The music bytes are not copied into the snapshot. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 - Run **Gig**, a read-only check before a gig. It gives a ready score and a Holding it back list: missing files, a drive that is not connected, Apple Music streaming tracks, empty crates, whether a snapshot from the last 7 days exists, and what changed since the latest snapshot. A missing drive, or a missing file in the crate you selected, is not ready. `python3 gig_check.py` prints the same report. See [Before a gig](docs/guide/gig-check.md).
 - The first write in a session copies the database into `Library/Backups`. An unfinished copy is not offered for restore.
 - Ask before sharing anonymous counts and crash reports. Setup asks on the first launch. Sharing stays off until you opt in. See [PRIVACY.md](PRIVACY.md).
@@ -124,10 +126,17 @@ CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/wor
 
 | | |
 | --- | --- |
-| App | `1.1.0` in source (`app_config.APP_VERSION`). Latest GitHub Release: v0.1.1. |
+| App | `app_config.APP_VERSION` is the string `GET /api/version` returns. A release build stamps the tag into `_version.py`. Latest GitHub Release: v0.1.1. |
 | Python | 3.12 and 3.14 on Ubuntu CI. 3.12 on Windows CI. Frozen builds embed 3.12. |
 | OS | macOS and Windows for the app. Linux runs the test suite and is not a published build. |
 | Serato | Serato DJ Pro. Writes and restores run when the version is a dotted number below 5. Serato 5 can be snapshotted and read. Writes and restores stay off while Lucid and Flexible beatgrid storage is not verified. An unknown version blocks writes. |
+
+## Guides
+
+- [Panic page](docs/panic.md). Red tracks, missing crates, a drive that will not mount, or a library that looks wrong after a Serato update. Restore in the app is **Snapshots**, then **Review restore**.
+- [Is my library safe?](docs/is-my-library-safe.md). Snapshots, restore, undo, and the outside-change watcher. The gig check is in the app. The pictures are example layouts.
+- [Moving between Serato and Rekordbox](docs/coming-from-rekordbox.md). What the export keeps.
+- [User guide](docs/index.md). The rest of the app.
 
 ## More
 

@@ -105,6 +105,27 @@ class TokenSheetTests(unittest.TestCase):
         app_at = page.index('href="/app.css"')
         self.assertLess(tokens_at, app_at)
 
+    def test_short_viewport_hides_the_wizard_art(self) -> None:
+        """Hide the setup illustration below a 600px-tall window.
+
+        The query is ``max-height: 599px``, so 600px still shows the art.
+        ``display: none`` is the hide. Removing the query, or changing
+        599px, fails this test.
+
+        Returns:
+            None. The test fails if the media rule or its threshold changes.
+        """
+        text = APP_CSS.read_text(encoding="utf-8")
+        rule = (
+            "@media (max-height: 599px) {\n"
+            "  .wizard-art:not([hidden]) {\n"
+            "    display: none;\n"
+            "  }\n"
+            "}"
+        )
+        self.assertIn(rule, text)
+        self.assertEqual(text.count("max-height: 599px"), 1)
+
     def test_app_css_has_no_raw_hex_colors(self) -> None:
         """Keep every color in app.css on a token or a color-mix.
 

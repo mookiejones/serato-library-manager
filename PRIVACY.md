@@ -10,7 +10,7 @@ Sharing is off until you turn it on. Setup asks on its own step:
 
 A report leaves the machine only after you opt in, and only when this copy of the app has a key for that service.
 
-Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, `tags_read`, `files_changed`, `related_link_saved`, `related_link_removed`, `related_crate_written`, and `duplicates_merged`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. `files_changed` includes a file-count range, a change type (`rename`, `move`, `move_folder`, `replace`, or `delete`), and, for a replacement, whether cue points were copied (`copied`, `kept`, `skipped`, `unsupported`, or `failed`). It does not include a path or a file name. `related_link_saved` includes `link_direction` set to `one_way` or `two_way`. It does not include a note, a rating, a title, or a path. `duplicates_merged` is only the fact that a duplicate merge finished. It does not include how many tracks moved, which file was kept, or any title or path. Each event includes `app` set to `serato-library-manager`, the app version (`1.1.0`), and the operating system. Crash reports use that same version as the Sentry release. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
+Usage counts go to PostHog. The events are `app_opened`, `library_scanned`, `crate_created`, `backup_made`, `tags_read`, `files_changed`, `related_link_saved`, `related_link_removed`, `related_crate_written`, and `duplicates_merged`. `library_scanned` includes a track-count range such as `100-499`, not the exact number. `files_changed` includes a file-count range, a change type (`rename`, `move`, `move_folder`, `replace`, or `delete`), and, for a replacement, whether cue points were copied (`copied`, `kept`, `skipped`, `unsupported`, or `failed`). It does not include a path or a file name. `related_link_saved` includes `link_direction` set to `one_way` or `two_way`. It does not include a note, a rating, a title, or a path. `duplicates_merged` is only the fact that a duplicate merge finished. It does not include how many tracks moved, which file was kept, or any title or path. Each event includes `app` set to `serato-library-manager`, the app version (the same string as `GET /api/version`), and the operating system. Crash reports use that same version as the Sentry release. The PostHog library also attaches its own Python and library version fields. GeoIP is disabled.
 
 Crash reports go to Sentry. A report is the exception type and a stack trace. The tag `app` is `serato-library-manager`. A file path in that report is replaced with `[path]`. A Python file is kept as its name only, such as `server.py`. The machine hostname is not sent. Request bodies and local variables are not sent.
 
@@ -26,11 +26,13 @@ A missing `SENTRY_DSN` keeps crash reports off even after you opt in. A missing 
 
 | System | Settings | Logs |
 |--------|----------|------|
-| macOS | `~/Library/Application Support/Serato Library/settings.json` and `related.sqlite` | `~/Library/Logs/Serato Library/` |
-| Windows | `%APPDATA%\Serato Library\settings.json` and `related.sqlite` | `%LOCALAPPDATA%\Serato Library\Logs\` |
-| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json` and `related.sqlite`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
+| macOS | `~/Library/Application Support/Serato Library/settings.json`, `library.json`, and `related.sqlite` | `~/Library/Logs/Serato Library/` |
+| Windows | `%APPDATA%\Serato Library\settings.json`, `library.json`, and `related.sqlite` | `%LOCALAPPDATA%\Serato Library\Logs\` |
+| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json`, `library.json`, and `related.sqlite`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
 
 `settings.json` also stores the Rekordbox export bar: whether hot loops and memory cues are on, and which key notation was chosen. Those choices are not sent.
+
+`library.json` is written only when setup is pointed at a library that is not in the usual folder. It stores that file's path. The path stays on this machine. It is not a usage report. `settings.json` does not include it.
 
 `related.sqlite` stores which tracks you marked as going well together, including file paths, titles, artists, lengths, notes, and ratings. That file stays on this machine. It is not a usage report. The schema is in [docs/related-tracks.md](docs/related-tracks.md).
 

@@ -32,6 +32,7 @@ import related
 import setup_flow
 import snapshots
 import telemetry
+import version_info
 
 
 def app_root() -> Path:
@@ -1491,6 +1492,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Answer a GET request.
 
+        Health and version are answered before the library is opened.
         Settings and logs are answered before the library routes. Library,
         status, track, history, duplicate, file, related-track, gig-check,
         M3U, and rekordbox XML paths return data. Every other path is a file
@@ -1504,13 +1506,17 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Library, status, track, history, duplicate, file, gig-check, M3U, and
-        rekordbox XML paths return data. Every other path is a file under static/.
+        Health and version do not open the library. Library, status, track,
+        history, duplicate, file, related-track, gig-check, M3U, and rekordbox
+        XML paths return data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
         if parsed.path == "/api/health":
             self.send_json({"ok": True})
+            return
+        if parsed.path == "/api/version":
+            self.send_json(version_info.payload())
             return
         try:
             if parsed.path == "/api/settings":
@@ -1942,10 +1948,15 @@ class Handler(BaseHTTPRequestHandler):
         if set(payload) != {"folder"} or not isinstance(folder, str):
             self.send_json({"error": "That request is not valid."}, status=400)
             return
+        before = Path(library.MASTER)
         try:
-            self.send_json(setup_flow.accept_folder(folder))
+            chosen = setup_flow.accept_folder(folder)
         except library.LibraryError as exc:
             self.send_json({"error": _safe_folder_error(exc.message)}, status=exc.status)
+            return
+        if Path(library.MASTER) != before:
+            invalidate()
+        self.send_json(chosen)
 
     def _get_related(self, query: dict[str, list[str]]) -> None:
         """Return saved links and suggestions for one track path.
@@ -2167,6 +2178,7 @@ class Handler(BaseHTTPRequestHandler):
                     ".html": "text/html; charset=utf-8",
                     ".css": "text/css; charset=utf-8",
                     ".js": "text/javascript; charset=utf-8",
+                    ".svg": "image/svg+xml",
                 }.get(path.suffix, "application/octet-stream")
                 body = path.read_bytes()
                 self.send_response(200)
@@ -2185,19 +2197,24 @@ def serve(port: int | None = None, *, require_library: bool = True) -> Threading
     Args:
         port: TCP port. None uses 8765. ``0`` asks the operating system
             for a free port. The desktop app uses ``0``.
-        require_library: When true, telemetry and the snapshot watch start
-            after the bind if the master database exists. A missing
-            database still serves the page, so the first-run wizard can
-            explain what to do. The release smoke check passes false so a
-            runner without Serato does not start telemetry either.
+        require_library: When true, a library chosen on an earlier launch
+            is used when that file is still a Serato library, then
+            telemetry and the snapshot watch start after the bind if the
+            master database exists. A missing database still serves the
+            page, so the first-run wizard can explain what to do. The
+            release smoke check passes false so a runner without Serato
+            does not start telemetry or open a remembered library either.
 
     Returns:
         A server that is listening and not yet serving. ``shutdown_token``
         and ``focus_token`` are None until the desktop app sets them.
 
     Raises:
-        SystemExit: If the port is already taken.
+        SystemExit: If the port is already taken. A missing library does
+            not exit.
     """
+    if require_library:
+        setup_flow.apply_remembered_library()
     library_present = db_path().exists()
     app_log.configure()
     if require_library and library_present:

@@ -835,7 +835,8 @@ def public_settings() -> dict[str, object]:
     Returns:
         Consent, whether the first-launch prompt should show, the saved
         pane layout, whether this build has a key, the app version, and the
-        Rekordbox export bar. The install id and the telemetry keys are not
+        Rekordbox export bar. ``app_version`` is the ``version`` string from
+        ``GET /api/version``. The install id and the telemetry keys are not
         included.
     """
     settings = app_config.load_settings()

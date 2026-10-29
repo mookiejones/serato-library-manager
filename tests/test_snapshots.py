@@ -1134,6 +1134,32 @@ class SnapshotTests(unittest.TestCase):
             paths = [row["path"] for row in loaded["cues"]]
             self.assertTrue(any(str(path).endswith("one-grid.mp3") for path in paths))
 
+    def test_absolute_portable_id_stays_inside_the_music_root(self) -> None:
+        """Snapshot an absolute path, and refuse one that leaves the drive.
+
+        The music root is the temporary directory, not the filesystem
+        root. A relative component that contains a colon is not opened.
+
+        Returns:
+            None. The test fails if the absolute file is missed or a
+            colon component is accepted.
+        """
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            track = root / "set" / "opener.mp3"
+            track.parent.mkdir()
+            track.write_bytes(b"audio")
+            other = root / "other"
+            other.mkdir()
+            self.assertEqual(snapshots._resolve_track(str(track), root), track.resolve())
+            self.assertEqual(snapshots._resolve_track(track.as_posix(), root), track.resolve())
+            self.assertEqual(snapshots._resolve_track("set/opener.mp3", root), track.resolve())
+            self.assertIsNone(snapshots._resolve_track(str(track), other))
+            self.assertIsNone(snapshots._resolve_track("set/file:stream.mp3", root))
+            streamed = root / "file:stream.mp3"
+            streamed.write_bytes(b"audio")
+            self.assertIsNone(snapshots._resolve_track(str(streamed), root))
+
     def test_manifest_key_keeps_newline_bytes(self) -> None:
         """Store a manifest key that contains newline bytes unchanged.
 

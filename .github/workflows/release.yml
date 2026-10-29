@@ -14,6 +14,9 @@ on:
       - "requirements-build.txt"
       - "requirements-macos.txt"
       - "desktop.py"
+      - "version_info.py"
+      - "_version.py"
+      - "scripts/write_version.py"
 
 permissions:
   contents: read
@@ -78,12 +81,26 @@ jobs:
           npm ci
           npm run build
 
+      - name: Bake the app version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          VERSION_COMMIT: ${{ github.sha }}
+        run: python scripts/write_version.py
+
       - name: Build the app
         run: python -m PyInstaller serato-library.spec
 
       - name: Require the frozen architecture
         shell: bash
         run: python scripts/release_bundle.py assert-arch dist "${{ matrix.arch }}"
+
+      - name: Require the Windows version resource
+        if: matrix.kind == 'windows'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: python scripts/release_bundle.py assert-version dist
 
       # No secrets are passed. The script prints "Signing skipped" and exits 0.
       - name: Skip signing on a pull request
@@ -234,12 +251,26 @@ jobs:
           npm ci
           npm run build
 
+      - name: Bake the app version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          VERSION_COMMIT: ${{ github.sha }}
+        run: python scripts/write_version.py
+
       - name: Build the app
         run: python -m PyInstaller serato-library.spec
 
       - name: Require the frozen architecture
         shell: bash
         run: python scripts/release_bundle.py assert-arch dist "${{ matrix.arch }}"
+
+      - name: Require the Windows version resource
+        if: matrix.kind == 'windows'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: python scripts/release_bundle.py assert-version dist
 
       - name: Sign the macOS app when secrets are present
         if: runner.os == 'macOS'

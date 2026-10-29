@@ -15,7 +15,7 @@ from pathlib import Path
 root = Path(SPECPATH)
 sys.path.insert(0, str(root))
 
-import app_config
+import version_info
 from static_assets import missing_static_files
 
 missing = missing_static_files(root / "static")
@@ -135,6 +135,7 @@ elif sys.platform == "win32":
 else:
     hidden += ["webview.platforms.gtk", "gi"]
 hidden.extend(telemetry_hiddenimports())
+hidden.extend(["version_info", "_version"])
 
 a = Analysis(
     ["desktop.py"],
@@ -149,6 +150,13 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
+
+bundle_version = version_info.bundle_version()
+windows_version_file = None
+if sys.platform == "win32":
+    windows_version_path = root / "build" / "file_version_info.txt"
+    version_info.write_windows_version_file(windows_version_path)
+    windows_version_file = str(windows_version_path)
 
 exe = EXE(
     pyz,
@@ -166,6 +174,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=windows_version_file,
 )
 coll = COLLECT(
     exe,
@@ -182,8 +191,8 @@ if sys.platform == "darwin":
         icon=None,
         bundle_identifier="local.seratolibrary.browser",
         info_plist={
-            "CFBundleShortVersionString": app_config.APP_VERSION,
-            "CFBundleVersion": app_config.APP_VERSION,
+            "CFBundleShortVersionString": bundle_version,
+            "CFBundleVersion": bundle_version,
             "NSHighResolutionCapable": True,
             "NSRemovableVolumesUsageDescription": (
                 "Serato Library reads music files on external drives."

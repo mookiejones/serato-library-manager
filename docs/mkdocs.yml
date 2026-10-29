@@ -15,6 +15,7 @@ exclude_docs: |
   github.md
   related-tracks.md
   serato-library-tools.md
+  wiki/*.md
 
 theme:
   name: material
@@ -56,9 +57,12 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Start:
+      - Quick Start: quick-start.md
       - First install: first-install.md
       - Install: guide/install.md
       - Safety and backups: guide/safety.md
+      - Is my library safe?: is-my-library-safe.md
+      - Panic: panic.md
   - Your library:
       - Crates: guide/crates.md
       - Track details: guide/tags.md

@@ -1290,8 +1290,10 @@ class _SavedFrames:
         self.cues: dict[str, snapshots.CueTrackView] = {row["path"]: row for row in contents["cues"]}
         self.grids: dict[str, snapshots.GridTrackView] = {row["path"]: row for row in contents["grids"]}
         self.seen: set[str] = set(self.cues) | set(self.grids) | {row["path"] for row in contents["tags"]}
+        self.by_key: dict[str, str] = {}
         self.by_name: dict[str, list[str]] = {}
         for path in self.seen:
+            self.by_key.setdefault(_path_key(path), path)
             self.by_name.setdefault(_base_name(path), []).append(path)
 
     def _find(self, portable_id: str) -> str | None:
@@ -1302,16 +1304,30 @@ class _SavedFrames:
 
         Returns:
             The saved path that is that id, or ends with it on some drive.
+            Separators are the same path. On Windows the match ignores case.
             None when the snapshot saved no frame for that track.
         """
         if not portable_id:
             return None
+        found = self.by_key.get(_path_key(portable_id))
+        if found is not None:
+            return found
         for candidate in _candidates(portable_id, None):
-            if str(candidate) in self.seen:
-                return str(candidate)
+            found = self.by_key.get(_path_key(str(candidate)))
+            if found is not None:
+                return found
         tail = portable_id.replace("\\", "/").lstrip("/")
+        head = tail.split("/", 1)[0]
+        if not tail or ":" in head:
+            return None
+        needle = "/" + tail
+        if os.name == "nt":
+            needle = needle.casefold()
         for path in self.by_name.get(_base_name(portable_id), ()):
-            if path.replace("\\", "/").endswith("/" + tail):
+            folded = path.replace("\\", "/")
+            if os.name == "nt":
+                folded = folded.casefold()
+            if folded.endswith(needle):
                 return path
         return None
 
@@ -1346,6 +1362,23 @@ def _base_name(path: str) -> str:
         The file name, folded to lower case.
     """
     return path.replace("\\", "/").rsplit("/", 1)[-1].casefold()
+
+
+def _path_key(path: str) -> str:
+    """Return the identity used to match a stored path to a saved frame.
+
+    Args:
+        path: A portable id or a path recorded in a snapshot.
+
+    Returns:
+        The path with forward slashes. On Windows it is case-folded,
+        because that filesystem treats ``C:/Music/a.mp3`` and
+        ``c:\\music\\a.mp3`` as the same file.
+    """
+    text = path.replace("\\", "/")
+    if os.name == "nt":
+        return text.casefold()
+    return text
 
 
 def default_reader(database: Path | None, space: str) -> StoreSnapshots:

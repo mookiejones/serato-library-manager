@@ -2326,13 +2326,28 @@ def _sqlite_audio_paths(master: Path, music_root: Path) -> list[Path]:
 def _resolve_track(text: str, music_root: Path) -> Path | None:
     """Resolve a crate path against a drive's music root.
 
+    An absolute path is the file itself. That includes a Windows drive
+    letter (``C:/Music/track.mp3``) and a UNC path. It is kept only when
+    the file stays inside ``music_root``. A relative path is joined onto
+    that root. A colon in a relative component is refused: that is an
+    alternate data stream or a drive-relative name, not a file to open.
+
     Args:
-        text: Path stored in a crate or database V2.
+        text: Path stored in a crate, database V2, or ``portable_id``.
         music_root: Root the path must stay inside.
 
     Returns:
         The file, or None when it is missing, a shortcut, or outside the root.
     """
+    if not text or "\x00" in text:
+        return None
+    direct = Path(text)
+    try:
+        absolute = direct.is_absolute()
+    except ValueError:
+        return None
+    if absolute:
+        return _file_inside(direct, music_root)
     raw = text.replace("\\", "/").lstrip("/")
     parts = [part for part in raw.split("/") if part != ""]
     if not raw or not parts or any(part in {".", ".."} for part in parts):
@@ -2357,6 +2372,49 @@ def _resolve_track(text: str, music_root: Path) -> Path | None:
         if _contained(resolved, root) and resolved.is_file():
             return resolved
     return None
+
+
+def _file_inside(candidate: Path, music_root: Path) -> Path | None:
+    """Return a regular file when an absolute path stays inside a drive.
+
+    Args:
+        candidate: Absolute path from a crate or a portable id.
+        music_root: Drive folder the file must stay inside.
+
+    Returns:
+        The resolved file, or None when it is a shortcut, missing,
+        outside the root, or a later component names an alternate data
+        stream.
+    """
+    if _stream_in_path(candidate):
+        return None
+    try:
+        if candidate.is_symlink():
+            return None
+        resolved = candidate.resolve()
+        root = music_root.resolve()
+    except (OSError, ValueError):
+        return None
+    if _contained(resolved, root) and resolved.is_file():
+        return resolved
+    return None
+
+
+def _stream_in_path(path: Path) -> bool:
+    """Return whether a component after the drive contains a colon.
+
+    Args:
+        path: Absolute path.
+
+    Returns:
+        True when a component other than the drive anchor contains ``:``.
+        ``C:\\`` is allowed to contain the drive colon. ``file:stream``
+        later in the path is an alternate data stream and is not opened.
+    """
+    parts = path.parts
+    if len(parts) <= 1:
+        return False
+    return any(":" in part for part in parts[1:])
 
 
 def _iter_serato_files(root: Path) -> list[tuple[str, Path]]:

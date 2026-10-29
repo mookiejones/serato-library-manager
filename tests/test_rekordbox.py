@@ -925,6 +925,8 @@ class ExportTests(unittest.TestCase):
         self.assertIn("coming-from-rekordbox.md", index)
         self.assertIn("docs/coming-from-rekordbox.md", readme)
         self.assertIn("Status: preview.", page)
+        self.assertNotIn("nothing here works yet", page)
+        self.assertIn("not rounded to three decimals", page)
         self.assertIn("0xRRGGBB", page)
         self.assertIn("without its cue points", page)
         self.assertIn("as Serato stored it", page)

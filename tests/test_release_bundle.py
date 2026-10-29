@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import release_bundle  # noqa: E402
 import static_assets  # noqa: E402
+import version_info  # noqa: E402
 
 
 def _pe(machine: int) -> bytes:
@@ -92,6 +93,16 @@ class AssetTests(unittest.TestCase):
         """
         names = static_assets.local_asset_names(ROOT / "static" / "index.html")
         self.assertEqual(names, ["tokens.css", "app.css", "wizard.js", "app.js"])
+        page = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        for name in (
+            "wizard-welcome.svg",
+            "wizard-find-library.svg",
+            "wizard-safety-snapshot.svg",
+            "wizard-consent.svg",
+            "wizard-done.svg",
+        ):
+            artwork = (ROOT / "static" / "img" / "wizard" / name).read_text(encoding="utf-8").strip()
+            self.assertIn(artwork, page)
         self.assertEqual(static_assets.missing_static_files(ROOT / "static"), [])
 
     def test_remote_links_are_not_assets(self) -> None:
@@ -757,8 +768,8 @@ class PackageTests(unittest.TestCase):
         """Require the Inno script to take AppVersion from the build.
 
         The script must fail closed without ``/DAppVersion`` and must name
-        the portable installer. The version constant is read from
-        ``app_config``, not from the script.
+        the portable installer. The version passed to the compiler is the
+        release identity, not a literal in the script.
 
         Returns:
             None. The test fails if the script bakes a version of its own.
@@ -768,7 +779,11 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Serato-Library-windows-setup", text)
         self.assertIn("PrivilegesRequired=lowest", text)
         self.assertNotIn("SignTool=", text)
-        self.assertEqual(release_bundle.app_version(), "1.1.0")
+        self.assertEqual(release_bundle.app_version(), version_info.installer_version())
+        self.assertRegex(
+            release_bundle.app_version(),
+            r"[0-9]+\.[0-9]+\.[0-9]+(?:-(?:rc|beta)[0-9]+)?",
+        )
         self.assertIn(release_bundle.INNO_VERSION, release_bundle.INNO_URL)
         self.assertEqual(len(release_bundle.INNO_SHA256), 64)
         self.assertIn("ArchitecturesInstallIn64BitMode=x64compatible", text)

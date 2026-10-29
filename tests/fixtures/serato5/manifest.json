@@ -1,0 +1,111 @@
+{
+  "version": "serato5",
+  "status": "spec-derived, unverified",
+  "note": "spec-derived, unverified. Lucid/Flexible beatgrid storage and Protect Library storage are not in the published notes, so these fixtures do not invent them. The beatgrid here is the documented version-byte-1 layout. Unverified until Byte Beat's serato5-probe.sh runs on a real Serato 5 install.",
+  "files": [
+    {
+      "bytes": 826,
+      "sha256": "91de7fc4ccd6bdb761072e819e0e823389e158f98013f001bdada58d3423b2ef",
+      "path": "_Serato_/database V2",
+      "role": "database-v2",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (record header, vrsn, otrk, pfil/ptrk as UTF-16BE) and https://github.com/Holzhaus/serato-tags/blob/master/scripts/database_v2.py (field names ttyp, tsng, tart, tbpm, bmis)."
+    },
+    {
+      "bytes": 268,
+      "sha256": "1fe5317c759cbe369ab9f424873f8037f3b9f76b379f11cdf54cd67e4271bf55",
+      "path": "_Serato_/Subcrates/House.crate",
+      "role": "crate",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (vrsn '1.0/Serato ScratchLive Crate', otrk/ptrk; the crate name is the filename, not a record). Nested crates join parent and child with %% in the filename."
+    },
+    {
+      "bytes": 116,
+      "sha256": "f5e6cd82a84b9ea696105118d5f04d7ceff3ba1e2b8c26acfb2ab7098bee741b",
+      "path": "_Serato_/Subcrates/House%%深夜.crate",
+      "role": "crate",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (vrsn '1.0/Serato ScratchLive Crate', otrk/ptrk; the crate name is the filename, not a record). Nested crates join parent and child with %% in the filename."
+    },
+    {
+      "bytes": 64,
+      "sha256": "3d52fefc46bf06a4b1f5b1606089553d7dfe3021a733e1d5bca8715c3201ff10",
+      "path": "_Serato_/Subcrates/Empty.crate",
+      "role": "crate",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (vrsn '1.0/Serato ScratchLive Crate', otrk/ptrk; the crate name is the filename, not a record). Nested crates join parent and child with %% in the filename."
+    },
+    {
+      "bytes": 178,
+      "sha256": "b279adc39d4a007582adea069ef2f5aa7219ed18cefb639ac371a4c39e3cd650",
+      "path": "drives/UNMOUNTED/_Serato_/Subcrates/Gig.crate",
+      "role": "crate",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (vrsn '1.0/Serato ScratchLive Crate', otrk/ptrk; the crate name is the filename, not a record). Nested crates join parent and child with %% in the filename."
+    },
+    {
+      "bytes": 344,
+      "sha256": "a5781b31339153388fa0aef3963fc36c5b3ab833b5e69fdcc3e1c24963cbb91c",
+      "path": "drives/UNMOUNTED/_Serato_/database V2",
+      "role": "database-v2",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (record header, vrsn, otrk, pfil/ptrk as UTF-16BE) and https://github.com/Holzhaus/serato-tags/blob/master/scripts/database_v2.py (field names ttyp, tsng, tart, tbpm, bmis)."
+    },
+    {
+      "bytes": 825,
+      "sha256": "6b3badede31f1810a1a22077cdc0871efa01338f64d6ee2c2fa22f9f1ea32267",
+      "path": "audio/tempo.mp3",
+      "role": "audio",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/serato-tags/blob/main/docs/fileformats.md section 'MP3 and AIFF' (ID3v2.4 GEOB Serato Markers2 and Serato BeatGrid). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_markers2.md (header, base64 and null padding, CUE, LOOP, FLIP, COLOR, BPMLOCK entries). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_beatgrid.md (version byte 1, non-terminal beats-until-next, terminal BPM, one-byte footer)."
+    },
+    {
+      "bytes": 696,
+      "sha256": "8a05ad563b630259efca0a4c9700f7c805841a9b8b8b072e27161d921e66ab9e",
+      "path": "audio/downbeat.aiff",
+      "role": "audio",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/serato-tags/blob/main/docs/fileformats.md section 'MP3 and AIFF' (ID3v2.4 GEOB inside an AIFF ID3 chunk). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_markers2.md (header, base64 and null padding, CUE, LOOP, FLIP, COLOR, BPMLOCK entries). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_beatgrid.md (version byte 1, non-terminal beats-until-next, terminal BPM, one-byte footer)."
+    },
+    {
+      "bytes": 906,
+      "sha256": "6e8ff425167e4423a7fd9e516e2816fcf4945180838dd544e67c6112635f251b",
+      "path": "audio/shifts.flac",
+      "role": "audio",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/serato-tags/blob/main/docs/fileformats.md section 'FLAC' (VORBIS_COMMENT SERATO_MARKERS_V2 and SERATO_BEATGRID, base64 without padding, linefeed every 72 characters, application/octet-stream envelope). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_markers2.md (header, base64 and null padding, CUE, LOOP, FLIP, COLOR, BPMLOCK entries). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_beatgrid.md (version byte 1, non-terminal beats-until-next, terminal BPM, one-byte footer)."
+    },
+    {
+      "bytes": 1721,
+      "sha256": "370d681c93f5c91551c1d89f3bbd447957f789989ea52970d7f892aa562b06d3",
+      "path": "audio/anchor.m4a",
+      "role": "audio",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/serato-tags/blob/main/docs/fileformats.md section 'MP4/M4A' (---- atoms, mean com.serato.dj, names markersv2 and beatgrid; markersv2 has linefeeds every 72 characters, beatgrid does not). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_markers2.md (header, base64 and null padding, CUE, LOOP, FLIP, COLOR, BPMLOCK entries). https://github.com/Holzhaus/serato-tags/blob/main/docs/serato_beatgrid.md (version byte 1, non-terminal beats-until-next, terminal BPM, one-byte footer)."
+    },
+    {
+      "bytes": 244,
+      "sha256": "6989199a9484ead94ee3e480254a712a574cae3e1ab2529b495158c93e04984a",
+      "path": "edge/truncated.crate",
+      "role": "edge",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/mixxx/wiki/Serato-Database-Format (vrsn '1.0/Serato ScratchLive Crate', otrk/ptrk; the crate name is the filename, not a record). Nested crates join parent and child with %% in the filename."
+    },
+    {
+      "bytes": 332,
+      "sha256": "47c5b50b2ebfced6241ddc068ea0d15d80f40ebf6e066be362022cae61d31c33",
+      "path": "edge/truncated-tags.mp3",
+      "role": "edge",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/serato-tags/blob/main/docs/fileformats.md section 'MP3 and AIFF' (ID3v2.4 GEOB Serato Markers2 and Serato BeatGrid)."
+    },
+    {
+      "bytes": 6,
+      "sha256": "113baf8ac4c066486f59c4fca05b74acc28dc24d43bddfe648627a0ee68593a4",
+      "path": "edge/cut-header.mp3",
+      "role": "edge",
+      "status": "spec-derived, unverified",
+      "citation": "https://github.com/Holzhaus/serato-tags/blob/main/docs/fileformats.md section 'MP3 and AIFF' (ID3v2.4 GEOB Serato Markers2 and Serato BeatGrid)."
+    }
+  ]
+}

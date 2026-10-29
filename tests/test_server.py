@@ -290,6 +290,28 @@ class ApiTests(unittest.TestCase):
         self.assertIn(b"--color-bg: #231910", body)
         self.assertNotIn(b"#0d0f14", body)
 
+    def test_wizard_svg_is_an_image(self) -> None:
+        """Serve a setup illustration as an SVG image.
+
+        An ``img`` will not paint the file when the type is a generic
+        byte stream.
+
+        Returns:
+            None. The test fails if the media type is not ``image/svg+xml``.
+        """
+        host, port = self.httpd.server_address
+        connection = http.client.HTTPConnection(host, port, timeout=5)
+        connection.putrequest("GET", "/img/wizard/wizard-welcome.svg")
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        content_type = response.getheader("Content-Type")
+        connection.close()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(content_type, "image/svg+xml")
+        self.assertIn(b"--illus-primary", body)
+        self.assertNotIn(b"#", body)
+
     def test_save_and_read_track(self) -> None:
         """Save a comment through POST ``/api/track`` and read it back.
 
