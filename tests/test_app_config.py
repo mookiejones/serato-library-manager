@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -625,6 +626,264 @@ class LayoutSettingsTests(unittest.TestCase):
             with self.assertLogs("serato.library.config", level="WARNING"):
                 loaded = app_config.load_settings()
             self.assertIsNone(loaded.track_list_width, layout)
+
+
+class SettingsIntegrityTests(unittest.TestCase):
+    """Gaps that let a settings save drop or tear another field.
+
+    Each test uses a fresh directory via ``SERATO_LIBRARY_CONFIG_DIR``.
+    Nothing here opens a Serato database or the machine's settings file.
+    """
+
+    def setUp(self) -> None:
+        """Create an empty config directory for one test.
+
+        Returns:
+            None.
+        """
+        self._tmp = tempfile.TemporaryDirectory()
+        self.config = Path(self._tmp.name) / "config"
+        self.config.mkdir()
+        self._env = mock.patch.dict(os.environ, {app_config.CONFIG_ENV: str(self.config)})
+        self._env.start()
+
+    def tearDown(self) -> None:
+        """Remove the temporary config directory.
+
+        Returns:
+            None.
+        """
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_update_rekordbox_keeps_the_window(self) -> None:
+        """Keep a saved frame when the export bar is written.
+
+        The frame includes a negative origin. The export-bar save has to
+        write that object back, not only the ``rekordbox`` section.
+
+        Returns:
+            None. The test fails if the frame is missing after the save.
+        """
+        frame = app_config.WindowGeometry(12, -8, 1024, 768)
+        app_config.save_window_geometry(frame)
+        saved = app_config.update_rekordbox(hot_loops=True)
+        self.assertEqual(saved.window, frame)
+        self.assertTrue(saved.rekordbox.hot_loops)
+        loaded = app_config.load_settings()
+        self.assertEqual(loaded.window, frame)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            payload["window"],
+            {"x": 12, "y": -8, "width": 1024, "height": 768},
+        )
+
+    def test_update_rekordbox_keeps_wizard_complete(self) -> None:
+        """Keep a finished setup flag when the export bar is written.
+
+        The flag starts True. A save that reset it to False would hide
+        that the wizard had already finished.
+
+        Returns:
+            None. The test fails if the flag comes back False.
+        """
+        app_config.set_telemetry_consent(False)
+        done = app_config.set_wizard_complete(True)
+        self.assertIs(done.wizard_complete, True)
+        saved = app_config.update_rekordbox(memory_cues=False)
+        self.assertIs(saved.wizard_complete, True)
+        self.assertIs(saved.telemetry_consent, False)
+        self.assertFalse(saved.rekordbox.memory_cues)
+        loaded = app_config.load_settings()
+        self.assertIs(loaded.wizard_complete, True)
+        self.assertIs(loaded.telemetry_consent, False)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertIs(payload["wizard_complete"], True)
+
+    def test_overlapping_saves_keep_every_settings_key(self) -> None:
+        """Keep every settings key when three saves overlap.
+
+        One thread stores a new window frame and another stores a sharing
+        choice while an export-bar save is inside its write. Those writes
+        share the settings lock, so each one reads the file the previous
+        one published. The file still has every ``SETTINGS_KEYS`` entry,
+        the new frame, the new choice, and the export-bar change.
+
+        Returns:
+            None. The test fails if a stale export-bar write puts the old
+            frame or the old choice back, or if a key disappears.
+        """
+        consented = app_config.set_telemetry_consent(False)
+        app_config.set_wizard_complete(True)
+        old_frame = app_config.WindowGeometry(1, 2, 800, 600)
+        app_config.save_window_geometry(old_frame)
+        app_config.set_track_list_width(480)
+        app_config.update_rekordbox(memory_cues=False, key_notation="camelot")
+        new_frame = app_config.WindowGeometry(30, 40, 1100, 700)
+        original_save = app_config.save_settings
+        armed = True
+        errors: list[BaseException] = []
+        window_ready = threading.Event()
+        consent_ready = threading.Event()
+
+        def save_frame() -> None:
+            try:
+                acquired = app_config._settings_lock.acquire(blocking=False)
+                if acquired:
+                    try:
+                        app_config.save_window_geometry(new_frame)
+                    finally:
+                        app_config._settings_lock.release()
+                        window_ready.set()
+                else:
+                    window_ready.set()
+                    app_config.save_window_geometry(new_frame)
+            except BaseException as exc:
+                errors.append(exc)
+                window_ready.set()
+
+        def save_choice() -> None:
+            try:
+                if not window_ready.wait(timeout=5):
+                    raise TimeoutError("window save did not reach the settings lock")
+                acquired = app_config._settings_lock.acquire(blocking=False)
+                if acquired:
+                    try:
+                        app_config.set_telemetry_consent(True)
+                    finally:
+                        app_config._settings_lock.release()
+                        consent_ready.set()
+                else:
+                    consent_ready.set()
+                    app_config.set_telemetry_consent(True)
+            except BaseException as exc:
+                errors.append(exc)
+                consent_ready.set()
+
+        frame_thread = threading.Thread(target=save_frame, name="window-save", daemon=True)
+        choice_thread = threading.Thread(target=save_choice, name="consent-save", daemon=True)
+
+        def wrapped_save(settings: app_config.Settings) -> None:
+            nonlocal armed
+            if armed and settings.rekordbox.hot_loops is True and settings.window == old_frame:
+                armed = False
+                frame_thread.start()
+                choice_thread.start()
+                if not window_ready.wait(timeout=5) or not consent_ready.wait(timeout=5):
+                    raise AssertionError("overlapping saves did not reach the settings lock")
+            original_save(settings)
+
+        try:
+            with mock.patch.object(app_config, "save_settings", wrapped_save):
+                app_config.update_rekordbox(hot_loops=True)
+        finally:
+            # Join even when the save raises, so a writer is not still
+            # holding settings.json when the temp directory is removed.
+            # Windows cannot delete a file that is still open.
+            for thread in (frame_thread, choice_thread):
+                if thread.ident is not None:
+                    thread.join(timeout=5)
+        self.assertFalse(frame_thread.is_alive())
+        self.assertFalse(choice_thread.is_alive())
+        self.assertEqual(errors, [])
+        loaded = app_config.load_settings()
+        self.assertEqual(loaded.window, new_frame)
+        self.assertIs(loaded.telemetry_consent, True)
+        self.assertEqual(loaded.install_id, consented.install_id)
+        self.assertIs(loaded.wizard_complete, True)
+        self.assertTrue(loaded.rekordbox.hot_loops)
+        self.assertFalse(loaded.rekordbox.memory_cues)
+        self.assertEqual(loaded.rekordbox.key_notation, "camelot")
+        self.assertEqual(loaded.track_list_width, 480)
+        payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(payload), set(app_config.SETTINGS_KEYS))
+
+    def test_rekordbox_changes_rejects_integers(self) -> None:
+        """Reject an integer where the export bar wants a boolean.
+
+        ``1`` is not true and ``0`` is not false. A real boolean still
+        passes, including a saved false.
+
+        Returns:
+            None. The test fails if an integer is returned as a change.
+        """
+        accepted = app_config.rekordbox_changes(
+            {"hot_loops": False, "memory_cues": True, "key_notation": "classical"}
+        )
+        self.assertIs(accepted["hot_loops"], False)
+        self.assertIs(accepted["memory_cues"], True)
+        self.assertEqual(accepted["key_notation"], "classical")
+        for field in ("hot_loops", "memory_cues"):
+            for value in (1, 0, 2):
+                with self.assertRaises(ValueError, msg=f"{field}={value!r}"):
+                    app_config.rekordbox_changes({field: value})
+        with self.assertRaises(ValueError):
+            app_config.rekordbox_changes({"key_notation": 1})
+
+    def test_interrupted_write_keeps_the_original_file(self) -> None:
+        """Leave the previous settings file in place when a write stops halfway.
+
+        The new bytes go to a temp file in the same directory. A crash
+        during that write must not replace ``settings.json``.
+
+        Returns:
+            None. The test fails if the original file is truncated or replaced.
+        """
+        app_config.set_telemetry_consent(False)
+        path = self.config / "settings.json"
+        original = path.read_bytes()
+
+        def crash_mid_write(target: Path, data: str, *args: object, **kwargs: object) -> None:
+            encoding = kwargs.get("encoding")
+            if not isinstance(encoding, str):
+                encoding = args[0] if args and isinstance(args[0], str) else "utf-8"
+            # Close the handle before raising. Windows cannot remove the
+            # temp directory while this file is still open.
+            with target.open("w", encoding=encoding) as handle:
+                handle.write(data[:8])
+            raise OSError("crash mid-write")
+
+        with mock.patch.object(Path, "write_text", crash_mid_write):
+            with self.assertRaises(OSError):
+                app_config.update_rekordbox(hot_loops=True)
+        self.assertEqual(path.read_bytes(), original)
+        temp = path.with_suffix(".json.tmp")
+        leftover = temp.read_text(encoding="utf-8")
+        self.assertEqual(len(leftover), 8)
+        self.assertTrue(leftover.startswith("{\n"))
+        loaded = app_config.load_settings()
+        self.assertIs(loaded.telemetry_consent, False)
+        self.assertFalse(loaded.rekordbox.hot_loops)
+
+    def test_failed_replace_keeps_the_original_file(self) -> None:
+        """Keep the previous file when the temp file cannot be renamed into place.
+
+        The new JSON is in the temp file. ``settings.json`` is the file
+        that was already there.
+
+        Returns:
+            None. The test fails if the destination changes before the
+            rename, or if the rename is not attempted.
+        """
+        app_config.set_telemetry_consent(False)
+        path = self.config / "settings.json"
+        original = path.read_bytes()
+        seen: list[tuple[str, str]] = []
+
+        def fail_replace(src: object, dst: object, *args: object, **kwargs: object) -> None:
+            seen.append((Path(str(src)).name, Path(str(dst)).name))
+            raise OSError("replace failed")
+
+        with mock.patch("os.replace", side_effect=fail_replace):
+            with self.assertRaises(OSError):
+                app_config.update_rekordbox(key_notation="classical")
+        self.assertEqual(seen, [("settings.json.tmp", "settings.json")])
+        self.assertEqual(path.read_bytes(), original)
+        temp = path.with_suffix(".json.tmp")
+        self.assertIn("classical", temp.read_text(encoding="utf-8"))
+        loaded = app_config.load_settings()
+        self.assertEqual(loaded.rekordbox.key_notation, "asis")
+        self.assertIs(loaded.telemetry_consent, False)
 
 
 class VersionTests(unittest.TestCase):
