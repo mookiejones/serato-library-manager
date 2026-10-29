@@ -66,6 +66,15 @@ npm run build
 4. Update `PRIVACY.md` and the README when sharing, local logs, or telemetry keys change.
 5. Commit the change. Do not push unless asked.
 
+## Merge rules
+
+- `main` is protected. Changes go in only through a pull request.
+- A merge needs one approving review from `mookiejones-qa` on the latest commit. A new push dismisses that approval, so re-request review after pushing.
+- CI must pass on the Ubuntu and Windows test jobs `tests (ubuntu-latest, Python 3.12)`, `tests (ubuntu-latest, Python 3.14)`, and `tests (windows-latest, Python 3.12)`, plus the CodeQL job `analyze Python`.
+- No force-pushes to `main`.
+- Admins can bypass these rules, but should not.
+- Never merge your own pull request without that `mookiejones-qa` review.
+
 ## Library safety
 
 The database lives outside this repo. Quit Serato before a write. Do not commit a copy of `master.sqlite`. Cue points live in the audio file, not in the crate row.
