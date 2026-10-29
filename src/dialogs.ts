@@ -49,7 +49,9 @@ let filesTrigger: HTMLElement | null = null;
  *
  * The report form asks for the loss report as JSON. The file form is the
  * XML download, which starts only after the dialog is confirmed.
- * Hot loops is off until checked, which sends ``hot_loops=0``.
+ * Hot loops sends ``hot_loops=1`` while the box is checked and
+ * ``hot_loops=0`` while it is clear. The box starts clear.
+ * wireDialogs loads the saved export bar before the person exports.
  *
  * @param {boolean} report True asks for the loss report instead of the file.
  * @returns {string} The request path and query.
@@ -61,6 +63,62 @@ export function rekordboxExportUrl(report: boolean) {
   const key = el("rekordbox-key").value;
   const base = `/api/export.rekordbox.xml?space=${encodeURIComponent(state.space)}&crate=${encodeURIComponent(crate)}&memory=${memory}&hot_loops=${hotLoops}&key=${encodeURIComponent(key)}`;
   return report ? `${base}&report=1` : base;
+}
+
+/** Bumps when the export bar changes, so a late settings response is ignored. */
+let rekordboxToken = 0;
+
+/**
+ * Apply a saved export bar to the three controls.
+ *
+ * Only boolean cues and a known key notation are copied. A missing
+ * section leaves the controls as they are. Does not fetch.
+ *
+ * @param {object} payload Settings object from the server.
+ * @returns {void}
+ */
+export function applyRekordboxExport(payload: SettingsPayload): void {
+  const section = payload.rekordbox;
+  if (section == null) return;
+  if (typeof section.hot_loops === "boolean") {
+    el("rekordbox-hot-loops").checked = section.hot_loops;
+  }
+  if (typeof section.memory_cues === "boolean") {
+    el("rekordbox-memory").checked = section.memory_cues;
+  }
+  if (
+    section.key_notation === "asis"
+    || section.key_notation === "camelot"
+    || section.key_notation === "classical"
+  ) {
+    el("rekordbox-key").value = section.key_notation;
+  }
+}
+
+/**
+ * POST the export bar.
+ *
+ * The body is the three controls as they are now. A failed request leaves
+ * those controls in place, and the export reads them directly.
+ *
+ * @returns {Promise<void>}
+ */
+export async function saveRekordboxExport(): Promise<void> {
+  const key = el("rekordbox-key").value;
+  const notation = key === "camelot" || key === "classical" ? key : "asis";
+  const token = ++rekordboxToken;
+  try {
+    const payload = await postJSON<SettingsPayload>("/api/settings", {
+      rekordbox: {
+        hot_loops: el("rekordbox-hot-loops").checked,
+        memory_cues: el("rekordbox-memory").checked,
+        key_notation: notation,
+      },
+    });
+    if (token === rekordboxToken) applyRekordboxExport(payload);
+  } catch {
+    // The boxes stay as set. The export still uses them.
+  }
 }
 
 /**
@@ -491,11 +549,13 @@ function openWizard(force: boolean, returnFocus: HTMLElement): boolean {
  * @returns {Promise<void>}
  */
 export async function loadPrivacy() {
+  const token = rekordboxToken;
   const response = await fetch("/api/settings");
   const payload = await readJSONOr<SettingsPayload>(response, {});
   if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
   applyPrivacy(payload);
   applyLayout(payload);
+  if (token === rekordboxToken) applyRekordboxExport(payload);
   if (!state.wizardComplete && openWizard(false, el("search"))) return;
   if (payload.needs_consent_prompt) showConsent();
 }
@@ -668,6 +728,17 @@ async function confirmFiles() {
  * @returns {void}
  */
 export function wireDialogs(): void {
+  const saveExportBar = () => {
+    saveRekordboxExport().catch(() => {
+      // saveRekordboxExport already keeps the boxes. This catch is the listener boundary.
+    });
+  };
+  el("rekordbox-hot-loops").addEventListener("change", saveExportBar);
+  el("rekordbox-memory").addEventListener("change", saveExportBar);
+  el("rekordbox-key").addEventListener("change", saveExportBar);
+  loadPrivacy().catch((error: unknown) => {
+    setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent.");
+  });
   el("export-rekordbox").addEventListener("click", () => {
     rekordboxXml = "";
     fetch(rekordboxExportUrl(true))

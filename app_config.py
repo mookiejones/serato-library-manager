@@ -1,9 +1,10 @@
-"""Settings for sharing anonymous telemetry.
+"""Settings for sharing and for the Rekordbox export bar.
 
-The choice and the anonymous install id live in a JSON file under the
-per-system config directory. A missing file means the choice has not been
-made, and sharing stays off. ``False`` is a real choice and must not be
-treated as missing.
+The sharing choice, the anonymous install id, and the export bar live in
+one JSON file under the per-system config directory. A missing file means
+the sharing choice has not been made, and sharing stays off. ``False`` is
+a real choice and must not be treated as missing. The export bar has its
+own defaults and can be saved before that choice.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import os
 import sys
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # Single source for the app version. Sentry's release, PostHog's
@@ -25,13 +26,16 @@ CONFIG_ENV = "SERATO_LIBRARY_CONFIG_DIR"
 LOG_ENV = "SERATO_LIBRARY_LOG_DIR"
 SETTINGS_NAME = "settings.json"
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "layout", "telemetry_consent", "window", "wizard_complete")
-WINDOW_FIELDS = ("x", "y", "width", "height")
+SETTINGS_KEYS = ("install_id", "telemetry_consent", "window", "wizard_complete", "rekordbox", "layout")
 LAYOUT_FIELDS = ("track_list_width",)
 # The page clamps the track list to the sheet it sits in. These bounds only
 # keep a hand-edited file from storing a width no screen could show.
 TRACK_LIST_MIN_WIDTH = 240
 TRACK_LIST_MAX_WIDTH = 8192
+REKORDBOX_KEYS = ("hot_loops", "memory_cues", "key_notation")
+# The same three words rekordbox.py accepts for --key.
+REKORDBOX_KEY_NOTATIONS = ("asis", "camelot", "classical")
+WINDOW_FIELDS = ("x", "y", "width", "height")
 # The desktop window refuses a smaller frame. Origins may be negative
 # when a monitor sits left of or above the primary screen.
 WINDOW_MIN_WIDTH = 640
@@ -48,6 +52,43 @@ _WINDOW_LIMITS = (
 _UUID = uuid.UUID
 _settings_lock = threading.RLock()
 logger = logging.getLogger("serato.library.config")
+
+
+@dataclass(frozen=True)
+class RekordboxSettings:
+    """The Rekordbox export bar.
+
+    Attributes:
+        hot_loops: True puts a saved loop on its own free hot-cue pad.
+        memory_cues: True also writes each hot cue as a memory cue.
+        key_notation: ``asis``, ``camelot``, or ``classical``.
+    """
+
+    hot_loops: bool
+    memory_cues: bool
+    key_notation: str
+
+    def as_json(self) -> dict[str, object]:
+        """Return the three export fields.
+
+        Returns:
+            ``hot_loops``, ``memory_cues``, and ``key_notation``. ``False``
+            is written as false.
+        """
+        return {
+            "hot_loops": self.hot_loops,
+            "memory_cues": self.memory_cues,
+            "key_notation": self.key_notation,
+        }
+
+
+def default_rekordbox() -> RekordboxSettings:
+    """Return the export bar the page shows before a choice is saved.
+
+    Returns:
+        Hot loops off, memory cues on, and the key left as stored.
+    """
+    return RekordboxSettings(hot_loops=False, memory_cues=True, key_notation="asis")
 
 
 @dataclass(frozen=True)
@@ -84,11 +125,12 @@ class WindowGeometry:
 
 @dataclass(frozen=True)
 class Settings:
-    """The sharing choice, the install id, the window frame, and setup.
+    """The sharing choice, the install id, the window frame, setup, and the export bar.
 
     Attributes:
         install_id: Random UUID for this install, or None until one is saved.
         telemetry_consent: True, False, or None when the person has not chosen.
+        rekordbox: Export bar. Defaults apply when the file has no section.
         window: Last saved frame, or None before the window has been placed.
         wizard_complete: True after setup finishes. False is unfinished,
             including a file written before this key existed.
@@ -98,6 +140,7 @@ class Settings:
 
     install_id: str | None
     telemetry_consent: bool | None
+    rekordbox: RekordboxSettings = field(default_factory=default_rekordbox)
     window: WindowGeometry | None = None
     wizard_complete: bool = False
     track_list_width: int | None = None
@@ -108,14 +151,14 @@ class Settings:
         Returns:
             The completed telemetry pair when both fields are set, the
             setup flag with that pair, the window frame when one has been
-            saved, and the layout when a pane width has been saved. A window
-            or a layout may be stored before the sharing choice.
+            saved, the export bar in full, and the layout when a pane width
+            has been saved. A window, the export bar, or the layout may be
+            stored before the sharing choice.
 
         Raises:
-            ValueError: If the install id and the choice disagree, if
-                ``wizard_complete`` is not a boolean, or if there is
-                nothing to store. A partial telemetry pair would stick
-                on the next load and hide the prompt.
+            ValueError: If the install id and the choice disagree, or if
+                ``wizard_complete`` is not a boolean. A partial telemetry
+                pair would stick on the next load and hide the prompt.
         """
         has_id = self.install_id is not None
         has_consent = isinstance(self.telemetry_consent, bool)
@@ -125,9 +168,7 @@ class Settings:
             raise ValueError("wizard_complete must be a boolean.")
         if self.track_list_width is not None:
             _check_track_list_width(self.track_list_width)
-        if not has_id and self.window is None and self.track_list_width is None:
-            raise ValueError("Refusing to write an empty settings file.")
-        body: dict[str, object] = {}
+        body: dict[str, object] = {"rekordbox": self.rekordbox.as_json()}
         if has_id:
             body["install_id"] = self.install_id
             body["telemetry_consent"] = self.telemetry_consent
@@ -399,13 +440,111 @@ def _parse(payload: object) -> Settings:
             wizard_complete = raw_wizard
         else:
             logger.warning("Config key 'wizard_complete' has wrong type — ignored")
+    if "rekordbox" not in payload:
+        rekordbox = default_rekordbox()
+    else:
+        rekordbox = _parse_rekordbox(payload.get("rekordbox"))
     return Settings(
         install_id=install_id,
         telemetry_consent=consent,
         window=window,
         wizard_complete=wizard_complete,
+        rekordbox=rekordbox,
         track_list_width=track_list_width,
     )
+
+def _parse_bool(value: object, dotted: str, default: bool) -> bool:
+    """Return a stored boolean, or the default when the type is wrong.
+
+    Args:
+        value: Candidate from the settings file.
+        dotted: Full key, such as ``rekordbox.hot_loops``.
+        default: Value used when ``value`` is not a boolean. ``False`` is
+            a stored choice and is not replaced by the default.
+
+    Returns:
+        The boolean, or ``default`` after a warning.
+    """
+    if isinstance(value, bool):
+        return value
+    logger.warning("Config key %r has wrong type — ignored", dotted)
+    return default
+
+
+def _parse_rekordbox(value: object) -> RekordboxSettings:
+    """Validate the export section.
+
+    Args:
+        value: The ``rekordbox`` member of the settings file.
+
+    Returns:
+        The saved fields. A missing field keeps its default. An unknown
+        field and a wrong type are dropped. ``False`` is kept.
+    """
+    defaults = default_rekordbox()
+    if not isinstance(value, dict):
+        logger.warning("Config key 'rekordbox' must be a mapping — ignored")
+        return defaults
+    for key in value:
+        if key not in REKORDBOX_KEYS:
+            logger.warning("Unknown config key %r — ignored", f"rekordbox.{key}")
+    hot_loops = defaults.hot_loops
+    memory_cues = defaults.memory_cues
+    key_notation = defaults.key_notation
+    if "hot_loops" in value:
+        hot_loops = _parse_bool(value.get("hot_loops"), "rekordbox.hot_loops", defaults.hot_loops)
+    if "memory_cues" in value:
+        memory_cues = _parse_bool(value.get("memory_cues"), "rekordbox.memory_cues", defaults.memory_cues)
+    if "key_notation" in value:
+        raw_key = value.get("key_notation")
+        if isinstance(raw_key, str) and raw_key in REKORDBOX_KEY_NOTATIONS:
+            key_notation = raw_key
+        else:
+            logger.warning("Config key 'rekordbox.key_notation' has wrong type — ignored")
+    return RekordboxSettings(
+        hot_loops=hot_loops,
+        memory_cues=memory_cues,
+        key_notation=key_notation,
+    )
+
+
+def rekordbox_changes(section: object) -> dict[str, bool | str]:
+    """Validate one POST body for the export bar.
+
+    Args:
+        section: The ``rekordbox`` object from the request. It must be a
+            mapping with at least one known field.
+
+    Returns:
+        The fields to merge. Only keys present in ``section`` are included.
+
+    Raises:
+        ValueError: If the section is not a mapping, is empty, names an
+            unknown field, or gives a field the wrong type. An integer is
+            not a boolean.
+    """
+    if not isinstance(section, dict) or not section:
+        raise ValueError("rekordbox must be an object with at least one field.")
+    unknown = [key for key in section if key not in REKORDBOX_KEYS]
+    if unknown:
+        raise ValueError(f"Unknown config key 'rekordbox.{unknown[0]}'.")
+    changes: dict[str, bool | str] = {}
+    if "hot_loops" in section:
+        raw_loops = section.get("hot_loops")
+        if not isinstance(raw_loops, bool):
+            raise ValueError("rekordbox.hot_loops must be a boolean.")
+        changes["hot_loops"] = raw_loops
+    if "memory_cues" in section:
+        raw_memory = section.get("memory_cues")
+        if not isinstance(raw_memory, bool):
+            raise ValueError("rekordbox.memory_cues must be a boolean.")
+        changes["memory_cues"] = raw_memory
+    if "key_notation" in section:
+        raw_key = section.get("key_notation")
+        if not isinstance(raw_key, str) or raw_key not in REKORDBOX_KEY_NOTATIONS:
+            raise ValueError("rekordbox.key_notation must be asis, camelot, or classical.")
+        changes["key_notation"] = raw_key
+    return changes
 
 
 def load_settings() -> Settings:
@@ -454,13 +593,15 @@ def _retire_unreadable(path: Path) -> None:
 
 
 def save_settings(settings: Settings) -> None:
-    """Atomically replace the settings file with a complete object.
+    """Atomically replace the settings file.
 
     Args:
-        settings: Choice and install id. Both fields must be set.
+        settings: Sharing choice, install id, and export bar. A missing
+            sharing choice is omitted. The export bar is always written
+            in full.
 
     Raises:
-        ValueError: If the object is missing the id or the boolean choice.
+        ValueError: If the install id and the sharing choice disagree.
         OSError: If the directory or the file cannot be written.
 
     The write is a temp file in the same directory followed by replace, so
@@ -502,6 +643,7 @@ def set_telemetry_consent(value: bool) -> Settings:
             telemetry_consent=value,
             window=current.window,
             wizard_complete=current.wizard_complete is True,
+            rekordbox=current.rekordbox,
             track_list_width=current.track_list_width,
         )
         save_settings(updated)
@@ -541,6 +683,7 @@ def save_window_geometry(geometry: WindowGeometry) -> Settings:
             telemetry_consent=consent,
             window=geometry,
             wizard_complete=current.wizard_complete is True,
+            rekordbox=current.rekordbox,
             track_list_width=current.track_list_width,
         )
         save_settings(updated)
@@ -576,6 +719,7 @@ def set_wizard_complete(value: bool) -> Settings:
                 telemetry_consent=current.telemetry_consent,
                 window=current.window,
                 wizard_complete=False,
+                rekordbox=current.rekordbox,
                 track_list_width=current.track_list_width,
             )
         updated = Settings(
@@ -583,6 +727,65 @@ def set_wizard_complete(value: bool) -> Settings:
             telemetry_consent=current.telemetry_consent,
             window=current.window,
             wizard_complete=value,
+            rekordbox=current.rekordbox,
+            track_list_width=current.track_list_width,
+        )
+        save_settings(updated)
+        return updated
+
+
+def update_rekordbox(
+    *,
+    hot_loops: bool | None = None,
+    memory_cues: bool | None = None,
+    key_notation: str | None = None,
+) -> Settings:
+    """Merge export-bar fields into the settings file.
+
+    Args:
+        hot_loops: New hot-loops choice. None leaves the saved value.
+        memory_cues: New memory-cues choice. None leaves the saved value.
+            ``False`` is stored.
+        key_notation: ``asis``, ``camelot``, or ``classical``. None leaves
+            the saved value.
+
+    Returns:
+        The settings that were written. A sharing choice that was already
+        saved is kept, and so are the window frame and the setup flag.
+        Saving the export bar does not invent a sharing choice.
+
+    Raises:
+        ValueError: If a field has the wrong type, or no field was given.
+        OSError: If the settings file cannot be written.
+    """
+    if hot_loops is not None and not isinstance(hot_loops, bool):
+        raise ValueError("rekordbox.hot_loops must be a boolean.")
+    if memory_cues is not None and not isinstance(memory_cues, bool):
+        raise ValueError("rekordbox.memory_cues must be a boolean.")
+    if key_notation is not None and (
+        not isinstance(key_notation, str) or key_notation not in REKORDBOX_KEY_NOTATIONS
+    ):
+        raise ValueError("rekordbox.key_notation must be asis, camelot, or classical.")
+    if hot_loops is None and memory_cues is None and key_notation is None:
+        raise ValueError("rekordbox has no fields to save.")
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id
+        consent = current.telemetry_consent
+        if not isinstance(consent, bool) or install_id is None:
+            install_id = None
+            consent = None
+        box = current.rekordbox
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=consent,
+            window=current.window,
+            wizard_complete=current.wizard_complete is True,
+            rekordbox=RekordboxSettings(
+                hot_loops=box.hot_loops if hot_loops is None else hot_loops,
+                memory_cues=box.memory_cues if memory_cues is None else memory_cues,
+                key_notation=box.key_notation if key_notation is None else key_notation,
+            ),
             track_list_width=current.track_list_width,
         )
         save_settings(updated)
@@ -596,15 +799,15 @@ def set_track_list_width(value: int | None) -> Settings:
         value: Width in CSS pixels, or None to forget the saved width.
 
     Returns:
-        The settings after the change. Clearing a width when nothing else
-        is stored removes nothing and writes nothing.
+        The settings that were written.
 
     Raises:
         ValueError: If ``value`` is not None and not an integer in range.
         OSError: If the settings file cannot be written.
 
     A sharing choice is kept only when the install id and the boolean are
-    both stored, as in :func:`save_window_geometry`.
+    both stored, as in :func:`save_window_geometry`. The window frame, the
+    setup flag, and the export bar are kept.
     """
     if value is not None:
         _check_track_list_width(value)
@@ -620,13 +823,8 @@ def set_track_list_width(value: int | None) -> Settings:
             telemetry_consent=consent,
             window=current.window,
             wizard_complete=current.wizard_complete is True,
+            rekordbox=current.rekordbox,
             track_list_width=value,
         )
-        if install_id is None and current.window is None and value is None:
-            path = settings_path()
-            if path.is_file():
-                _retire_unreadable(path)
-                path.unlink(missing_ok=True)
-            return updated
         save_settings(updated)
         return updated

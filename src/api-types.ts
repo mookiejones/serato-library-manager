@@ -297,6 +297,12 @@ export interface RelatedPayload {
   track?: { asset_id?: number; in_library?: boolean };
 }
 
+export interface RekordboxSettings {
+  hot_loops?: boolean;
+  memory_cues?: boolean;
+  key_notation?: string;
+}
+
 export interface SettingsPayload {
   telemetry_consent?: boolean | null;
   telemetry_configured?: boolean;
@@ -304,6 +310,7 @@ export interface SettingsPayload {
   wizard_complete?: boolean;
   layout?: { track_list_width: number | null };
   app_version?: string;
+  rekordbox?: RekordboxSettings;
   error?: string;
 }
 

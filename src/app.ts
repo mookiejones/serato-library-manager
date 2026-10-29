@@ -3,13 +3,14 @@
  *
  * Wires the screen and starts the first load. The view modules do not
  * fetch when they are imported. This file attaches listeners, then calls
- * loadLibrary and loadPrivacy. server.py uses port 8765. The desktop app
- * uses a free port, and this page calls the same origin. Snapshot UI is
- * src/restore.ts. This file does not open master.sqlite itself.
+ * loadLibrary. Settings load when the dialogs wire. server.py uses port
+ * 8765. The desktop app uses a free port, and this page calls the same
+ * origin. Snapshot UI is src/restore.ts. This file does not open
+ * master.sqlite itself.
  */
 
 import { failureOf } from "./api";
-import { loadPrivacy, wireDialogs } from "./dialogs";
+import { wireDialogs } from "./dialogs";
 import { el } from "./dom";
 import { wireLayout } from "./layout";
 import {
@@ -22,7 +23,7 @@ import {
   takeSnapshot,
 } from "./restore";
 import { state } from "./state";
-import { loadLibrary, setNotice, showFailure, wireLibrary } from "./views";
+import { loadLibrary, showFailure, wireLibrary } from "./views";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
 /**
@@ -65,4 +66,3 @@ wireSnapshots();
 wireLayout();
 bindLibraryReload(loadLibrary);
 loadLibrary().catch(showFailure);
-loadPrivacy().catch((error) => setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent."));
