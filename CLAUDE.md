@@ -83,7 +83,7 @@ npm run build
   - `analyze Python` (CodeQL)
 - Do not force-push to `main`.
 - Admins can bypass these rules, but should not.
-- Agents never merge, tag, or publish a release. A merge needs the `mookiejones-qa` approval on the latest commit plus an explicit go-ahead from Charles (@mookiejones). Charles (@mookiejones) does merges, tags and releases.
+- The team may merge a PR once `mookiejones-qa` has approved its latest commit and all required checks are green (the six listed: Ubuntu + Windows tests, frontend, and `analyze Python` (CodeQL)). Agents never tag or publish a public release without Charles (@mookiejones)'s explicit OK.
 - QA reviews every pull request and blocks any pull request lacking tests for its changes.
 - Follow [Library safety](#library-safety) and [strict TypeScript](#strict-typescript).
 
