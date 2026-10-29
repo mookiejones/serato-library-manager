@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
 
 import app_config
@@ -265,7 +264,7 @@ def _status_for_wizard(master: Path) -> dict[str, object]:
         is running, so the wizard and the sidebar do not disagree.
     """
     try:
-        return library.status(master)
+        return library.status(master, from_copy=True)
     except (library.LibraryError, sqlite3.Error, OSError):
         running = snapshots.serato_dj_running()
         return {
@@ -401,7 +400,7 @@ def _track_count(path: Path) -> int | None:
         still says the library was found.
     """
     try:
-        with closing(library.read_conn(path)) as conn:
+        with library.copied_read_conn(path) as conn:
             row = conn.execute(
                 """
                 SELECT COUNT(*) FROM asset AS a

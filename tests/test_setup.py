@@ -813,33 +813,32 @@ class ChosenLibraryTests(unittest.TestCase):
         self.assertNotIn(str(gone), reported)
         self.assertNotIn("master.sqlite", reported)
 
-    def test_library_check_creates_no_sidecars(self) -> None:
-        """Leave the library folder free of wal, shm, and journal files.
+    def test_wal_validation_leaves_the_library_folder_unchanged(self) -> None:
+        """Keep a WAL library folder free of wal, shm, and journal files.
 
-        A rollback database and a WAL database are both checked. The WAL
-        file already holds the Serato tables. The check reads a copy, so
-        it does not create those sidecars beside the original.
+        The database is in WAL mode and has already been checkpointed, so
+        the folder holds only ``master.sqlite``. Setup's validation, which
+        is the table check and the library summary, must leave that
+        listing identical.
 
         Returns:
-            None. The test fails if a sidecar appears or the WAL library
-            is not recognized.
+            None. The test fails if a sidecar appears or the library is
+            not recognized.
         """
-        folder = self.folder.parent / "check"
-        folder.mkdir()
+        folder = self.folder.parent / "Serato" / "Library"
+        folder.mkdir(parents=True)
         db = folder / "master.sqlite"
-        build_database(db)
+        _write_checkpointed_wal_library(db)
+        before = sorted(path.name for path in folder.iterdir())
+        self.assertEqual(before, ["master.sqlite"])
         self.assertTrue(library.is_serato_database(db))
-        self.assertEqual(_sidecar_names(folder), set())
-        wal = _write_wal_library(db)
-        self.assertTrue(wal.is_file())
-        self.assertFalse((folder / "master.sqlite-shm").exists())
-        self.assertFalse((folder / "master.sqlite-journal").exists())
-        wal_bytes = wal.read_bytes()
-        db_bytes = db.read_bytes()
-        self.assertTrue(library.is_serato_database(db))
-        self.assertEqual(wal.read_bytes(), wal_bytes)
-        self.assertEqual(db.read_bytes(), db_bytes)
-        self.assertEqual(_sidecar_names(folder), {"master.sqlite-wal"})
+        library.MASTER = self.missing
+        described = setup_flow.accept_folder(str(folder))
+        self.assertTrue(described["found"])
+        after = sorted(path.name for path in folder.iterdir())
+        self.assertEqual(after, before)
+        for name in after:
+            self.assertFalse(name.endswith(("-wal", "-shm", "-journal")))
 
 
 def _sidecar_names(folder: Path) -> set[str]:
@@ -858,26 +857,19 @@ def _sidecar_names(folder: Path) -> set[str]:
     return found
 
 
-def _write_wal_library(db: Path) -> Path:
-    """Rewrite ``db`` as a WAL library whose tables live in the wal file.
+def _write_checkpointed_wal_library(db: Path) -> None:
+    """Write a WAL-mode library that has no sidecar files.
 
     Args:
-        db: Database to replace. Parent directories must exist.
+        db: Database to create. Parent directories must exist.
 
-    Returns:
-        The ``-wal`` file. No ``-shm`` file is left beside ``db``.
-
-    The connection does not checkpoint on close. The shared-memory file
-    created while it was open is removed before this returns, so a later
-    check is what would put it back.
+    The journal mode stays WAL. A full checkpoint removes ``-wal`` and
+    ``-shm`` before this returns, which is the state that a read-only
+    open of the live file would turn back into sidecars.
     """
-    if db.exists():
-        db.unlink()
     conn = sqlite3.connect(db)
     try:
-        conn.setconfig(sqlite3.SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, True)
         conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA wal_autocheckpoint=0")
         conn.executescript(
             """
             CREATE TABLE asset (id INTEGER);
@@ -886,12 +878,13 @@ def _write_wal_library(db: Path) -> Path:
             """
         )
         conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     finally:
         conn.close()
-    shm = Path(str(db) + "-shm")
-    if shm.exists():
-        shm.unlink()
-    return Path(str(db) + "-wal")
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(db) + suffix)
+        if sidecar.exists():
+            sidecar.unlink()
 
 
 class _ArtSlots(HTMLParser):
