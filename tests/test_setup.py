@@ -13,6 +13,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from html.parser import HTMLParser
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -415,12 +416,16 @@ class MissingLibraryServerTests(unittest.TestCase):
                     status, page = _request_text(base, "/")
                     self.assertEqual(status, 200)
                     self.assertIn("Get started", page)
-                    self.assertIn('data-art-slot="welcome"', page)
-                    self.assertIn('data-art-slot="done"', page)
-                    self.assertIn('alt=""', page)
-                    self.assertIn('aria-hidden="true"', page)
-                    self.assertIn("var(--illus-primary, currentColor)", page)
                     self.assertNotIn("Art placeholder", page)
+                    slots = _art_slots(page)
+                    self.assertEqual(
+                        list(slots),
+                        ["welcome", "library", "snapshot", "consent", "done"],
+                    )
+                    for name, svg in slots.items():
+                        self.assertEqual(svg.get("aria-hidden"), "true", name)
+                        self.assertEqual(svg.get("focusable"), "false", name)
+                        self.assertNotIn("alt", svg, name)
                     status, payload = _request(base, "/api/setup")
                     self.assertEqual(status, 200)
                     assert isinstance(payload, dict)
@@ -443,6 +448,56 @@ class MissingLibraryServerTests(unittest.TestCase):
                     app_log.close_files()
         finally:
             tmp.cleanup()
+
+
+class _ArtSlots(HTMLParser):
+    """Collect the SVG opening tag inside each setup illustration slot."""
+
+    def __init__(self) -> None:
+        """Start with no slot open.
+
+        Returns:
+            None.
+        """
+        super().__init__()
+        self.found: dict[str, dict[str, str]] = {}
+        self._slot: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Remember a slot, and the SVG that sits inside it.
+
+        Args:
+            tag: HTML tag name.
+            attrs: Attributes on that tag.
+        """
+        values = {name: value or "" for name, value in attrs}
+        if tag == "div" and "data-art-slot" in values:
+            self._slot = values["data-art-slot"]
+        elif tag == "svg" and self._slot is not None:
+            self.found[self._slot] = values
+
+    def handle_endtag(self, tag: str) -> None:
+        """Close the current slot when its div ends.
+
+        Args:
+            tag: HTML tag name.
+        """
+        if tag == "div":
+            self._slot = None
+
+
+def _art_slots(page: str) -> dict[str, dict[str, str]]:
+    """Return each setup illustration slot and the SVG attributes on it.
+
+    Args:
+        page: HTML of the library page.
+
+    Returns:
+        Slot name to the attributes of the SVG in that slot, in page order.
+    """
+    parser = _ArtSlots()
+    parser.feed(page)
+    return parser.found
 
 
 def _request_text(base: str, path: str) -> tuple[int, str]:
