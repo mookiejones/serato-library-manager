@@ -522,7 +522,12 @@ def _safe_folder_error(message: str) -> str:
         The message when it is one of the short folder sentences.
         A generic sentence when the text contains a path.
     """
-    if message in {"That folder could not be read.", "Shortcuts are left alone.", "That request is not valid."}:
+    if message in {
+        "That folder could not be read.",
+        "Shortcuts are left alone.",
+        "That request is not valid.",
+        "That folder is outside the music folders.",
+    }:
         return message
     return "That folder could not be read."
 
@@ -1564,7 +1569,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"space": space, "groups": groups, "count": len(groups)})
                 return
             if parsed.path == "/api/files":
-                self.send_json(files.list_directory(query_text(query, "path", "") or ""))
+                raw_elsewhere = query_text(query, "elsewhere", "") or ""
+                elsewhere = raw_elsewhere.lower() in {"1", "true", "yes"}
+                self.send_json(
+                    files.list_directory(query_text(query, "path", "") or "", elsewhere=elsewhere)
+                )
                 return
             if parsed.path == "/api/snapshots":
                 self._get_snapshots(query)

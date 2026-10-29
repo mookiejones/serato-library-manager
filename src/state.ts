@@ -3,12 +3,15 @@
  *
  * The server remains the source of truth. This object is the last payload
  * plus the view the user has open. ROW matches --row in app.css.
+ * FILE_ROW matches --file-row.
  */
 
 import type {
   Crate,
   DuplicateGroup,
+  FileCrumb,
   FileEntry,
+  FileRoot,
   HistorySession,
   PendingUndo,
   SeratoStatus,
@@ -19,6 +22,7 @@ import type {
 // Row height in pixels. It matches --row in app.css. The painter divides
 // the scroll offset by this value, so the two must stay equal.
 export const ROW = 36;
+export const FILE_ROW = 44;
 
 export const COLORS: Array<[number, string]> = [
   [0xffffff, "None"],
@@ -81,6 +85,12 @@ export interface PageState {
   filesError: string;
   filesMessage: string;
   filesTruncated: boolean;
+  filesAtRoots: boolean;
+  filesRoots: FileRoot[];
+  filesRoot: FileRoot | null;
+  filesBreadcrumb: FileCrumb[];
+  filesElsewhere: boolean;
+  filesActive: number;
   snapshots: SnapshotInfo[];
   snapshotLoading: boolean;
   snapshotError: string;
@@ -131,6 +141,12 @@ export const state: PageState = {
   filesError: "",
   filesMessage: "",
   filesTruncated: false,
+  filesAtRoots: false,
+  filesRoots: [],
+  filesRoot: null,
+  filesBreadcrumb: [],
+  filesElsewhere: false,
+  filesActive: 0,
   snapshots: [],
   snapshotLoading: false,
   snapshotError: "",

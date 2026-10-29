@@ -349,7 +349,7 @@ class BackupTests(unittest.TestCase):
             self.assertFalse(library.is_complete(leftover))
             self.assertEqual(library.backup_status(leftover), "incomplete")
             self.assertEqual(library.list_backups(parent), [good])
-            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            names = [item["name"] for item in files.list_directory(str(parent), elsewhere=True)["entries"]]
             self.assertNotIn(leftover.name, names)
             self.assertIn(good.name, names)
 
@@ -379,7 +379,7 @@ class BackupTests(unittest.TestCase):
             self.assertFalse(library.is_complete(fresh))
             self.assertFalse(library.is_complete(stale))
             self.assertEqual(library.list_backups(parent), [])
-            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            names = [item["name"] for item in files.list_directory(str(parent), elsewhere=True)["entries"]]
             self.assertNotIn(fresh.name, names)
             self.assertNotIn(stale.name, names)
             library.MASTER = temp.db
@@ -928,7 +928,7 @@ class BackupTests(unittest.TestCase):
             library._write_complete_marker(snapshots)
             self.assertTrue(library.is_complete(snapshots))
             self.assertEqual(library.list_backups(parent), [good, snapshots])
-            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            names = [item["name"] for item in files.list_directory(str(parent), elsewhere=True)["entries"]]
             self.assertIn(good.name, names)
             self.assertIn(snapshots.name, names)
 
@@ -981,7 +981,7 @@ class BackupTests(unittest.TestCase):
             self.assertFalse(library.is_complete(leftover))
             self.assertTrue(library.is_complete(good))
             self.assertEqual(library.list_backups(parent), [good])
-            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            names = [item["name"] for item in files.list_directory(str(parent), elsewhere=True)["entries"]]
             self.assertIn(good.name, names)
             self.assertNotIn(leftover.name, names)
             self.assertIn(journal.name, names)
@@ -1035,7 +1035,7 @@ class BackupTests(unittest.TestCase):
             self.assertTrue((leftover / "master.sqlite").is_file())
             self.assertFalse(library.is_complete(leftover))
             self.assertEqual(library.list_backups(parent), [good])
-            names = [item["name"] for item in files.list_directory(str(parent))["entries"]]
+            names = [item["name"] for item in files.list_directory(str(parent), elsewhere=True)["entries"]]
             self.assertIn(good.name, names)
             self.assertNotIn(leftover.name, names)
             self.assertIn(str(leftover), "\n".join(recorded.output))

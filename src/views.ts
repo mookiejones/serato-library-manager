@@ -12,7 +12,9 @@ import type {
   Crate,
   DuplicatePayload,
   ErrorBody,
+  FileCrumb,
   FileEntry,
+  FileRoot,
   FilesPayload,
   HistoryPayload,
   LibraryPayload,
@@ -25,7 +27,7 @@ import { bridge } from "./bridge";
 import { el } from "./dom";
 import { clockLabel, colorHex, compare, durationLabel, sizeLabel } from "./format";
 import { failSnapshots, loadSnapshots } from "./restore";
-import { COLOR_NAMES, COLORS, state } from "./state";
+import { COLOR_NAMES, COLORS, FILE_ROW, state } from "./state";
 import { paintRows } from "./virtual-scroll";
 
 /**
@@ -549,6 +551,12 @@ export function renderShell() {
   el("crate-delete").disabled = !state.writable || !crateChosen;
   syncMergeButton();
   if (filesMode) {
+    if (state.filesAtRoots) {
+      el("crate-foot").textContent = state.filesLoading
+        ? "Reading music folders"
+        : `${state.filesRoots.length.toLocaleString()} music folders`;
+      return;
+    }
     const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
     el("crate-foot").textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
     return;
@@ -2200,7 +2208,8 @@ export function setMode(mode: string) {
   }
   if (mode === "files") {
     state.filesLoading = true;
-    loadFolder(state.filesPath || "").catch((error) => failFiles(error));
+    const path = state.filesAtRoots ? "" : (state.filesPath || "");
+    loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error) => failFiles(error));
   }
   if (mode === "snapshots") {
     loadSnapshots().catch((error) => failSnapshots(error));
@@ -2281,34 +2290,66 @@ export function failFiles(error: unknown) {
 }
 
 /**
- * Load one folder from GET /api/files.
+ * Folder request counter.
  *
- * An empty path asks for the home directory. Selection is cleared because
- * the previous paths are no longer the rows on screen. A success message
- * can be kept when the reload follows a save.
+ * A slow reply must not paint a folder the user has already left.
+ */
+let filesRequest = 0;
+
+const FILE_OVERSCAN = 8;
+
+/**
+ * Load music roots, or one folder, from GET /api/files.
  *
- * @param {string} path Folder to open.
- * @param {{keepMessage?: boolean}} [options] Pass keepMessage to retain the last save note.
+ * An empty path asks for the music folders. ``elsewhere`` asks to browse
+ * outside those folders. Selection is cleared because the previous paths
+ * are no longer the rows on screen. A success message can be kept when
+ * the reload follows a save.
+ *
+ * @param {string} path Folder to open. Empty selects the music roots.
+ * @param {{keepMessage?: boolean, elsewhere?: boolean}} [options] keepMessage retains the last save note. elsewhere lists outside the roots.
  * @returns {Promise<void>}
  */
-export async function loadFolder(path: string, options: { keepMessage?: boolean } = {}) {
+export async function loadFolder(path: string, options: { keepMessage?: boolean; elsewhere?: boolean } = {}) {
+  const elsewhere = options.elsewhere === true;
+  const atRoots = path === "" && !elsewhere;
+  const token = ++filesRequest;
   state.filesLoading = true;
   state.filesError = "";
   if (!options.keepMessage) state.filesMessage = "";
   state.filesSelected = new Set();
+  state.filesActive = 0;
+  state.filesAtRoots = atRoots;
+  state.filesElsewhere = elsewhere;
+  if (atRoots) {
+    state.filesPath = "";
+    state.filesParent = null;
+    state.filesEntries = [];
+    state.filesBreadcrumb = [];
+    state.filesRoot = null;
+  }
   renderFiles();
-  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  if (elsewhere) params.set("elsewhere", "1");
+  const query = params.size ? `?${params.toString()}` : "";
   const response = await fetch(`/api/files${query}`);
   const payload = await readJSONOr<FilesPayload>(response, {});
+  if (token !== filesRequest) return;
   if (!response.ok) throw new Error(payload.error || "That folder could not be read.");
   state.filesPath = payload.path || "";
-  state.filesParent = payload.parent || null;
+  state.filesParent = typeof payload.parent === "string" && payload.parent ? payload.parent : null;
   state.filesEntries = Array.isArray(payload.entries) ? payload.entries : [];
+  if (Array.isArray(payload.roots)) state.filesRoots = payload.roots.filter(isFileRoot);
+  state.filesRoot = isFileRoot(payload.root) ? payload.root : null;
+  state.filesBreadcrumb = Array.isArray(payload.breadcrumb) ? payload.breadcrumb.filter(isFileCrumb) : [];
+  state.filesElsewhere = Boolean(payload.elsewhere);
+  state.filesAtRoots = !state.filesPath && !state.filesElsewhere;
   state.filesTruncated = Boolean(payload.truncated);
   state.filesLoading = false;
+  el("files-list").scrollTop = 0;
   if (payload.serato) applyStatus(payload.serato);
-  else renderFiles();
-  if (payload.serato) renderFiles();
+  renderFiles();
 }
 
 /**
@@ -2327,35 +2368,21 @@ export function renderFiles() {
   pick.hidden = !state.filesPick;
   moveHere.hidden = !state.filesPick;
   pickCancel.hidden = !state.filesPick;
-  el("files-path").textContent = state.filesPath || "Home";
+  renderBreadcrumb();
+  const elsewhere = el("files-elsewhere");
+  elsewhere.textContent = state.filesElsewhere ? "Music folders" : "Browse elsewhere…";
   el("files-up").disabled = !state.filesParent || state.filesLoading;
   const notes = [];
-  if (state.filesLoading) notes.push("Reading this folder.");
+  if (state.filesLoading) notes.push(state.filesAtRoots ? "Reading music folders." : "Reading this folder.");
   if (state.filesError) notes.push(state.filesError);
   if (state.filesMessage) notes.push(state.filesMessage);
   if (state.filesTruncated) notes.push("Some files are not listed.");
   el("files-status").textContent = notes.join(" ");
-  el("files-list").setAttribute("aria-busy", String(state.filesLoading));
-  el("files-list").replaceChildren();
-  if (state.filesLoading && !state.filesEntries.length) {
-    const loading = document.createElement("p");
-    loading.className = "files-empty";
-    loading.textContent = "Reading this folder.";
-    el("files-list").append(loading);
-  } else if (!state.filesEntries.length) {
-    const empty = document.createElement("p");
-    empty.className = "files-empty";
-    empty.textContent = state.filesError || "This folder is empty.";
-    el("files-list").append(empty);
-  } else {
-    const rank: Record<string, number> = { dir: 0, file: 1, link: 2 };
-    const entries = [...state.filesEntries].sort((left, right) => {
-      return (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3) || left.name.localeCompare(right.name);
-    });
-    for (const entry of entries) el("files-list").append(fileRow(entry));
-  }
+  const scroll = el("files-list").scrollTop;
+  paintFileWindow();
+  if (el("files-list").scrollTop !== scroll) el("files-list").scrollTop = scroll;
   const selected = selectedFiles();
-  const locked = !state.writable || state.filesLoading;
+  const locked = !state.writable || state.filesLoading || state.filesAtRoots;
   el("files-rename").disabled = locked || selected.length !== 1;
   el("files-move").disabled = locked || !selected.length || Boolean(state.filesPick);
   el("files-move-folder").disabled = locked || !state.filesPath || Boolean(state.filesPick);
@@ -2366,30 +2393,324 @@ export function renderFiles() {
 }
 
 /**
+ * Paint the folder path, starting at the music-root name.
+ *
+ * The current folder is text. Earlier crumbs are buttons. There is no
+ * crumb above the root unless the browse is elsewhere.
+ *
+ * @returns {void}
+ */
+function renderBreadcrumb(): void {
+  const nav = el("files-path");
+  nav.replaceChildren();
+  const list = document.createElement("ol");
+  list.className = "files-crumbs";
+  const crumbs = visibleCrumbs();
+  crumbs.forEach((crumb, index) => {
+    const item = document.createElement("li");
+    const last = index === crumbs.length - 1;
+    if (!last && crumb.path) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "files-crumb";
+      button.textContent = crumb.name;
+      button.addEventListener("click", () => {
+        loadFolder(crumb.path, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
+      });
+      item.append(button);
+    } else {
+      const current = document.createElement("span");
+      current.className = "files-crumb";
+      current.setAttribute("aria-current", "page");
+      current.textContent = crumb.name;
+      item.append(current);
+    }
+    if (!last) {
+      const sep = document.createElement("span");
+      sep.className = "files-sep";
+      sep.setAttribute("aria-hidden", "true");
+      sep.textContent = "/";
+      item.append(sep);
+    }
+    list.append(item);
+  });
+  nav.append(list);
+}
+
+/**
+ * Return the crumbs for the open location.
+ *
+ * @returns {FileCrumb[]} Path crumbs. The root list is one crumb.
+ */
+function visibleCrumbs(): FileCrumb[] {
+  if (state.filesBreadcrumb.length) return state.filesBreadcrumb;
+  if (state.filesAtRoots) return [{ name: "Music folders", path: "" }];
+  if (state.filesPath) return [{ name: state.filesPath, path: state.filesPath }];
+  return [{ name: "Music folders", path: "" }];
+}
+
+/**
+ * Return the rows in the order they are shown.
+ *
+ * Roots keep the order from the server. A folder lists directories, then
+ * files, then shortcuts.
+ *
+ * @returns {FileEntry[]} Rows for the virtual window.
+ */
+function browserRows(): FileEntry[] {
+  if (state.filesAtRoots) {
+    return state.filesRoots.map((root) => ({
+      name: root.name,
+      path: root.path,
+      kind: root.kind === "drive" ? "drive" : "folder",
+    }));
+  }
+  const rank: Record<string, number> = { dir: 0, file: 1, link: 2 };
+  return [...state.filesEntries].sort((left, right) => {
+    return (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3)
+      || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
+/**
+ * Paint only the file rows inside the scroll window.
+ *
+ * Row height is FILE_ROW. Extra rows above and below the window keep a
+ * fast scroll from flashing empty space. The spacer is the full height,
+ * so the last row can be scrolled into view.
+ *
+ * @returns {void}
+ */
+function paintFileWindow(): void {
+  const list = el("files-list");
+  const rows = browserRows();
+  list.setAttribute("aria-busy", String(state.filesLoading));
+  list.setAttribute("aria-label", state.filesAtRoots ? "Music folders" : "Folder contents");
+  if (state.filesLoading && !rows.length) {
+    list.replaceChildren(fileNote(state.filesAtRoots ? "Reading music folders." : "Reading this folder."));
+    list.tabIndex = 0;
+    return;
+  }
+  if (state.filesError && !rows.length) {
+    list.replaceChildren(fileNote(state.filesError));
+    list.tabIndex = 0;
+    return;
+  }
+  if (state.filesAtRoots && !state.filesRoots.length) {
+    list.replaceChildren(rootsEmpty());
+    list.tabIndex = -1;
+    return;
+  }
+  if (!rows.length) {
+    list.replaceChildren(fileNote("This folder is empty."));
+    list.tabIndex = 0;
+    return;
+  }
+  list.tabIndex = -1;
+  if (state.filesActive >= rows.length) state.filesActive = rows.length - 1;
+  if (state.filesActive < 0) state.filesActive = 0;
+  const view = list.clientHeight || 600;
+  const maxScroll = Math.max(0, rows.length * FILE_ROW - view);
+  const scrollTop = Math.min(Math.max(0, list.scrollTop), maxScroll);
+  const start = Math.max(0, Math.floor(scrollTop / FILE_ROW) - FILE_OVERSCAN);
+  const end = Math.min(rows.length, Math.ceil((scrollTop + view) / FILE_ROW) + FILE_OVERSCAN);
+  const spacer = fileSpacer(list);
+  const windowEl = spacer.querySelector<HTMLDivElement>(".files-window");
+  if (!windowEl) return;
+  spacer.style.height = `${rows.length * FILE_ROW}px`;
+  windowEl.style.transform = `translateY(${start * FILE_ROW}px)`;
+  windowEl.replaceChildren();
+  for (let index = start; index < end; index += 1) {
+    const entry = rows[index];
+    if (entry) windowEl.append(fileRow(entry, index));
+  }
+  if (state.filesActive >= start && state.filesActive < end) {
+    list.setAttribute("aria-activedescendant", `files-item-${state.filesActive}`);
+  } else list.removeAttribute("aria-activedescendant");
+}
+
+/**
+ * Return the scroll spacer, creating it when the list is showing rows.
+ *
+ * @param {HTMLElement} list Files list element.
+ * @returns {HTMLDivElement} The spacer that holds the window.
+ */
+function fileSpacer(list: HTMLElement): HTMLDivElement {
+  const first = list.firstElementChild;
+  if (first instanceof HTMLDivElement && first.classList.contains("files-spacer") && list.childElementCount === 1) {
+    return first;
+  }
+  list.replaceChildren();
+  const spacer = document.createElement("div");
+  spacer.className = "files-spacer";
+  const windowEl = document.createElement("div");
+  windowEl.className = "files-window";
+  spacer.append(windowEl);
+  list.append(spacer);
+  return spacer;
+}
+
+/**
+ * Build a short status line inside the file list.
+ *
+ * @param {string} text Sentence to show.
+ * @returns {HTMLParagraphElement} The note.
+ */
+function fileNote(text: string): HTMLParagraphElement {
+  const note = document.createElement("p");
+  note.className = "files-empty";
+  note.textContent = text;
+  return note;
+}
+
+/**
+ * Build the empty state for a library with no music folders.
+ *
+ * One primary button opens setup. Browse elsewhere stays in the bar.
+ *
+ * @returns {HTMLDivElement} The empty state.
+ */
+function rootsEmpty(): HTMLDivElement {
+  const box = document.createElement("div");
+  box.className = "files-empty-state";
+  const heading = document.createElement("h2");
+  heading.textContent = "No music folders yet";
+  const copy = document.createElement("p");
+  copy.textContent = "Setup finds the folders Serato uses for your music.";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = "files-run-setup";
+  button.className = "files-primary";
+  button.textContent = "Run setup";
+  button.addEventListener("click", () => bridge.openSetup());
+  box.append(heading, copy, button);
+  return box;
+}
+
+/**
+ * Move the keyboard cursor to one row and keep that row on screen.
+ *
+ * @param {number} index Row index in browserRows.
+ * @returns {void}
+ */
+function focusFilesIndex(index: number): void {
+  const rows = browserRows();
+  if (!rows.length) return;
+  state.filesActive = Math.max(0, Math.min(rows.length - 1, index));
+  const list = el("files-list");
+  const view = list.clientHeight || 600;
+  const top = state.filesActive * FILE_ROW;
+  const maxScroll = Math.max(0, rows.length * FILE_ROW - view);
+  if (top < list.scrollTop) list.scrollTop = top;
+  if (top + FILE_ROW > list.scrollTop + view) list.scrollTop = Math.min(maxScroll, top + FILE_ROW - view);
+  paintFileWindow();
+  const control = list.querySelector<HTMLElement>(`[data-files-index="${state.filesActive}"]`);
+  control?.focus();
+}
+
+/**
+ * Open the active folder or toggle the active file.
+ *
+ * @param {number} index Row index in browserRows.
+ * @returns {void}
+ */
+function activateFilesIndex(index: number): void {
+  const entry = browserRows()[index];
+  if (!entry) return;
+  if (entry.kind === "file") {
+    if (state.filesSelected.has(entry.path)) state.filesSelected.delete(entry.path);
+    else state.filesSelected.add(entry.path);
+    renderFiles();
+    focusFilesIndex(index);
+    return;
+  }
+  if (entry.kind === "link") return;
+  openBrowserRow(entry);
+}
+
+/**
+ * Open a folder, a music root, or a drive.
+ *
+ * A folder opened while browsing elsewhere stays outside the roots.
+ * A root returns to rooted browsing.
+ *
+ * @param {FileEntry} entry Row to open.
+ * @returns {void}
+ */
+function openBrowserRow(entry: FileEntry): void {
+  const elsewhere = state.filesElsewhere && entry.kind === "dir";
+  loadFolder(entry.path, { elsewhere }).catch((error) => failFiles(error));
+}
+
+/**
+ * Handle arrow keys, Home, and End for the file list.
+ *
+ * @param {KeyboardEvent} event Key event from the list or a row.
+ * @returns {void}
+ */
+function onFilesKey(event: KeyboardEvent): void {
+  if (state.mode !== "files") return;
+  const list = el("files-list");
+  if (!(event.target instanceof Node) || !list.contains(event.target)) return;
+  const rows = browserRows();
+  if (!rows.length) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    if (event.key === "ArrowDown") focusFilesIndex(state.filesActive + 1);
+    else if (event.key === "ArrowUp") focusFilesIndex(state.filesActive - 1);
+    else if (event.key === "Home") focusFilesIndex(0);
+    else focusFilesIndex(rows.length - 1);
+    return;
+  }
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const control = event.target instanceof HTMLElement ? event.target.closest("button, input") : null;
+  if (control && list.contains(control)) return;
+  event.preventDefault();
+  activateFilesIndex(state.filesActive);
+}
+
+/**
  * Build one folder row.
  *
- * @param {{name: string, kind: string, path: string, in_library?: boolean}} entry Directory entry.
+ * @param {FileEntry} entry Directory entry or music root.
+ * @param {number} index Index in browserRows. Used for keyboard focus.
  * @returns {HTMLDivElement} The row.
  */
-function fileRow(entry: FileEntry) {
+function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "files-row";
-  if (entry.kind === "dir") {
+  if (index === state.filesActive) row.classList.add("is-active");
+  row.setAttribute("role", "listitem");
+  const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
+  if (openKind) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "files-open";
-    button.textContent = entry.name;
+    button.dataset.filesIndex = String(index);
+    button.id = `files-item-${index}`;
+    button.tabIndex = index === state.filesActive ? 0 : -1;
+    if (entry.kind === "drive" || entry.kind === "folder") button.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
+    const name = document.createElement("span");
+    name.textContent = entry.name;
+    button.append(name);
+    button.title = entry.name;
     button.setAttribute("aria-label", `Open ${entry.name}`);
     button.addEventListener("click", () => {
-      loadFolder(entry.path).catch((error) => failFiles(error));
+      state.filesActive = index;
+      openBrowserRow(entry);
     });
     row.append(button);
     return row;
   }
   if (entry.kind !== "file") {
-    const label = document.createElement("span");
+    const label = document.createElement("button");
+    label.type = "button";
     label.className = "files-kind";
+    label.dataset.filesIndex = String(index);
+    label.id = `files-item-${index}`;
+    label.tabIndex = index === state.filesActive ? 0 : -1;
     label.textContent = `${entry.name} (shortcut)`;
+    label.setAttribute("aria-label", `${entry.name} shortcut`);
     row.append(label);
     return row;
   }
@@ -2397,14 +2718,20 @@ function fileRow(entry: FileEntry) {
   label.className = "files-file";
   const box = document.createElement("input");
   box.type = "checkbox";
+  box.dataset.filesIndex = String(index);
+  box.id = `files-item-${index}`;
+  box.tabIndex = index === state.filesActive ? 0 : -1;
   box.checked = state.filesSelected.has(entry.path);
+  box.setAttribute("aria-label", entry.name);
   box.addEventListener("change", () => {
+    state.filesActive = index;
     if (box.checked) state.filesSelected.add(entry.path);
     else state.filesSelected.delete(entry.path);
     renderFiles();
   });
   const name = document.createElement("span");
   name.textContent = entry.name;
+  name.title = entry.name;
   label.append(box, name);
   if (entry.in_library) {
     const badge = document.createElement("span");
@@ -2414,6 +2741,60 @@ function fileRow(entry: FileEntry) {
   }
   row.append(label);
   return row;
+}
+
+/**
+ * Draw a folder or drive mark with the text color.
+ *
+ * The shapes are part of the page. They are not a separate icon font.
+ *
+ * @param {"folder" | "drive"} kind Which mark to draw.
+ * @returns {SVGSVGElement} A decorative icon.
+ */
+function fileIcon(kind: "folder" | "drive"): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "20");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("files-icon", kind === "drive" ? "files-icon-drive" : "files-icon-folder");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.5");
+  path.setAttribute("stroke-linejoin", "round");
+  path.setAttribute(
+    "d",
+    kind === "drive"
+      ? "M5 8.5h14v8H5z M8 14.5h.01 M12 14.5h4"
+      : "M4 8.5h6l2 2h8v7.5H4z",
+  );
+  svg.append(path);
+  return svg;
+}
+
+/**
+ * Return whether a JSON value is a music root.
+ *
+ * @param {unknown} value Candidate.
+ * @returns {boolean} True when name, path, and kind are strings.
+ */
+function isFileRoot(value: unknown): value is FileRoot {
+  if (!value || typeof value !== "object") return false;
+  const record = value as FileRoot;
+  return typeof record.name === "string" && typeof record.path === "string" && typeof record.kind === "string";
+}
+
+/**
+ * Return whether a JSON value is a breadcrumb.
+ *
+ * @param {unknown} value Candidate.
+ * @returns {boolean} True when name and path are strings.
+ */
+function isFileCrumb(value: unknown): value is FileCrumb {
+  if (!value || typeof value !== "object") return false;
+  const record = value as FileCrumb;
+  return typeof record.name === "string" && typeof record.path === "string";
 }
 
 /**
@@ -2434,6 +2815,11 @@ export function selectedFiles() {
  * @returns {void}
  */
 export function wireLibrary(): void {
+  el("files-list").addEventListener("scroll", () => {
+    if (state.mode === "files") paintFileWindow();
+  });
+  el("files-list").addEventListener("keydown", onFilesKey);
+
   el("search").addEventListener("input", () => {
     state.query = el("search").value;
     el("list").scrollTop = 0;

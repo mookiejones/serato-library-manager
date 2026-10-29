@@ -203,6 +203,17 @@ export interface FileEntry {
   in_library?: boolean;
 }
 
+export interface FileRoot {
+  name: string;
+  path: string;
+  kind: string;
+}
+
+export interface FileCrumb {
+  name: string;
+  path: string;
+}
+
 export interface FileChange {
   from?: string;
   to?: string;
@@ -214,6 +225,10 @@ export interface FilesPayload {
   path?: string;
   parent?: string | null;
   entries?: FileEntry[];
+  roots?: FileRoot[];
+  root?: FileRoot | null;
+  breadcrumb?: FileCrumb[];
+  elsewhere?: boolean;
   truncated?: boolean;
   serato?: SeratoStatus | null;
   error?: string;

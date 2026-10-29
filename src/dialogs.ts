@@ -901,11 +901,19 @@ export function wireDialogs(): void {
     }
   });
   el("files-up").addEventListener("click", () => {
-    if (state.filesParent) loadFolder(state.filesParent).catch((error) => failFiles(error));
+    if (state.filesParent) {
+      loadFolder(state.filesParent, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
+    }
   });
 
   el("files-refresh").addEventListener("click", () => {
-    loadFolder(state.filesPath || "").catch((error) => failFiles(error));
+    const path = state.filesAtRoots ? "" : state.filesPath;
+    loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error) => failFiles(error));
+  });
+
+  el("files-elsewhere").addEventListener("click", () => {
+    if (state.filesElsewhere) loadFolder("").catch((error) => failFiles(error));
+    else loadFolder("", { elsewhere: true }).catch((error) => failFiles(error));
   });
 
   el("files-rename").addEventListener("click", (event) => {
@@ -1000,3 +1008,18 @@ export function wireDialogs(): void {
 }
 
 bridge.openMergeDialog = openMergeDialog;
+
+/**
+ * Open the first-run wizard from the Files empty state.
+ *
+ * Cancel leaves the saved setup flag as it was. The button that opened
+ * setup takes focus back when the wizard closes.
+ *
+ * @returns {void}
+ */
+function openSetup(): void {
+  const trigger = document.getElementById("files-run-setup");
+  openWizard(true, trigger instanceof HTMLElement ? trigger : el("search"));
+}
+
+bridge.openSetup = openSetup;
