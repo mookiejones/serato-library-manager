@@ -10,9 +10,10 @@ from __future__ import annotations
 import os
 import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
 
+import app_config
+import app_log
 import files
 import library
 import snapshots
@@ -22,6 +23,15 @@ NOT_FOUND_NEXT = (
     "Open Serato DJ once so it can create your library. "
     "Quit Serato DJ, then choose Check again."
 )
+PICK_FAILED_NEXT = (
+    "Choose the folder that contains your library, "
+    "or open Serato DJ once, quit it, and choose Check again."
+)
+REMEMBERED_MISSING_NOTE = (
+    "The library you chose before is not on this computer. "
+    "This is the library in the usual place."
+)
+_remembered_missing = False
 WRONG_FOLDER_SUMMARY = "That folder is not the Serato library on this computer."
 WRONG_FOLDER_NEXT = (
     "Choose Check again to use the library that was found, "
@@ -95,11 +105,14 @@ def describe_library() -> dict[str, object]:
     count = _track_count(master)
     places = _extra_places(volume)
     message = info.get("message")
+    summary = _found_summary(volume, count, places)
+    if _remembered_missing:
+        summary = f"{summary} {REMEMBERED_MISSING_NOTE}"
     return {
         "found": True,
         "volume": volume,
         "track_count": count,
-        "summary": _found_summary(volume, count, places),
+        "summary": summary,
         "next": None,
         "places": places,
         "serato_running": running,
@@ -109,18 +122,23 @@ def describe_library() -> dict[str, object]:
 
 
 def accept_folder(folder: str) -> dict[str, object]:
-    """Accept a chosen folder only when it is the library already in use.
+    """Accept the open library folder, or a library when none is open.
 
     Args:
         folder: Absolute folder from the wizard's folder list.
 
     Returns:
         The same object as :func:`describe_library` when the folder is
-        the one that holds that library. Otherwise a not-found object
-        whose ``next`` says what to do. The chosen path is not returned.
+        the one that holds the library already in use, or when no library
+        file is open and the folder contains one. Otherwise a not-found
+        object whose ``next`` says what to do. The chosen path is not
+        returned.
 
     Raises:
         LibraryError: If the folder is missing, not a directory, or a shortcut.
+
+    A folder is not accepted as a different library while one is already
+    open. Choosing a file does not create or modify it.
     """
     directory = files._list_root(folder)
     master = Path(library.MASTER)
@@ -132,13 +150,15 @@ def accept_folder(folder: str) -> dict[str, object]:
         chosen = directory
     if live is not None and (chosen == live.parent or _same_file(chosen / "master.sqlite", live)):
         return describe_library()
+    if live is None and _adopt_unopened_library(directory):
+        return describe_library()
     running = snapshots.serato_dj_running()
     if master.is_file():
         summary = WRONG_FOLDER_SUMMARY
         nxt = WRONG_FOLDER_NEXT
     else:
         summary = NOT_FOUND_SUMMARY
-        nxt = NOT_FOUND_NEXT
+        nxt = PICK_FAILED_NEXT
     return {
         "found": False,
         "volume": None,
@@ -152,6 +172,87 @@ def accept_folder(folder: str) -> dict[str, object]:
     }
 
 
+def apply_remembered_library() -> None:
+    """Point the process at a library chosen on an earlier launch.
+
+    Returns:
+        None. A missing choice, a shortcut, or a file that is not a
+        Serato library leaves the usual path in place. A missing
+        remembered file does too, and setup then says so.
+
+    The database is not created or modified. This does not run when the
+    usual library is only being confirmed.
+    """
+    _set_remembered_missing(False)
+    try:
+        saved = app_config.load_remembered_library()
+    except OSError:
+        return
+    if saved is None:
+        return
+    try:
+        if saved.is_symlink():
+            return
+        if not saved.is_file():
+            _set_remembered_missing(True)
+            return
+        if not library.is_serato_database(saved):
+            return
+        library.use_library_file(saved)
+    except (library.LibraryError, OSError):
+        return
+
+
+def _set_remembered_missing(value: bool) -> None:
+    """Remember whether the chosen library file was missing.
+
+    Args:
+        value: True when setup should say the earlier choice is gone
+            and the usual library is in use.
+    """
+    global _remembered_missing
+    _remembered_missing = value
+
+
+def _adopt_unopened_library(directory: Path) -> bool:
+    """Open a Serato library in ``directory`` when none is open yet.
+
+    Args:
+        directory: Real folder the person chose. Shortcuts are already
+            refused.
+
+    Returns:
+        True when that folder's ``master.sqlite`` is now the library
+        this process reads. False when a library is already open, or
+        the file is missing, a shortcut, or not a Serato library.
+
+    The database file is not created or modified. A path that is not the
+    usual location is remembered for the next launch. Remembering a path
+    does not write the database. A failure to remember the path still
+    leaves this process pointed at the file.
+    """
+    if Path(library.MASTER).is_file():
+        return False
+    candidate = directory / "master.sqlite"
+    try:
+        if candidate.is_symlink() or not candidate.is_file() or candidate.name != "master.sqlite":
+            return False
+        library.use_library_file(candidate)
+    except (library.LibraryError, OSError):
+        return False
+    _set_remembered_missing(False)
+    try:
+        remembered = Path(library.MASTER)
+        default = Path(library.LIVE_MASTER)
+        if _same_file(remembered, default):
+            app_config.forget_remembered_library()
+        else:
+            app_config.remember_library(remembered)
+    except (OSError, ValueError):
+        app_log.logger.exception("The chosen library could not be remembered.")
+    return True
+
+
 def _status_for_wizard(master: Path) -> dict[str, object]:
     """Read the same lock status the sidebar shows.
 
@@ -163,7 +264,7 @@ def _status_for_wizard(master: Path) -> dict[str, object]:
         is running, so the wizard and the sidebar do not disagree.
     """
     try:
-        return library.status(master)
+        return library.status(master, from_copy=True)
     except (library.LibraryError, sqlite3.Error, OSError):
         running = snapshots.serato_dj_running()
         return {
@@ -299,7 +400,7 @@ def _track_count(path: Path) -> int | None:
         still says the library was found.
     """
     try:
-        with closing(library.read_conn(path)) as conn:
+        with library.copied_read_conn(path) as conn:
             row = conn.execute(
                 """
                 SELECT COUNT(*) FROM asset AS a

@@ -93,6 +93,16 @@ class AssetTests(unittest.TestCase):
         """
         names = static_assets.local_asset_names(ROOT / "static" / "index.html")
         self.assertEqual(names, ["tokens.css", "app.css", "wizard.js", "app.js"])
+        page = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        for name in (
+            "wizard-welcome.svg",
+            "wizard-find-library.svg",
+            "wizard-safety-snapshot.svg",
+            "wizard-consent.svg",
+            "wizard-done.svg",
+        ):
+            artwork = (ROOT / "static" / "img" / "wizard" / name).read_text(encoding="utf-8").strip()
+            self.assertIn(artwork, page)
         self.assertEqual(static_assets.missing_static_files(ROOT / "static"), [])
 
     def test_remote_links_are_not_assets(self) -> None:

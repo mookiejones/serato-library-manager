@@ -26,11 +26,13 @@ A missing `SENTRY_DSN` keeps crash reports off even after you opt in. A missing 
 
 | System | Settings | Logs |
 |--------|----------|------|
-| macOS | `~/Library/Application Support/Serato Library/settings.json` and `related.sqlite` | `~/Library/Logs/Serato Library/` |
-| Windows | `%APPDATA%\Serato Library\settings.json` and `related.sqlite` | `%LOCALAPPDATA%\Serato Library\Logs\` |
-| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json` and `related.sqlite`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
+| macOS | `~/Library/Application Support/Serato Library/settings.json`, `library.json`, and `related.sqlite` | `~/Library/Logs/Serato Library/` |
+| Windows | `%APPDATA%\Serato Library\settings.json`, `library.json`, and `related.sqlite` | `%LOCALAPPDATA%\Serato Library\Logs\` |
+| Linux | `$XDG_CONFIG_HOME/serato-library/settings.json`, `library.json`, and `related.sqlite`, or `~/.config/serato-library/` | `$XDG_STATE_HOME/serato-library/logs`, or `~/.local/state/serato-library/logs` |
 
 `settings.json` also stores the Rekordbox export bar: whether hot loops and memory cues are on, and which key notation was chosen. Those choices are not sent.
+
+`library.json` is written only when setup is pointed at a library that is not in the usual folder. It stores that file's path. The path stays on this machine. It is not a usage report. `settings.json` does not include it.
 
 `related.sqlite` stores which tracks you marked as going well together, including file paths, titles, artists, lengths, notes, and ratings. That file stays on this machine. It is not a usage report. The schema is in [docs/related-tracks.md](docs/related-tracks.md).
 

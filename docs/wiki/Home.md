@@ -30,7 +30,7 @@ Cue points live in the audio file. A normal save does not rewrite them.
 
 **Snapshots** keeps hash-checked copies of the library, the crates on each drive, and the Cue point frames stored in the audio files. The music itself is not copied.
 
-Open **Snapshots**, choose **Review restore**, then **Restore**. Restore never changes audio data. It can put those Cue point frames back.
+Open **Snapshots**, choose **Review restore**, then **Restore**. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 
 Quit Serato DJ Pro before a write. On Serato 5, writes and restores stay off.
 
