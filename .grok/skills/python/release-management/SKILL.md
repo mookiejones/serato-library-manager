@@ -40,7 +40,7 @@ git tag -a v1.2.3 -m "Release v1.2.3."
 git push origin v1.2.3
 ```
 
-Push the tag only when `main` is the commit you want to ship.
+Push the tag only when `main` is the commit you want to ship. Never push a tag or publish a release, including a prerelease, without Charles (@mookiejones)'s explicit OK.
 
 What the workflow does:
 

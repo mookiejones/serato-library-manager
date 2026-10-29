@@ -143,9 +143,9 @@ Step 3 is the one that gets skipped, and it is the only step that distinguishes
 "the archive has files in it" from "the thing runs." Run it somewhere else on
 disk, or it passes against the sources and proves nothing.
 
-For language-specific artifact inspection (wheels, sdists, console scripts), see
-`packaging-python-libraries`. For pinning the tools that produce and check these
-artifacts, see the CI tooling section of `setting-up-python-libraries`.
+For publishing the checked artifact, see `managing-python-releases`. For
+pinning the tools that produce and check these artifacts, see
+`reproducing-ci-locally`.
 
 ## Checklist
 
