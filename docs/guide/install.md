@@ -16,7 +16,7 @@ Open the [releases page](https://github.com/mookiejones/serato-library-manager/r
 The builds are unsigned. macOS Gatekeeper and Windows SmartScreen warn before the app opens. That warning is expected. On a Mac, reading an external drive needs **Removable Volumes** under **System Settings › Privacy & Security › Files and Folders**. That is not Full Disk Access. An unsigned update can ask again. [First install](../first-install.md#mac-external-drives) has the steps.
 
 !!! note "What version 0.1.1 includes"
-    The GitHub Release named v0.1.1 was built before Duplicate Merge, Related Tracks, and Files. This guide describes the app in the repository now. Those three parts ship in the next release after 0.1.1. Crates, track details, History, Missing, the Duplicates list, Stems, Prepare, playlists, and Settings are in v0.1.1.
+    The GitHub Release marked Latest is v0.1.1. It was built before Duplicate Merge, Related Tracks, and Files. The pre-release v1.1.0-rc2 includes those parts. It does not include the first-run setup or **Hot loops**. This guide describes the app in the repository now. Crates, track details, History, Missing, the Duplicates list, Stems, Prepare, playlists, and Settings are in v0.1.1.
 
 ## The first page
 
