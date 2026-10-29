@@ -26,8 +26,7 @@ into a scoring path, and write the report as *"short inputs are wrongly flagged.
 Then you run real short inputs through the public entry point and the flag never
 sets — a downstream threshold absorbs the degenerate value, and the only visible
 effect is noise in a secondary per-feature list. The internal oddity is worth
-fixing (see [reporting-derived-metrics](../derived-metrics/SKILL.md)); the
-headline was false, and a reviewer who tests it will say so.
+fixing; the headline was false, and a reviewer who tests it will say so.
 
 **Before writing the title, run the reproduction at the outermost layer the title
 names.** Then choose one of three honest framings:
@@ -156,9 +155,7 @@ the report look padded.
 
 State which test each mutation trips, and which assertion inside it — a guard
 often turns out to be load-bearing at a different layer than the report assumed,
-and the assertion name is what reveals it. See
-[reporting-derived-metrics](../derived-metrics/SKILL.md) for a worked example of
-reading that signal.
+and the assertion name is what reveals it.
 
 ## A red gate is not an aside
 
