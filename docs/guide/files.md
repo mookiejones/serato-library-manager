@@ -22,7 +22,7 @@ Quit Serato DJ Pro before any of these actions. The buttons stay off while Serat
 5. Click **Up** to go to the parent folder, until you are back at the music folder.
 6. Click **Refresh** to read the folder again.
 
-**Browse elsewhere…** is the small link at the end of that bar. It is not the first thing you see. It opens the rest of the computer. **Music folders** in that same place comes back.
+**Search files** is on that bar. Type a name to look through the folder you have open, including folders inside it. A few letters are enough. The path sits beside the name. Clearing the field shows the folder again. **Browse elsewhere…** is the small link at the end of that bar. It is not the first thing you see. It opens the rest of the computer. **Music folders** in that same place comes back.
 
 If Serato has no music folders yet, the page says **No music folders yet** and offers **Run setup**.
 

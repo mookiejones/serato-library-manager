@@ -22,6 +22,7 @@ The first time you open it, setup finds your library and saves a safety copy bef
 - [Rename, move, replace, and trash files](guide/files.md) so crates and history follow the file.
 - [Keep hash-checked snapshots and restore one](guide/safety.md#snapshots), including crates on each drive and the cue data stored in audio files. The music itself is not copied into the snapshot. Restore can rewrite the Serato tags (cue points, beatgrid, autotags) inside each audio file, and removes Serato tags the snapshot didn't have. The audio stream is hash-checked before and after; if it would change, the file is left as it was.
 - Change [sharing, and open the log](guide/settings.md).
+- Use [keyboard shortcuts](guide/shortcuts.md) to search, switch views, and move through a list. **Shortcuts** is at the bottom of the sidebar.
 
 Pictures in this guide use a small sample library, not your collection.
 

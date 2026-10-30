@@ -22,7 +22,7 @@ The views are **Crates**, **History**, **Missing**, **Duplicates**, **Stems**, *
 
 The space menu shows **Library**, **Video**, **Apple Music**, and **Prepare**.
 
-**Settings** is at the bottom of that sidebar.
+**Shortcuts** and **Settings** are at the bottom of that sidebar. **Shortcuts** lists the keys. Ctrl+K or Command+K finds a track or a file.
 
 ## Cue points and Backups
 

@@ -407,6 +407,11 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     (".lock-note", ("--color-card",), 15, 400),
     (".editor label", ("--color-card",), 13, 400),
     ("dialog", ("--color-card",), 15, 400),
+    (".shortcut-table thead th", ("--color-card",), 11, 600),
+    ("#quick-open-query", ("--color-card",), 15, 400),
+    (".quick-open-option", ("--color-card", "--color-selection"), 15, 400),
+    (".quick-open-kind", ("--color-button",), 11, 600),
+    (".quick-open-detail", ("--color-card", "--color-selection"), 11, 400),
     (".dialog-note", ("--color-card",), 15, 400),
     (".dialog-status", ("--color-card",), 15, 400),
     (".about-version", ("--color-card",), 13, 400),
@@ -423,6 +428,7 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     ("#merge-cancel", ("--color-card",), 15, 400),
     ("#merge-confirm.danger", ("--color-danger",), 15, 400),
     (".log-fallback", ("--color-card",), 15, 400),
+    (".files-match-detail", ("--color-card", "--color-selection"), 11, 400),
     (".files-badge", ("--color-card",), 13, 400),
     (".files-root-detail", ("--color-card",), 13, 400),
     (".files-row.is-missing .files-icon", ("--color-card", "--color-selection"), 20, 400),
@@ -492,6 +498,8 @@ _DECORATIVE = {
     ".files-row",
     ".files-actions",
     ".snapshot-card",
+    ".shortcut-table th",
+    ".shortcut-table td",
     ".swatch",
 }
 
@@ -509,6 +517,8 @@ _CONTROL_EDGE = (
     (".related-form input", "--color-card", "border-bottom"),
     (".related-form select", "--color-card", "border-bottom"),
     (".files-field input", "--color-card", "border-bottom"),
+    ("#quick-open-query", "--color-card", "border"),
+    (".shortcut-table kbd", "--color-card", "border"),
     (".rule-edit textarea", "--color-card", "border"),
     (".wizard-folder", "--color-card", "border"),
 )
@@ -650,6 +660,10 @@ class ContrastTests(unittest.TestCase):
             border = _paint(self._rule(selector)["border"], self.colors)
             ratio = contrast(border, self._surface("--color-card"))
             self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
+        active_mark = _paint(self._rule(".quick-open-option.is-active")["border-left"], self.colors)
+        for background_name in ("--color-card", "--color-selection"):
+            ratio = contrast(active_mark, self._surface(background_name))
+            self.assertGreaterEqual(ratio, 3, f"quick-open selection on {background_name} is {ratio:.2f}:1")
 
         for selector, background_name, prop in _CONTROL_EDGE:
             value = self._rule(selector)[prop]
@@ -703,6 +717,7 @@ class ContrastTests(unittest.TestCase):
             "#rekordbox-cancel",
             "#merge-cancel",
             ".wizard-choice",
+            ".quick-open-option.is-active",
         } | {selector for selector, _, _ in _CONTROL_EDGE}
         self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")
         self.assertEqual(checked_borders - bordered, set(), "contrast list names a border that is not painted")

@@ -74,6 +74,7 @@
       </div>
       <footer class="rail-foot">
         <p id="app-version" class="app-version" hidden></p>
+        <button id="open-shortcuts" type="button" aria-haspopup="dialog">Shortcuts</button>
         <button id="open-settings" type="button" aria-haspopup="dialog">Settings</button>
       </footer>
     </aside>
@@ -134,6 +135,10 @@
         <div class="browser-bar">
           <button id="files-up" type="button">Up</button>
           <nav id="files-path" class="files-path" aria-label="Folder path"></nav>
+          <label class="search files-search" for="files-search">
+            <span class="visually-hidden">Search files</span>
+            <input id="files-search" type="search" placeholder="Search files" autocomplete="off" spellcheck="false">
+          </label>
           <button id="files-refresh" type="button">Refresh</button>
           <button id="files-elsewhere" class="files-elsewhere" type="button">Browse elsewhere…</button>
         </div>
@@ -248,6 +253,25 @@
       <button id="files-cancel" type="button">Cancel</button>
       <button id="files-review" type="button">Review</button>
       <button id="files-confirm" type="button">Confirm</button>
+    </div>
+  </dialog>
+  <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title" aria-describedby="shortcuts-intro">
+    <h2 id="shortcuts-title" tabindex="-1">Keyboard shortcuts</h2>
+    <p id="shortcuts-intro">These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.</p>
+    <div class="dialog-actions">
+      <button id="shortcuts-close" type="button">Close</button>
+    </div>
+    <div id="shortcuts-body"></div>
+  </dialog>
+  <dialog id="quick-open" aria-labelledby="quick-open-title">
+    <h2 id="quick-open-title">Find a track or file</h2>
+    <label id="quick-open-label" for="quick-open-query">Name</label>
+    <input id="quick-open-query" type="search" placeholder="Track or file name" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="quick-open-list" aria-expanded="true">
+    <p id="quick-open-status" class="dialog-status" role="status" aria-live="polite"></p>
+    <button id="quick-open-retry" type="button" hidden>Try again</button>
+    <ul id="quick-open-list" role="listbox" aria-label="Matches"></ul>
+    <div class="dialog-actions">
+      <button id="quick-open-close" type="button">Close</button>
     </div>
   </dialog>
   <dialog id="snapshot-dialog" aria-labelledby="snapshot-title" aria-describedby="snapshot-intro">

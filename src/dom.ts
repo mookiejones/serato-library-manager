@@ -110,6 +110,21 @@ export interface ElementIds {
   "files-cancel": HTMLButtonElement;
   "files-review": HTMLButtonElement;
   "files-refresh": HTMLButtonElement;
+  "files-search": HTMLInputElement;
+  "open-shortcuts": HTMLButtonElement;
+  "shortcuts-dialog": HTMLDialogElement;
+  "shortcuts-title": HTMLHeadingElement;
+  "shortcuts-intro": HTMLParagraphElement;
+  "shortcuts-body": HTMLDivElement;
+  "shortcuts-close": HTMLButtonElement;
+  "quick-open": HTMLDialogElement;
+  "quick-open-title": HTMLHeadingElement;
+  "quick-open-label": HTMLLabelElement;
+  "quick-open-query": HTMLInputElement;
+  "quick-open-status": HTMLParagraphElement;
+  "quick-open-list": HTMLUListElement;
+  "quick-open-close": HTMLButtonElement;
+  "quick-open-retry": HTMLButtonElement;
 }
 
 export function el<K extends keyof ElementIds>(id: K): ElementIds[K] {

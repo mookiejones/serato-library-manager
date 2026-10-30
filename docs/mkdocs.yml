@@ -76,6 +76,7 @@ nav:
       - Related tracks: guide/related.md
       - Files: guide/files.md
   - The app:
+      - Keyboard shortcuts: guide/shortcuts.md
       - Settings and privacy: guide/settings.md
       - Troubleshooting: guide/troubleshooting.md
   - For developers:
