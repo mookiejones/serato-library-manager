@@ -623,16 +623,19 @@ function fixtureWaveform(durationSeconds: number): ParsedWaveform {
   const detail = new Uint8Array(count * 6);
   for (let index = 0; index < count; index += 1) {
     const t = index / rate;
-    const low = Math.round(140 + 100 * Math.sin(t * 3));
-    const mid = Math.round(80 + 70 * Math.sin(t * 7 + 1));
-    const high = Math.round(40 + 50 * Math.sin(t * 13));
+    // One slow envelope. High stays under low so a fast high-band
+    // sine does not paint a saturated blue bar every half second.
+    const env = 0.42 + 0.58 * (0.5 + 0.5 * Math.sin(t * 0.85));
+    const low = Math.round(210 * env);
+    const mid = Math.round(120 * env * (0.75 + 0.25 * Math.sin(t * 1.6)));
+    const high = Math.round(55 * env * (0.7 + 0.3 * Math.sin(t * 2.2 + 0.8)));
     const offset = index * 6;
     detail[offset] = low;
-    detail[offset + 1] = Math.round(low * 0.45);
+    detail[offset + 1] = Math.round(low * 0.5);
     detail[offset + 2] = mid;
-    detail[offset + 3] = Math.round(mid * 0.4);
+    detail[offset + 3] = Math.round(mid * 0.45);
     detail[offset + 4] = high;
-    detail[offset + 5] = Math.round(high * 0.35);
+    detail[offset + 5] = Math.round(high * 0.4);
   }
   const overviewCount = 200;
   const overview = new Uint8Array(overviewCount * 6);
