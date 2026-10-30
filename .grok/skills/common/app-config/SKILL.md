@@ -258,8 +258,7 @@ Two details that bite:
       an unknown level falls back with a warning instead of raising
 - [ ] Loader takes an explicit path; tests never rely on the cwd-relative default
 
-Related: **reporting-derived-metrics** for how a broad `except` disguises a
-mis-wired key as a normal-shaped result, **verifying-external-behavior** for
-confirming what a permissive client does with an argument it doesn't recognise,
-and **shipping-across-surfaces** for keeping a documented config key in step with
+Related: **verifying-external-behavior** for confirming what a permissive
+client does with an argument it doesn't recognise, and
+**shipping-across-surfaces** for keeping a documented config key in step with
 the code that reads it.

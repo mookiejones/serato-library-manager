@@ -163,8 +163,7 @@ as much as to prose — the label is the surface most people read.
 
 Note that in an LLM-backed product, some of these strings are not documentation
 at all: structured-output field descriptions and tool descriptions are read by
-the model and change its behavior. See
-**[../../python/llm-features/SKILL.md](../../python/llm-features/SKILL.md)**.
+the model and change its behavior.
 
 ## Make factual claims traceable
 
