@@ -25,6 +25,31 @@ from pathlib import Path
 CRATE_VERSION = "1.0/Serato ScratchLive Crate"
 DATABASE_VERSION = "2.0/Serato Scratch LIVE Database"
 
+# Portable-drive check fixture. Paths are synthetic. Names that Windows
+# would reject (CON, a trailing space, a colon) live only inside the crate
+# bytes, never as file names in this tree.
+DRIVE_CHECK_HOUSE = [
+    "Music/on-drive.mp3",
+    "Music/gone.mp3",
+    "Music/CON.mp3",
+    "Music/NUL.txt",
+    "Music/COM1.mp3",
+    "Music/COM10.mp3",
+    "Music/concert.mp3",
+    "Music/late.mp3.",
+    "Music/what?.mp3",
+    "Music/space.mp3 ",
+    "Music/a:b.mp3",
+    "Users/serato-drive-check-absent/night.mp3",
+    "Music/" + ("b" * 256) + ".mp3",
+]
+DRIVE_CHECK_PEAK = ["Music\\peak-win.mp3"]
+DRIVE_CHECK_KEEP = ["Music/from-the-extra-folder.mp3"]
+DRIVE_CHECK_EXPORT_BACKUP = ["Music/from-export-backups.mp3"]
+DRIVE_CHECK_LEXICON = ["Music/from-lexicon.mp3"]
+DRIVE_CHECK_SMART = ["Music/smart-only.mp3"]
+DRIVE_CHECK_DATABASE_ONLY = "Music/only-in-database.mp3"
+
 # Silent AAC-LC carrier. The access unit decodes to digital silence. The
 # moov skeleton is the ISO-BMFF track for that one access unit. Serato
 # ---- atoms are added separately from the fileformats note.
@@ -822,12 +847,58 @@ def _write(path: Path, data: bytes) -> dict[str, object]:
     return {"bytes": len(data), "sha256": _sha256(data)}
 
 
-def build(root: Path) -> None:
-    """Write both fixture trees, their goldens, and the README.
+def _write_drive_check(root: Path) -> None:
+    """Write the portable-drive tree the drive check reads.
 
     Args:
-        root: Directory that will contain ``serato4``, ``serato5``, and
-            ``README.md``. Existing fixture files are replaced.
+        root: Fixture directory. The tree is ``drive_check/GIGDRIVE``.
+
+    Returns:
+        None. Audio placeholders are a few bytes. Unsafe names are stored
+        in the crate, not used as file names.
+    """
+    drive = root / "drive_check" / "GIGDRIVE"
+    serato = drive / "_Serato_"
+    for name in (
+        "on-drive.mp3",
+        "peak-win.mp3",
+        "concert.mp3",
+        "COM10.mp3",
+        "only-in-database.mp3",
+    ):
+        _write(drive / "Music" / name, b"fixture\n")
+    _write(serato / "Subcrates" / "House.crate", crate_bytes(DRIVE_CHECK_HOUSE))
+    _write(serato / "Subcrates" / "House%%Peak.crate", crate_bytes(DRIVE_CHECK_PEAK))
+    _write(
+        serato / "Subcrates" / "Export Backups-extra" / "Keep.crate",
+        crate_bytes(DRIVE_CHECK_KEEP),
+    )
+    _write(serato / "SmartCrates" / "Warmup.scrate", crate_bytes(DRIVE_CHECK_SMART))
+    _write(serato / "Export Backups" / "Subcrates" / "Skip.crate", crate_bytes(DRIVE_CHECK_EXPORT_BACKUP))
+    _write(serato / "Lexicon" / "Subcrates" / "Skip.crate", crate_bytes(DRIVE_CHECK_LEXICON))
+    _write(
+        serato / "database V2",
+        database_bytes(
+            [
+                {
+                    "path": DRIVE_CHECK_DATABASE_ONLY,
+                    "title": "Database",
+                    "artist": "Fixture",
+                    "type": "mp3",
+                    "bpm": "0.00",
+                    "missing": False,
+                }
+            ]
+        ),
+    )
+
+
+def build(root: Path) -> None:
+    """Write both fixture trees, the drive-check drive, their goldens, and the README.
+
+    Args:
+        root: Directory that will contain ``serato4``, ``serato5``,
+            ``drive_check``, and ``README.md``. Existing fixture files are replaced.
 
     Returns:
         None.
@@ -931,6 +1002,7 @@ def build(root: Path) -> None:
                     "citation": str(item["citation"]),
                 }
             )
+    _write_drive_check(root)
     _write_text(root / "README.md", _readme(readme_rows))
 
 
@@ -1014,6 +1086,8 @@ def _readme(rows: list[dict[str, str]]) -> str:
             "- `edge/truncated.crate` and `edge/truncated-tags.mp3` are cut on purpose.",
             "- `edge/cut-header.mp3` is an ID3 header that stops early.",
             "- `drives/UNMOUNTED` is a crate for a volume the tests do not mount.",
+            "- `drive_check/GIGDRIVE` is a portable drive for the read-only drive check.",
+            "  Unsafe FAT names are inside the crate bytes, not file names.",
             "",
         ]
     )
