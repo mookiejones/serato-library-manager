@@ -569,11 +569,13 @@
   var WAVE_BG = { r: 35, g: 25, b: 16 };
   var OUTER_ALPHA = 0.6;
   var PLAYED_SHADE = 0.45;
-  var BEAT_GUTTER_CSS = 12;
+  var BEAT_HEIGHT_RATIO = 0.12;
+  var DOWNBEAT_HEIGHT_RATIO = 0.18;
+  var BEAT_ALPHA = 0.28;
+  var DOWNBEAT_ALPHA = 0.35;
   var DEFAULT_MARKER_COLOR = { r: 226, g: 59, b: 22 };
   var PLAYHEAD_COLOR = { r: 226, g: 59, b: 22 };
-  var DOWNBEAT_COLOR = { r: 243, g: 236, b: 223 };
-  var BEAT_COLOR = { r: 200, g: 187, b: 168 };
+  var BEAT_MARK = { r: 255, g: 255, b: 255 };
   var HEADER_BYTES = 64;
   var HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
   var MAX_POINTS = 2e7;
@@ -942,8 +944,7 @@
         highPeak = Math.max(highPeak, detail[offset + 4] ?? 0);
         highRms = Math.max(highRms, detail[offset + 5] ?? 0);
       }
-      const gutter = Math.min(height - 1, Math.round(BEAT_GUTTER_CSS * dpr));
-      paintColumn(pixels, x, width, height, gutter, lowPeak, lowRms, midPeak, midRms, highPeak, highRms);
+      paintColumn(pixels, x, width, height, 0, lowPeak, lowRms, midPeak, midRms, highPeak, highRms);
     }
     return { pixels, pointsRead };
   }
@@ -993,14 +994,16 @@
   }
   function drawBeats(pixels, width, height, dpr, playheadSeconds, pixelsPerSecond, cssWidth, markers, viewStart, viewEnd) {
     const ticks = beatgridTicks(markers, viewStart, viewEnd);
-    const regularHeight = Math.max(2, Math.round(6 * dpr));
-    const downbeatHeight = Math.max(regularHeight + 1, Math.round(BEAT_GUTTER_CSS * dpr));
+    const tickWidth = Math.max(1, Math.round(dpr));
+    const regularHeight = Math.max(1, Math.round(height * BEAT_HEIGHT_RATIO));
+    const downbeatHeight = Math.max(regularHeight + 1, Math.round(height * DOWNBEAT_HEIGHT_RATIO));
     for (const tick of ticks) {
       const x = Math.round(timeToX(tick.seconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr);
-      const tickHeight = tick.downbeat ? downbeatHeight : regularHeight;
-      const color = tick.downbeat ? DOWNBEAT_COLOR : BEAT_COLOR;
-      const tickWidth = tick.downbeat ? Math.max(2, Math.round(2 * dpr)) : Math.max(1, Math.round(dpr));
-      fillSpan(pixels, width, height, x, x + tickWidth, 0, tickHeight, color, 1);
+      const tickHeight = Math.min(tick.downbeat ? downbeatHeight : regularHeight, Math.floor(height / 2) - 1);
+      if (tickHeight < 1) continue;
+      const alpha = tick.downbeat ? DOWNBEAT_ALPHA : BEAT_ALPHA;
+      fillSpan(pixels, width, height, x, x + tickWidth, 0, tickHeight, BEAT_MARK, alpha);
+      fillSpan(pixels, width, height, x, x + tickWidth, height - tickHeight, height, BEAT_MARK, alpha);
     }
   }
   function drawPlayhead(pixels, width, height) {
@@ -1101,6 +1104,10 @@
     raf = 0;
     dragging = false;
     disposed = false;
+    detailImage = null;
+    overviewImage = null;
+    lastAriaKey = "";
+    ariaImmediate = false;
     onWheel;
     onResize;
     resizeObserver = null;
@@ -1359,13 +1366,14 @@
       this.paint();
     }
     syncZoomButtons() {
-      const unavailable = this.host.dataset.waveformState === "unavailable";
-      this.zoomIn.disabled = unavailable || this.pps >= ZOOM_MAX_PPS - 1e-9;
-      this.zoomOut.disabled = unavailable || this.pps <= ZOOM_MIN_PPS + 1e-9;
+      const phase2 = this.host.dataset.waveformState;
+      const blocked = phase2 === "reading" || phase2 === "unavailable";
+      this.zoomIn.disabled = blocked || this.pps >= ZOOM_MAX_PPS - 1e-9;
+      this.zoomOut.disabled = blocked || this.pps <= ZOOM_MIN_PPS + 1e-9;
     }
     wheel(event) {
       if (!event.ctrlKey && !event.metaKey) return;
-      if (this.host.dataset.waveformState === "unavailable") return;
+      if (this.host.dataset.waveformState !== "ready") return;
       event.preventDefault();
       if (event.deltaY < 0) this.setZoom(zoomPixelsPerSecond(this.pps, 1));
       else if (event.deltaY > 0) this.setZoom(zoomPixelsPerSecond(this.pps, -1));
@@ -1393,6 +1401,7 @@
       const rect = this.overviewHit.getBoundingClientRect();
       const duration2 = this.duration();
       const x = event.clientX - rect.left;
+      this.ariaImmediate = true;
       this.hooks.seek(overviewXToTime(x, rect.width, duration2));
     }
     overviewKeyDown(event) {
@@ -1403,6 +1412,7 @@
       event.preventDefault();
       event.stopPropagation();
       const step = event.shiftKey ? this.hooks.seekStepLarge : this.hooks.seekStep;
+      this.ariaImmediate = true;
       this.hooks.seekBy((forward ? 1 : -1) * step);
     }
     startLoop() {
@@ -1425,18 +1435,18 @@
       const duration2 = this.duration();
       this.paintDetail(time);
       this.paintOverview(time, duration2);
-      this.updateSlider(time, duration2);
+      const immediate = this.ariaImmediate;
+      this.ariaImmediate = false;
+      this.updateSlider(time, duration2, immediate);
     }
     paintDetail(time) {
       if (!this.tiles || !this.parsed) return;
       const size = sizeCanvas(this.detail, 96);
       if (!size) return;
-      const frame = new Uint8ClampedArray(size.width * size.height * 4);
-      this.tiles.paint(frame, size.width, size.height, size.dpr, time, this.pps, this.markers);
       const context = this.detail.getContext("2d");
       if (!context) return;
-      const image = context.createImageData(size.width, size.height);
-      image.data.set(frame);
+      const image = this.canvasImage(context, "detail", size.width, size.height);
+      this.tiles.paint(image.data, size.width, size.height, size.dpr, time, this.pps, this.markers);
       context.putImageData(image, 0, 0);
     }
     paintOverview(time, duration2) {
@@ -1444,15 +1454,34 @@
       if (!size) return;
       const source = this.overviewPixels(size.width, size.height);
       if (!source) return;
-      const frame = source.slice();
-      const played = duration2 > 0 ? Math.min(duration2, Math.max(0, time)) / duration2 * size.width : 0;
-      shadePlayed(frame, size.width, size.height, played);
-      drawOverviewMarks(frame, size.width, size.height, duration2 > 0 ? duration2 : this.headerDuration(), time, this.markers);
       const context = this.overviewCanvas.getContext("2d");
       if (!context) return;
-      const image = context.createImageData(size.width, size.height);
-      image.data.set(frame);
+      const image = this.canvasImage(context, "overview", size.width, size.height);
+      image.data.set(source);
+      const played = duration2 > 0 ? Math.min(duration2, Math.max(0, time)) / duration2 * size.width : 0;
+      shadePlayed(image.data, size.width, size.height, played);
+      drawOverviewMarks(image.data, size.width, size.height, duration2 > 0 ? duration2 : this.headerDuration(), time, this.markers);
       context.putImageData(image, 0, 0);
+    }
+    /**
+     * One ImageData for a canvas, replaced only when the bitmap size changes.
+     *
+     * Width and height already include the device pixel ratio, so a DPR
+     * change allocates again. Playback reuses the same buffer.
+     *
+     * @param context Canvas context that owns the buffer.
+     * @param which Detail or overview cache.
+     * @param width Device pixels.
+     * @param height Device pixels.
+     * @returns The buffer to draw into.
+     */
+    canvasImage(context, which, width, height) {
+      const current = which === "detail" ? this.detailImage : this.overviewImage;
+      if (current && current.width === width && current.height === height) return current;
+      const image = context.createImageData(width, height);
+      if (which === "detail") this.detailImage = image;
+      else this.overviewImage = image;
+      return image;
     }
     overviewPixels(width, height) {
       const key = `${this.overviewSource}|${width}|${height}|${this.token}`;
@@ -1475,9 +1504,12 @@
       }
       return null;
     }
-    updateSlider(time, duration2) {
+    updateSlider(time, duration2, immediate) {
       const max = duration2 > 0 ? duration2 : 0;
       const now = Math.min(max, Math.max(0, Number.isFinite(time) ? time : 0));
+      const key = `${Math.floor(now)}|${max}`;
+      if (!immediate && key === this.lastAriaKey) return;
+      this.lastAriaKey = key;
       this.overviewHit.setAttribute("aria-valuemin", "0");
       this.overviewHit.setAttribute("aria-valuemax", String(max));
       this.overviewHit.setAttribute("aria-valuenow", String(now));

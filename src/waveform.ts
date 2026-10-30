@@ -107,8 +107,17 @@ export const OUTER_ALPHA = 0.6;
 /** Played overview columns are multiplied by this. */
 export const PLAYED_SHADE = 0.45;
 
-/** CSS pixels kept at the top of the zoomed view for beat ticks. */
-export const BEAT_GUTTER_CSS = 12;
+/** Regular beat ticks are this fraction of the canvas height, at each edge. */
+export const BEAT_HEIGHT_RATIO = 0.12;
+
+/** Downbeats extend a little farther than the other beats. */
+export const DOWNBEAT_HEIGHT_RATIO = 0.18;
+
+/** White mixed over the waveform for a regular beat. */
+export const BEAT_ALPHA = 0.28;
+
+/** Downbeats use a slightly stronger white. */
+export const DOWNBEAT_ALPHA = 0.35;
 
 /** Seek-bar primary, used when a marker has no usable color. */
 export const DEFAULT_MARKER_COLOR: Rgb = { r: 0xe2, g: 0x3b, b: 0x16 };
@@ -116,8 +125,7 @@ export const DEFAULT_MARKER_COLOR: Rgb = { r: 0xe2, g: 0x3b, b: 0x16 };
 /** Playhead on the zoomed view and the overview. */
 export const PLAYHEAD_COLOR: Rgb = { r: 0xe2, g: 0x3b, b: 0x16 };
 
-const DOWNBEAT_COLOR: Rgb = { r: 0xf3, g: 0xec, b: 0xdf };
-const BEAT_COLOR: Rgb = { r: 0xc8, g: 0xbb, b: 0xa8 };
+const BEAT_MARK: Rgb = { r: 255, g: 255, b: 255 };
 const HEADER_BYTES = 64;
 const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const MAX_POINTS = 20_000_000;
@@ -749,8 +757,7 @@ function renderTile(
       highPeak = Math.max(highPeak, detail[offset + 4] ?? 0);
       highRms = Math.max(highRms, detail[offset + 5] ?? 0);
     }
-    const gutter = Math.min(height - 1, Math.round(BEAT_GUTTER_CSS * dpr));
-    paintColumn(pixels, x, width, height, gutter, lowPeak, lowRms, midPeak, midRms, highPeak, highRms);
+    paintColumn(pixels, x, width, height, 0, lowPeak, lowRms, midPeak, midRms, highPeak, highRms);
   }
   return { pixels, pointsRead };
 }
@@ -871,14 +878,16 @@ function drawBeats(
   viewEnd: number,
 ): void {
   const ticks = beatgridTicks(markers, viewStart, viewEnd);
-  const regularHeight = Math.max(2, Math.round(6 * dpr));
-  const downbeatHeight = Math.max(regularHeight + 1, Math.round(BEAT_GUTTER_CSS * dpr));
+  const tickWidth = Math.max(1, Math.round(dpr));
+  const regularHeight = Math.max(1, Math.round(height * BEAT_HEIGHT_RATIO));
+  const downbeatHeight = Math.max(regularHeight + 1, Math.round(height * DOWNBEAT_HEIGHT_RATIO));
   for (const tick of ticks) {
     const x = Math.round(timeToX(tick.seconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr);
-    const tickHeight = tick.downbeat ? downbeatHeight : regularHeight;
-    const color = tick.downbeat ? DOWNBEAT_COLOR : BEAT_COLOR;
-    const tickWidth = tick.downbeat ? Math.max(2, Math.round(2 * dpr)) : Math.max(1, Math.round(dpr));
-    fillSpan(pixels, width, height, x, x + tickWidth, 0, tickHeight, color, 1);
+    const tickHeight = Math.min(tick.downbeat ? downbeatHeight : regularHeight, Math.floor(height / 2) - 1);
+    if (tickHeight < 1) continue;
+    const alpha = tick.downbeat ? DOWNBEAT_ALPHA : BEAT_ALPHA;
+    fillSpan(pixels, width, height, x, x + tickWidth, 0, tickHeight, BEAT_MARK, alpha);
+    fillSpan(pixels, width, height, x, x + tickWidth, height - tickHeight, height, BEAT_MARK, alpha);
   }
 }
 

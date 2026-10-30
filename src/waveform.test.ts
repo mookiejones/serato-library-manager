@@ -259,6 +259,34 @@ describe("time to x", () => {
   });
 });
 
+describe("beat ticks", () => {
+  it("draws one-pixel edge marks, with a longer brighter downbeat", () => {
+    const tiles = new DetailTiles(new Uint8Array(150 * 6), 150, 150);
+    const width = 200;
+    const height = 100;
+    const frame = new Uint8ClampedArray(width * height * 4);
+    tiles.paint(frame, width, height, 1, 1, 80, {
+      cues: [{ seconds: 1.2, color: "#CC0000" }],
+      loops: [{ startSeconds: 0.2, endSeconds: 0.4, color: "#27AAE1" }],
+      beatgrid: [{ positionSeconds: 0, bpm: 120 }],
+    });
+    const at = (x: number, y: number): number[] => {
+      const offset = (y * width + x) * 4;
+      return [frame[offset] ?? 0, frame[offset + 1] ?? 0, frame[offset + 2] ?? 0, frame[offset + 3] ?? 0];
+    };
+    const background = [0x23, 0x19, 0x10, 255];
+    expect(at(20, 0)).toEqual([112, 106, 100, 255]);
+    expect(at(21, 0)).toEqual(background);
+    expect(at(60, 0)).toEqual([97, 89, 83, 255]);
+    expect(at(20, 15)).toEqual([112, 106, 100, 255]);
+    expect(at(60, 15)).toEqual(background);
+    expect(at(20, 50)).toEqual(background);
+    expect(at(20, 99)).toEqual([112, 106, 100, 255]);
+    expect(at(60, 99)).toEqual([97, 89, 83, 255]);
+    expect(at(116, 50)).toEqual([204, 0, 0, 255]);
+  });
+});
+
 describe("overview shade", () => {
   it("darkens only the played columns", () => {
     const pixels = new Uint8ClampedArray(8 * 4);

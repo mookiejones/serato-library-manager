@@ -10,7 +10,7 @@ Cue points from the file sit on the seek bar in their colors. Click a cue to jum
 
 The bar also shows a waveform. The zoomed view keeps the playhead in the center and scrolls the track past it. Lows are red, mids are green, and highs are blue. **+** and **−** zoom in and out. Hold **Ctrl**, or **Command** on a Mac, and roll the mouse wheel to zoom. Those controls are not shortcut keys.
 
-Under that is the whole track. The part you have already played is darker. Click or drag there to move through the track. Cue points and loops are drawn on both views, in the colors stored on the file. A loop is a shaded region. Beat marks sit on the zoomed view, and a downbeat is taller.
+Under that is the whole track. The part you have already played is darker. Click or drag there to move through the track. Cue points and loops are drawn on both views, in the colors stored on the file. A loop is a shaded region. Beat marks sit on the zoomed view, as short lines along the top and bottom. A downbeat is a little longer than the other beats.
 
 While the waveform is still being read, the overview uses the Serato Overview stored in the file, then switches to the computed one. If the file has no waveform, the bar says **Waveform unavailable for this format**. The track still plays.
 

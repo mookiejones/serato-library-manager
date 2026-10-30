@@ -190,6 +190,8 @@ describe("waveform loading", () => {
     document.body.append(host);
     const view = mountWaveform(host, hooks());
     view.setTrack(7);
+    expect(host.querySelector<HTMLButtonElement>("[aria-label='Zoom in']")?.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>("[aria-label='Zoom out']")?.disabled).toBe(true);
     await vi.waitUntil(() => host.querySelector(".waveform-overview")?.getAttribute("data-waveform-overview") === "serato");
     expect(host.dataset.waveformState).toBe("reading");
     expect(calls.some((url) => url.includes("/api/waveform?") && !url.includes("overview") && !url.includes("path="))).toBe(true);
@@ -202,6 +204,7 @@ describe("waveform loading", () => {
     await vi.waitUntil(() => host.querySelector(".waveform-overview")?.getAttribute("data-waveform-overview") === "computed");
     expect(host.dataset.waveformState).toBe("ready");
     expect(host.querySelector<HTMLElement>(".waveform-note")?.hidden).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>("[aria-label='Zoom in']")?.disabled).toBe(false);
   });
 
   it("shows the format note and does not throw when the waveform is unavailable", async () => {
@@ -225,6 +228,49 @@ describe("waveform loading", () => {
     expect(note?.hidden).toBe(false);
     expect(host.querySelector(".waveform-detail-wrap")?.hasAttribute("hidden")).toBe(true);
     expect(host.querySelector<HTMLButtonElement>("[aria-label='Zoom in']")?.disabled).toBe(true);
+  });
+
+  it("updates the overview slider about once a second, and immediately on seek", () => {
+    let time = 0;
+    let sync = (): void => {};
+    const host = document.createElement("div");
+    document.body.append(host);
+    const view = mountWaveform(host, {
+      ...hooks((seconds) => {
+        time = seconds;
+        sync();
+      }),
+      getTime: () => time,
+    });
+    sync = () => view.sync();
+    view.showComputed(parsedWave());
+    const slider = host.querySelector(".waveform-overview");
+    expect(slider?.getAttribute("aria-valuenow")).toBe("0");
+    expect(slider?.getAttribute("aria-valuetext")).toBe("0");
+    time = 0.4;
+    view.sync();
+    expect(slider?.getAttribute("aria-valuenow")).toBe("0");
+    time = 1.2;
+    view.sync();
+    expect(slider?.getAttribute("aria-valuenow")).toBe("1.2");
+    expect(slider?.getAttribute("aria-valuetext")).toBe("1.2");
+    slider!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 200,
+        top: 0,
+        height: 36,
+        right: 200,
+        bottom: 36,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+    slider!.dispatchEvent(new PointerEvent("pointerdown", { button: 0, clientX: 50, bubbles: true }));
+    expect(slider?.getAttribute("aria-valuenow")).toBe("5");
+    expect(slider?.getAttribute("aria-valuetext")).toBe("5");
   });
 });
 

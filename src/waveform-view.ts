@@ -130,6 +130,10 @@ class WaveformView implements WaveformController {
   private raf = 0;
   private dragging = false;
   private disposed = false;
+  private detailImage: ImageData | null = null;
+  private overviewImage: ImageData | null = null;
+  private lastAriaKey = "";
+  private ariaImmediate = false;
   private readonly onWheel: (event: WheelEvent) => void;
   private readonly onResize: () => void;
   private resizeObserver: ResizeObserver | null = null;
@@ -403,14 +407,15 @@ class WaveformView implements WaveformController {
   }
 
   private syncZoomButtons(): void {
-    const unavailable = this.host.dataset.waveformState === "unavailable";
-    this.zoomIn.disabled = unavailable || this.pps >= ZOOM_MAX_PPS - 1e-9;
-    this.zoomOut.disabled = unavailable || this.pps <= ZOOM_MIN_PPS + 1e-9;
+    const phase = this.host.dataset.waveformState;
+    const blocked = phase === "reading" || phase === "unavailable";
+    this.zoomIn.disabled = blocked || this.pps >= ZOOM_MAX_PPS - 1e-9;
+    this.zoomOut.disabled = blocked || this.pps <= ZOOM_MIN_PPS + 1e-9;
   }
 
   private wheel(event: WheelEvent): void {
     if (!event.ctrlKey && !event.metaKey) return;
-    if (this.host.dataset.waveformState === "unavailable") return;
+    if (this.host.dataset.waveformState !== "ready") return;
     event.preventDefault();
     if (event.deltaY < 0) this.setZoom(zoomPixelsPerSecond(this.pps, 1));
     else if (event.deltaY > 0) this.setZoom(zoomPixelsPerSecond(this.pps, -1));
@@ -442,6 +447,7 @@ class WaveformView implements WaveformController {
     const rect = this.overviewHit.getBoundingClientRect();
     const duration = this.duration();
     const x = event.clientX - rect.left;
+    this.ariaImmediate = true;
     this.hooks.seek(overviewXToTime(x, rect.width, duration));
   }
 
@@ -453,6 +459,7 @@ class WaveformView implements WaveformController {
     event.preventDefault();
     event.stopPropagation();
     const step = event.shiftKey ? this.hooks.seekStepLarge : this.hooks.seekStep;
+    this.ariaImmediate = true;
     this.hooks.seekBy((forward ? 1 : -1) * step);
   }
 
@@ -478,19 +485,19 @@ class WaveformView implements WaveformController {
     const duration = this.duration();
     this.paintDetail(time);
     this.paintOverview(time, duration);
-    this.updateSlider(time, duration);
+    const immediate = this.ariaImmediate;
+    this.ariaImmediate = false;
+    this.updateSlider(time, duration, immediate);
   }
 
   private paintDetail(time: number): void {
     if (!this.tiles || !this.parsed) return;
     const size = sizeCanvas(this.detail, 96);
     if (!size) return;
-    const frame = new Uint8ClampedArray(size.width * size.height * 4);
-    this.tiles.paint(frame, size.width, size.height, size.dpr, time, this.pps, this.markers);
     const context = this.detail.getContext("2d");
     if (!context) return;
-    const image = context.createImageData(size.width, size.height);
-    image.data.set(frame);
+    const image = this.canvasImage(context, "detail", size.width, size.height);
+    this.tiles.paint(image.data, size.width, size.height, size.dpr, time, this.pps, this.markers);
     context.putImageData(image, 0, 0);
   }
 
@@ -499,15 +506,40 @@ class WaveformView implements WaveformController {
     if (!size) return;
     const source = this.overviewPixels(size.width, size.height);
     if (!source) return;
-    const frame = source.slice();
-    const played = duration > 0 ? (Math.min(duration, Math.max(0, time)) / duration) * size.width : 0;
-    shadePlayed(frame, size.width, size.height, played);
-    drawOverviewMarks(frame, size.width, size.height, duration > 0 ? duration : this.headerDuration(), time, this.markers);
     const context = this.overviewCanvas.getContext("2d");
     if (!context) return;
-    const image = context.createImageData(size.width, size.height);
-    image.data.set(frame);
+    const image = this.canvasImage(context, "overview", size.width, size.height);
+    image.data.set(source);
+    const played = duration > 0 ? (Math.min(duration, Math.max(0, time)) / duration) * size.width : 0;
+    shadePlayed(image.data, size.width, size.height, played);
+    drawOverviewMarks(image.data, size.width, size.height, duration > 0 ? duration : this.headerDuration(), time, this.markers);
     context.putImageData(image, 0, 0);
+  }
+
+  /**
+   * One ImageData for a canvas, replaced only when the bitmap size changes.
+   *
+   * Width and height already include the device pixel ratio, so a DPR
+   * change allocates again. Playback reuses the same buffer.
+   *
+   * @param context Canvas context that owns the buffer.
+   * @param which Detail or overview cache.
+   * @param width Device pixels.
+   * @param height Device pixels.
+   * @returns The buffer to draw into.
+   */
+  private canvasImage(
+    context: CanvasRenderingContext2D,
+    which: "detail" | "overview",
+    width: number,
+    height: number,
+  ): ImageData {
+    const current = which === "detail" ? this.detailImage : this.overviewImage;
+    if (current && current.width === width && current.height === height) return current;
+    const image = context.createImageData(width, height);
+    if (which === "detail") this.detailImage = image;
+    else this.overviewImage = image;
+    return image;
   }
 
   private overviewPixels(width: number, height: number): Uint8ClampedArray | null {
@@ -532,9 +564,12 @@ class WaveformView implements WaveformController {
     return null;
   }
 
-  private updateSlider(time: number, duration: number): void {
+  private updateSlider(time: number, duration: number, immediate: boolean): void {
     const max = duration > 0 ? duration : 0;
     const now = Math.min(max, Math.max(0, Number.isFinite(time) ? time : 0));
+    const key = `${Math.floor(now)}|${max}`;
+    if (!immediate && key === this.lastAriaKey) return;
+    this.lastAriaKey = key;
     this.overviewHit.setAttribute("aria-valuemin", "0");
     this.overviewHit.setAttribute("aria-valuemax", String(max));
     this.overviewHit.setAttribute("aria-valuenow", String(now));

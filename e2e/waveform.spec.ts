@@ -29,22 +29,18 @@ test("draws cues, loops, and the beatgrid", async ({ page }) => {
     return {
       cue: at("cueX", Math.floor(canvas.height / 2)),
       downbeat: at("downbeatX", 2),
-      downbeatTail: at("downbeatX", 8),
+      downbeatMid: at("downbeatX", Math.floor(canvas.height / 2)),
       beat: at("beatX", 2),
-      beatTail: at("beatX", 8),
       loop: at("loopEdgeX", Math.floor(canvas.height / 2)),
       playhead: at("playheadX", Math.floor(canvas.height / 2)),
     };
   });
-  expect(detailSample).toEqual({
-    cue: [204, 0, 0, 255],
-    downbeat: [243, 236, 223, 255],
-    downbeatTail: [243, 236, 223, 255],
-    beat: [200, 187, 168, 255],
-    beatTail: [35, 25, 16, 255],
-    loop: [39, 170, 225, 255],
-    playhead: [226, 59, 22, 255],
-  });
+  expect(detailSample?.cue).toEqual([204, 0, 0, 255]);
+  expect(detailSample?.downbeat).toEqual([112, 106, 100, 255]);
+  expect(detailSample?.beat).toEqual([97, 89, 83, 255]);
+  expect(detailSample?.downbeatMid).not.toEqual(detailSample?.downbeat);
+  expect(detailSample?.loop).toEqual([39, 170, 225, 255]);
+  expect(detailSample?.playhead).toEqual([226, 59, 22, 255]);
 
   const overviewSample = await overview.evaluate((canvas: HTMLCanvasElement) => {
     const context = canvas.getContext("2d");
