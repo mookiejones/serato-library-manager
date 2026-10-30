@@ -13,6 +13,7 @@ import { clockLabel, colorHex, lengthLabel } from "./format";
 import { getPlayerState, play, subscribe } from "./player";
 import { playerStrings } from "./player-strings";
 import { ROW, state } from "./state";
+import { tip } from "./tips";
 
 const spacer = document.createElement("div");
 const rows = document.createElement("div");
@@ -61,6 +62,7 @@ export function paintRows() {
   for (let index = start; index < end; index += 1) {
     const track = view[index]!;
     const button = document.createElement("div");
+    tip(button, "trackRow");
     button.className = "row";
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", String(track.id === state.selectedId));
@@ -74,6 +76,7 @@ export function paintRows() {
       const playingNow = getPlayerState();
       const playingThis = playingNow.trackId === track.id && playingNow.playing;
       const playButton = document.createElement("button");
+      tip(playButton, "rowPlay");
       playButton.type = "button";
       playButton.className = "row-play";
       const labelName = track.name || playerStrings.untitled;

@@ -9,6 +9,7 @@ import { failureOf, postJSON, readJSON } from "./api";
 import type { FrameDiff, PlanName, RestorePlan, SnapshotList } from "./api-types";
 import { el } from "./dom";
 import { state } from "./state";
+import { tip } from "./tips";
 
 let reloadLibrary: () => Promise<void> = async () => {};
 
@@ -90,6 +91,7 @@ function renderSnapshots() {
   if (state.snapshotError) {
     status.textContent = state.snapshotError;
     const retry = document.createElement("button");
+    tip(retry, "snapshotsRetry");
     retry.type = "button";
     retry.textContent = "Try again";
     retry.addEventListener("click", () => loadSnapshots().catch((error) => failSnapshots(error)));
@@ -118,6 +120,7 @@ function renderSnapshots() {
       : "";
     detail.textContent = `${version}. ${item.reason || ""}${drives}`;
     const restore = document.createElement("button");
+    tip(restore, "snapshotRestore");
     restore.type = "button";
     restore.textContent = "Review restore";
     restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));

@@ -64,9 +64,11 @@ describe("waveform controls", () => {
     view.showComputed(parsedWave());
     const zoomIn = host.querySelector<HTMLButtonElement>("[aria-label='Zoom in']");
     const zoomOut = host.querySelector<HTMLButtonElement>("[aria-label='Zoom out']");
-    expect(zoomIn?.title).toBe(playerStrings.zoomIn);
-    expect(zoomOut?.title).toBe(playerStrings.zoomOut);
-    expect(host.querySelector(".waveform-overview")?.getAttribute("title")).toBe(playerStrings.overviewSeek);
+    expect(zoomIn?.getAttribute("aria-label")).toBe(playerStrings.zoomIn);
+    expect(zoomOut?.getAttribute("aria-label")).toBe(playerStrings.zoomOut);
+    expect(zoomIn?.dataset.tip).toBe("waveformZoomIn");
+    expect(zoomOut?.dataset.tip).toBe("waveformZoomOut");
+    expect(host.querySelector<HTMLElement>(".waveform-overview")?.dataset.tip).toBe("waveformOverview");
     expect(view.pixelsPerSecond()).toBe(80);
     zoomIn?.click();
     expect(view.pixelsPerSecond()).toBe(100);

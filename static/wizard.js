@@ -161,6 +161,12 @@ var SeratoWizard = (() => {
     return { ...model2, step: next };
   }
 
+  // src/tips.ts
+  function tip(control, key, detail) {
+    control.dataset.tip = key;
+    if (detail) control.dataset.tipDetail = detail;
+  }
+
   // src/wizard-view.ts
   var LABELS = {
     "get-started": "Get started",
@@ -481,6 +487,7 @@ var SeratoWizard = (() => {
     }
     for (const folder of folders) {
       const control = document.createElement("button");
+      tip(control, "wizardFolder");
       control.type = "button";
       control.className = "wizard-folder";
       control.textContent = folder.name;

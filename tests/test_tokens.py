@@ -371,6 +371,8 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     (".rail-foot button", ("--color-bg",), 15, 400),
     (".app-version", ("--color-bg",), 13, 400),
     (".mode-note", ("--color-bg",), 13, 400),
+    (".tooltip", ("--color-bg",), 11, 400),
+    (".tooltip-keys", ("--color-bg",), 11, 400),
     (".crate-foot", ("--color-bg",), 13, 400),
     (".crate-row", ("--color-bg", "--color-panel"), 15, 400),
     (".twist", ("--color-bg", "--color-panel"), 15, 400),
@@ -495,7 +497,10 @@ _FOCUS_SURFACES = ("--color-bg", "--color-panel", "--color-card", "--color-selec
 #   .files-actions border-top
 # .swatch inset shadow: a 1px hairline of --color-shadow at 18% on a
 # data-driven swatch, not a control boundary.
+# .tooltip border: a hairline that lifts the tooltip off the dark rail. The
+# tooltip is not a control and its text is measured in _TEXT.
 _DECORATIVE = {
+    ".tooltip",
     ".detail",
     ".columns",
     ".field",

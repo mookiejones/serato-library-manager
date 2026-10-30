@@ -13,6 +13,7 @@
 
 import { playerStrings } from "./player-strings";
 import { state } from "./state";
+import { tip, type TipKey } from "./tips";
 import {
   DetailTiles,
   ZOOM_DEFAULT_PPS,
@@ -164,15 +165,15 @@ class WaveformView implements WaveformController {
     this.overviewHit.setAttribute("role", "slider");
     this.overviewHit.setAttribute("aria-label", playerStrings.overview);
     this.overviewHit.setAttribute("aria-orientation", "horizontal");
-    this.overviewHit.title = playerStrings.overviewSeek;
+    tip(this.overviewHit, "waveformOverview");
     this.overviewCanvas = document.createElement("canvas");
     this.overviewCanvas.setAttribute("aria-hidden", "true");
     this.overviewHit.append(this.overviewCanvas);
     main.append(this.detailWrap, this.note, this.overviewHit);
     const zoom = document.createElement("div");
     zoom.className = "waveform-zoom";
-    this.zoomIn = button(playerStrings.zoomIn, "+");
-    this.zoomOut = button(playerStrings.zoomOut, "\u2212");
+    this.zoomIn = button(playerStrings.zoomIn, "+", "waveformZoomIn");
+    this.zoomOut = button(playerStrings.zoomOut, "\u2212", "waveformZoomOut");
     this.zoomIn.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, 1)));
     this.zoomOut.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, -1)));
     zoom.append(this.zoomIn, this.zoomOut);
@@ -588,12 +589,12 @@ class WaveformView implements WaveformController {
   }
 }
 
-function button(label: string, text: string): HTMLButtonElement {
+function button(label: string, text: string, key: TipKey): HTMLButtonElement {
   const element = document.createElement("button");
   element.type = "button";
   element.className = "waveform-zoom-button";
   element.textContent = text;
-  element.title = label;
+  tip(element, key);
   element.setAttribute("aria-label", label);
   return element;
 }

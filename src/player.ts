@@ -33,6 +33,7 @@
 import type { Marker, Track } from "./api-types";
 import { playerStrings } from "./player-strings";
 import { state } from "./state";
+import { tip } from "./tips";
 import { beatgridFromMarkers, loopsFromMarkers } from "./waveform";
 import { mountWaveform, type WaveformController } from "./waveform-view";
 
@@ -580,17 +581,20 @@ function buildBar(): HTMLElement {
   meta.append(titleNode, artistNode, statusNode);
 
   previousNode = document.createElement("button");
+  tip(previousNode, "playerPrevious");
   previousNode.type = "button";
   previousNode.className = "player-toggle";
   previousNode.textContent = playerStrings.previous;
   previousNode.addEventListener("click", () => previous());
 
   toggleNode = document.createElement("button");
+  tip(toggleNode, "playerToggle");
   toggleNode.type = "button";
   toggleNode.className = "player-toggle player-play";
   toggleNode.addEventListener("click", () => togglePlayPause());
 
   nextNode = document.createElement("button");
+  tip(nextNode, "playerNext");
   nextNode.type = "button";
   nextNode.className = "player-toggle";
   nextNode.textContent = playerStrings.next;
@@ -613,6 +617,7 @@ function buildBar(): HTMLElement {
   const track = document.createElement("div");
   track.className = "player-seek-track";
   seekNode = document.createElement("input");
+  tip(seekNode, "playerSeek");
   seekNode.type = "range";
   seekNode.className = "player-range";
   seekNode.min = "0";
@@ -651,6 +656,7 @@ function buildBar(): HTMLElement {
   const volumeText = document.createElement("span");
   volumeText.textContent = playerStrings.volume;
   const volumeInput = document.createElement("input");
+  tip(volumeInput, "playerVolume");
   volumeInput.type = "range";
   volumeInput.min = "0";
   volumeInput.max = "1";
@@ -760,7 +766,7 @@ function paintCues(limit: number): void {
     button.style.left = `${percent}%`;
     if (cue.color) button.style.setProperty("--cue", cue.color);
     const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
-    button.title = label;
+    tip(button, "playerCue", label);
     button.setAttribute("aria-label", label);
     button.addEventListener("click", () => {
       seek(cue.seconds);

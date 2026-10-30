@@ -4,6 +4,8 @@ The keys work anywhere on the library screen, except while you are typing in a f
 
 **Shortcuts**, at the bottom of the sidebar, opens the list. **?** opens it too.
 
+Rest the pointer on any control, or reach it with Tab, and a short note says what it does. If the control has a shortcut, the note shows the keys. Esc or any other key hides the note.
+
 | Key | Action |
 | --- | --- |
 | Ctrl+F or Command+F, or / | Focus search |

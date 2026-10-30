@@ -13,6 +13,7 @@ import { el } from "./dom";
 import { scoreQuery } from "./fuzzy";
 import { ROW, state } from "./state";
 import { focusFileByPath, loadFolder, selectCrate, selectTrack, setMode } from "./views";
+import { tip } from "./tips";
 
 /** Wait before asking the disk, so a fast typist does not search every letter. */
 export const QUICK_OPEN_MS = 200;
@@ -279,6 +280,7 @@ function paint(): void {
   hits.forEach((hit, index) => {
     const item = document.createElement("li");
     const button = document.createElement("button");
+    tip(button, "quickOpenResult", hit.detail);
     button.type = "button";
     button.className = "quick-open-option";
     button.id = `quick-open-option-${index}`;
@@ -296,7 +298,6 @@ function paint(): void {
     const detail = document.createElement("span");
     detail.className = "quick-open-detail";
     detail.textContent = hit.detail;
-    detail.title = hit.detail;
     button.append(kind, title, detail);
     button.addEventListener("click", () => {
       active = index;

@@ -24,6 +24,7 @@ import {
   type PrimaryAction,
   type WizardModel,
 } from "./wizard";
+import { tip } from "./tips";
 
 export interface SettingsPayload {
   telemetry_consent: boolean | null;
@@ -399,6 +400,7 @@ function fillFolders(folders: readonly FolderRow[]): void {
   }
   for (const folder of folders) {
     const control = document.createElement("button");
+    tip(control, "wizardFolder");
     control.type = "button";
     control.className = "wizard-folder";
     control.textContent = folder.name;

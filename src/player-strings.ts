@@ -23,7 +23,6 @@ export const playerStrings = {
   zoomIn: "Zoom in",
   zoomOut: "Zoom out",
   overview: "Track overview",
-  overviewSeek: "Click or drag to seek",
   waveformReading: "Reading the waveform…",
   waveformUnavailable: "Waveform unavailable for this format",
 } as const;

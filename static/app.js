@@ -98,20 +98,20 @@
   function mountSplitter(options) {
     const { handle, container, first, property, minFirst, minSecond, onCommit } = options;
     const step = options.step ?? 16;
-    let current = null;
+    let current2 = null;
     const available = () => container.clientWidth - handle.offsetWidth;
     const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
-    const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
+    const shown = () => current2 == null ? first.getBoundingClientRect().width : fitted(current2);
     function paint3() {
-      if (current == null) container.style.removeProperty(property);
-      else container.style.setProperty(property, `${fitted(current)}px`);
+      if (current2 == null) container.style.removeProperty(property);
+      else container.style.setProperty(property, `${fitted(current2)}px`);
       const room = available();
       handle.setAttribute("aria-valuemin", String(minFirst));
       handle.setAttribute("aria-valuemax", String(Math.max(minFirst, Math.round(room - minSecond))));
       handle.setAttribute("aria-valuenow", String(Math.round(shown())));
     }
     function move(width) {
-      current = fitted(width);
+      current2 = fitted(width);
       paint3();
     }
     handle.addEventListener("pointerdown", (event) => {
@@ -133,7 +133,7 @@
         handle.removeEventListener("pointercancel", onEnd);
         delete handle.dataset.dragging;
         document.body.classList.remove("is-resizing");
-        if (moved) onCommit(current);
+        if (moved) onCommit(current2);
       };
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", onEnd);
@@ -148,22 +148,22 @@
       else if (event.key === "End") next2 = available() - minSecond;
       else return;
       event.preventDefault();
-      const before = current;
+      const before = current2;
       move(next2);
-      if (current !== before) onCommit(current);
+      if (current2 !== before) onCommit(current2);
     });
     handle.addEventListener("dblclick", () => {
-      current = null;
+      current2 = null;
       paint3();
       onCommit(null);
     });
     paint3();
     return {
       set(width) {
-        current = width == null ? null : Math.round(width);
+        current2 = width == null ? null : Math.round(width);
         paint3();
       },
-      width: () => current,
+      width: () => current2,
       refit: paint3
     };
   }
@@ -341,6 +341,169 @@
     return a.id - b.id;
   }
 
+  // src/tips.ts
+  var tips = {
+    space: "Choose which part of your library to show.",
+    viewCrates: "Show your crates and their tracks.",
+    viewHistory: "Show the sessions you played.",
+    viewMissing: "Show tracks whose files cannot be found.",
+    viewDuplicates: "Show tracks that are in the library more than once.",
+    viewStems: "Show tracks that have stems.",
+    viewFiles: "Show the music files on this computer.",
+    viewSnapshots: "Show saved copies of your library.",
+    crateSearch: "Type a name to narrow the crate list.",
+    crateSortOrder: "List crates in your Serato order.",
+    crateSortName: "List crates from A to Z.",
+    crateSortAdded: "List the newest crates first.",
+    crateRow: "Show the tracks in this crate.",
+    crateExpand: "Show the crates inside this one.",
+    crateCollapse: "Hide the crates inside this one.",
+    crateNew: "Make a new crate.",
+    crateRename: "Change the name of this crate.",
+    crateColor: "Change the color of this crate.",
+    crateDelete: "Delete this crate. Its music files stay on disk.",
+    crateMember: "Tick to keep this track in this crate.",
+    smartRules: "Edit the rules that choose this crate's tracks.",
+    smartRulesSave: "Save the rules for this smart crate.",
+    mergeCopies: "Keep one copy of this track and remove the others.",
+    openShortcuts: "List the keyboard shortcuts.",
+    openSettings: "Open settings for sharing, logs, and setup.",
+    search: "Type a title or artist to narrow the list.",
+    exportM3u: "Download this list as a playlist file.",
+    exportRekordbox: "Download a rekordbox.xml file of this library.",
+    rekordboxMemory: "Include memory cues in the Rekordbox file.",
+    rekordboxHotLoops: "Add saved loops to the Rekordbox file. Each uses a free hot-cue pad.",
+    rekordboxKey: "Choose how keys are written in the Rekordbox file.",
+    importM3u: "Make a new crate from a playlist file.",
+    reload: "Read the library again to pick up new changes.",
+    sortColumn: "Sort the list by this column. Click again to reverse it.",
+    trackRow: "Show the details of this track.",
+    splitter: "Drag to resize the track list. Double-click to reset it.",
+    trackTitle: "The track's title.",
+    trackArtist: "The artist's name.",
+    trackAlbum: "The album name.",
+    trackGenre: "The style of music.",
+    trackYear: "The year the track came out.",
+    trackComposer: "The person who wrote the track.",
+    trackRemixer: "The person who remixed the track.",
+    trackLabel: "The record label.",
+    trackGrouping: "Your own group name for this track.",
+    trackKey: "The musical key.",
+    trackBpm: "The speed in beats per minute.",
+    trackEmoji: "An emoji to mark this track.",
+    trackComments: "Your own notes about this track.",
+    trackColor: "Choose the color that marks this track.",
+    trackRating: "Give this track a star rating.",
+    trackGridLock: "Tick to stop the beatgrid from being changed.",
+    trackSave: "Save your changes to this track.",
+    trackReveal: "Show this track's file on your computer.",
+    prepareSend: "Add this track to the Prepare list.",
+    prepareRemove: "Take this track off the Prepare list.",
+    trackRelocate: "Point this track at its file in a new place.",
+    trackRemove: "Remove this track from the library. The file stays on disk.",
+    openInLibrary: "Open this stem's track in the library.",
+    searchCopies: "Show or hide the fields from the other copies.",
+    duplicateCopy: "Show the details of this copy.",
+    relatedCrate: "Update the Serato crate that holds these related tracks.",
+    relatedOpen: "Show this related track.",
+    relatedRemove: "Remove this link. Both tracks stay in the library.",
+    relatedSearch: "Type a title or artist to find a track to link.",
+    relatedChoose: "Choose this track to link.",
+    relatedNote: "Add a note about how these tracks go together.",
+    relatedRating: "Rate how well these tracks go together.",
+    relatedMutual: "Tick to show the link on both tracks.",
+    relatedSave: "Save this link.",
+    relatedSuggestionSave: "Save this suggestion as a link.",
+    historySession: "Show the tracks played in this session.",
+    filesUp: "Go up to the folder that holds this one.",
+    filesCrumb: "Go to this folder.",
+    filesSearch: "Type a name to find a file in this folder.",
+    filesRefresh: "Read this folder again.",
+    filesElsewhere: "Look in a folder outside your music folders.",
+    filesRunSetup: "Run setup to find your library.",
+    filesOpen: "Open this folder.",
+    filesDriveMissing: "This drive is not connected. Connect it and try again.",
+    filesShortcut: "This is a shortcut to another place on disk.",
+    filesSelect: "Tick to choose this file.",
+    filesRename: "Change the name of the chosen file.",
+    filesMove: "Move the chosen files to another folder.",
+    filesMoveFolder: "Move this whole folder.",
+    filesReplace: "Swap the chosen file for another. Its cues and crates stay.",
+    filesDelete: "Move the chosen files to the Trash.",
+    filesMoveHere: "Move the files into this folder.",
+    filesPickCancel: "Stop the move. Nothing changes.",
+    snapshotsRefresh: "Read the list of snapshots again.",
+    snapshotsTake: "Save a copy of your library now.",
+    snapshotsUndo: "See what undoing the outside change would do. Nothing changes yet.",
+    snapshotsRetry: "Try reading the snapshots again.",
+    snapshotRestore: "See what restoring this snapshot would change. Nothing changes yet.",
+    consentDecline: "Do not send usage counts or crash reports.",
+    consentAccept: "Send anonymous usage counts and crash reports.",
+    telemetryToggle: "Tick to send anonymous usage counts and crash reports.",
+    copyVersion: "Copy the version number.",
+    rerunWizard: "Go through first-time setup again.",
+    openLogs: "Open the folder that holds the app's logs.",
+    copyLogs: "Copy the app's logs so you can paste them.",
+    logFallback: "The app's logs. Select the text to copy it.",
+    dialogClose: "Close this box.",
+    dialogCancel: "Close this box. Nothing changes.",
+    mergeKeep: "Choose this copy to keep.",
+    mergeTrash: "Tick to also move the other files to the Trash.",
+    mergeConfirm: "Merge the copies into the one you chose.",
+    rekordboxDownload: "Download the rekordbox.xml file.",
+    filesName: "Type the new name.",
+    filesReplacement: "Type the full path of the new file.",
+    filesReview: "See what will change. Nothing changes yet.",
+    filesConfirm: "Make this change.",
+    quickOpenQuery: "Type part of a track or file name.",
+    quickOpenRetry: "Search the files on disk again.",
+    quickOpenResult: "Open this track or file.",
+    snapshotConfirm: "Put your library back to this snapshot.",
+    wizardFolderUp: "Go up to the folder that holds this one.",
+    wizardFolderUse: "Use the folder you are looking at.",
+    wizardFolderClose: "Close the folder list.",
+    wizardFolder: "Open this folder.",
+    wizardNo: "Do not send usage counts or crash reports.",
+    wizardYes: "Send anonymous usage counts and crash reports.",
+    wizardBack: "Go back one step.",
+    wizardCancel: "Close setup. It runs again next time.",
+    wizardSecondary: "Find your library folder yourself.",
+    wizardPrimary: "Go on to the next step.",
+    rowPlay: "Play this track.",
+    playerPrevious: "Go to the track before this one.",
+    playerToggle: "Play or pause the track.",
+    playerNext: "Go to the next track.",
+    playerSeek: "Drag to move through the track.",
+    playerVolume: "Change how loud the track plays.",
+    playerCue: "Jump to this cue point.",
+    waveformOverview: "Click or drag to move through the track.",
+    waveformZoomIn: "Show less of the track in more detail.",
+    waveformZoomOut: "Show more of the track in less detail."
+  };
+  var TIP_SHORTCUTS = {
+    search: "focus-search",
+    crateSearch: "focus-search",
+    filesSearch: "focus-search",
+    openShortcuts: "cheat-sheet",
+    viewCrates: "view-crates",
+    viewFiles: "view-files",
+    viewHistory: "view-history",
+    viewSnapshots: "view-snapshots",
+    trackRow: "list-open",
+    filesOpen: "list-open",
+    quickOpenResult: "list-open",
+    dialogClose: "dismiss",
+    dialogCancel: "dismiss",
+    rowPlay: "play-pause",
+    playerToggle: "play-pause",
+    playerSeek: ["seek-back", "seek-forward"],
+    waveformOverview: ["seek-back", "seek-forward"]
+  };
+  function tip(control, key, detail) {
+    control.dataset.tip = key;
+    if (detail) control.dataset.tipDetail = detail;
+  }
+
   // src/restore.ts
   var reloadLibrary = async () => {
   };
@@ -394,6 +557,7 @@
     if (state.snapshotError) {
       status.textContent = state.snapshotError;
       const retry = document.createElement("button");
+      tip(retry, "snapshotsRetry");
       retry.type = "button";
       retry.textContent = "Try again";
       retry.addEventListener("click", () => loadSnapshots().catch((error2) => failSnapshots(error2)));
@@ -418,6 +582,7 @@
       const drives = (item.unavailable_drives || []).length ? ` Unavailable: ${(item.unavailable_drives || []).join(", ")}.` : "";
       detail.textContent = `${version}. ${item.reason || ""}${drives}`;
       const restore = document.createElement("button");
+      tip(restore, "snapshotRestore");
       restore.type = "button";
       restore.textContent = "Review restore";
       restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error2) => setSnapshotDialogStatus(failureOf(error2).message)));
@@ -468,27 +633,27 @@
     }
   }
   function appendPlanLine(parent, label, rows2) {
-    const line = document.createElement("p");
+    const line2 = document.createElement("p");
     const items = rows2 || [];
     if (!items.length) {
-      line.textContent = `${label}: none`;
+      line2.textContent = `${label}: none`;
     } else {
       const names = items.slice(0, 8).map((item) => item.name || item.path || item.drive_label || "item");
       const extra = items.length > names.length ? `, and ${items.length - names.length} more` : "";
-      line.textContent = `${label}: ${items.length}. ${names.join(", ")}${extra}`;
+      line2.textContent = `${label}: ${items.length}. ${names.join(", ")}${extra}`;
     }
-    parent.append(line);
+    parent.append(line2);
   }
   function appendFrameDiffs(parent, label, rows2) {
     const items = rows2 || [];
-    const line = document.createElement("p");
+    const line2 = document.createElement("p");
     if (!items.length) {
-      line.textContent = `${label}: none`;
-      parent.append(line);
+      line2.textContent = `${label}: none`;
+      parent.append(line2);
       return;
     }
-    line.textContent = `${label}: ${items.length} file${items.length === 1 ? "" : "s"}`;
-    parent.append(line);
+    line2.textContent = `${label}: ${items.length} file${items.length === 1 ? "" : "s"}`;
+    parent.append(line2);
     for (const item of items.slice(0, 12)) {
       const row = document.createElement("p");
       row.textContent = fileName(item.path || "");
@@ -555,7 +720,6 @@
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
     overview: "Track overview",
-    overviewSeek: "Click or drag to seek",
     waveformReading: "Reading the waveform…",
     waveformUnavailable: "Waveform unavailable for this format"
   };
@@ -701,8 +865,8 @@
     const ratio = Math.min(1, Math.max(0, x / width));
     return ratio * durationSeconds;
   }
-  function zoomPixelsPerSecond(current, direction) {
-    const base = Number.isFinite(current) && current > 0 ? current : ZOOM_DEFAULT_PPS;
+  function zoomPixelsPerSecond(current2, direction) {
+    const base = Number.isFinite(current2) && current2 > 0 ? current2 : ZOOM_DEFAULT_PPS;
     const next2 = base * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR);
     if (next2 >= ZOOM_MAX_PPS) return ZOOM_MAX_PPS;
     if (next2 <= ZOOM_MIN_PPS) return ZOOM_MIN_PPS;
@@ -745,11 +909,11 @@
     if (!rows2 || rows2.length === 0) return [];
     const found = [];
     for (const row of rows2) {
-      const start = finiteNumber(row.start_ms);
+      const start2 = finiteNumber(row.start_ms);
       const end = finiteNumber(row.end_ms);
-      if (start === null || end === null || end <= start || start < 0) continue;
+      if (start2 === null || end === null || end <= start2 || start2 < 0) continue;
       found.push({
-        startSeconds: start / 1e3,
+        startSeconds: start2 / 1e3,
         endSeconds: end / 1e3,
         color: typeof row.color === "string" ? row.color : ""
       });
@@ -863,15 +1027,15 @@
     const columns = source.kind === "computed" ? source.count : source.columns.length;
     if (columns < 1 || width < 1 || height < 1) return pixels;
     for (let x = 0; x < width; x += 1) {
-      const start = Math.floor(x / width * columns);
-      const end = Math.max(start + 1, Math.floor((x + 1) / width * columns));
+      const start2 = Math.floor(x / width * columns);
+      const end = Math.max(start2 + 1, Math.floor((x + 1) / width * columns));
       let lowPeak = 0;
       let lowRms = 0;
       let midPeak = 0;
       let midRms = 0;
       let highPeak = 0;
       let highRms = 0;
-      for (let index = start; index < end && index < columns; index += 1) {
+      for (let index = start2; index < end && index < columns; index += 1) {
         if (source.kind === "computed") {
           const offset = index * 6;
           lowPeak = Math.max(lowPeak, source.points[offset] ?? 0);
@@ -974,10 +1138,10 @@
   function drawLoops(pixels, width, height, dpr, playheadSeconds, pixelsPerSecond, cssWidth, loops, xOf) {
     for (const loop of loops) {
       const color = colorFromHex(loop.color) ?? DEFAULT_MARKER_COLOR;
-      const start = xOf ? xOf(loop.startSeconds) : timeToX(loop.startSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
+      const start2 = xOf ? xOf(loop.startSeconds) : timeToX(loop.startSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
       const end = xOf ? xOf(loop.endSeconds) : timeToX(loop.endSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
-      const left = Math.min(start, end);
-      const right = Math.max(start, end);
+      const left = Math.min(start2, end);
+      const right = Math.max(start2, end);
       fillSpan(pixels, width, height, Math.floor(left), Math.ceil(right), 0, height, color, 0.35);
       const edge = Math.max(1, Math.round(dpr));
       fillSpan(pixels, width, height, Math.round(left), Math.round(left) + edge, 0, height, color, 1);
@@ -1137,15 +1301,15 @@
       this.overviewHit.setAttribute("role", "slider");
       this.overviewHit.setAttribute("aria-label", playerStrings.overview);
       this.overviewHit.setAttribute("aria-orientation", "horizontal");
-      this.overviewHit.title = playerStrings.overviewSeek;
+      tip(this.overviewHit, "waveformOverview");
       this.overviewCanvas = document.createElement("canvas");
       this.overviewCanvas.setAttribute("aria-hidden", "true");
       this.overviewHit.append(this.overviewCanvas);
       main.append(this.detailWrap, this.note, this.overviewHit);
       const zoom = document.createElement("div");
       zoom.className = "waveform-zoom";
-      this.zoomIn = button(playerStrings.zoomIn, "+");
-      this.zoomOut = button(playerStrings.zoomOut, "−");
+      this.zoomIn = button(playerStrings.zoomIn, "+", "waveformZoomIn");
+      this.zoomOut = button(playerStrings.zoomOut, "−", "waveformZoomOut");
       this.zoomIn.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, 1)));
       this.zoomOut.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, -1)));
       zoom.append(this.zoomIn, this.zoomOut);
@@ -1476,8 +1640,8 @@
      * @returns The buffer to draw into.
      */
     canvasImage(context, which, width, height) {
-      const current = which === "detail" ? this.detailImage : this.overviewImage;
-      if (current && current.width === width && current.height === height) return current;
+      const current2 = which === "detail" ? this.detailImage : this.overviewImage;
+      if (current2 && current2.width === width && current2.height === height) return current2;
       const image = context.createImageData(width, height);
       if (which === "detail") this.detailImage = image;
       else this.overviewImage = image;
@@ -1525,12 +1689,12 @@
       return this.parsed.durationMs / 1e3;
     }
   };
-  function button(label, text) {
+  function button(label, text, key) {
     const element = document.createElement("button");
     element.type = "button";
     element.className = "waveform-zoom-button";
     element.textContent = text;
-    element.title = label;
+    tip(element, key);
     element.setAttribute("aria-label", label);
     return element;
   }
@@ -1600,14 +1764,14 @@
     if (!rows2 || rows2.length === 0) return [];
     const found = [];
     for (const cue of rows2) {
-      const start = Number(cue.start_ms);
-      if (!Number.isFinite(start) || start < 0) continue;
+      const start2 = Number(cue.start_ms);
+      if (!Number.isFinite(start2) || start2 < 0) continue;
       const index = Number(cue.index);
       const named = typeof cue.name === "string" ? cue.name.trim() : "";
       const fallback = Number.isInteger(index) ? index + 1 : found.length + 1;
       const color = typeof cue.color === "string" && CUE_COLOR.test(cue.color) ? cue.color : "";
       found.push({
-        seconds: start / 1e3,
+        seconds: start2 / 1e3,
         color,
         label: named || `${playerStrings.cue} ${fallback}`
       });
@@ -1873,15 +2037,18 @@
     statusNode.setAttribute("role", "status");
     meta.append(titleNode, artistNode, statusNode);
     previousNode = document.createElement("button");
+    tip(previousNode, "playerPrevious");
     previousNode.type = "button";
     previousNode.className = "player-toggle";
     previousNode.textContent = playerStrings.previous;
     previousNode.addEventListener("click", () => previous());
     toggleNode = document.createElement("button");
+    tip(toggleNode, "playerToggle");
     toggleNode.type = "button";
     toggleNode.className = "player-toggle player-play";
     toggleNode.addEventListener("click", () => togglePlayPause());
     nextNode = document.createElement("button");
+    tip(nextNode, "playerNext");
     nextNode.type = "button";
     nextNode.className = "player-toggle";
     nextNode.textContent = playerStrings.next;
@@ -1901,6 +2068,7 @@
     const track = document.createElement("div");
     track.className = "player-seek-track";
     seekNode = document.createElement("input");
+    tip(seekNode, "playerSeek");
     seekNode.type = "range";
     seekNode.className = "player-range";
     seekNode.min = "0";
@@ -1937,6 +2105,7 @@
     const volumeText = document.createElement("span");
     volumeText.textContent = playerStrings.volume;
     const volumeInput = document.createElement("input");
+    tip(volumeInput, "playerVolume");
     volumeInput.type = "range";
     volumeInput.min = "0";
     volumeInput.max = "1";
@@ -2040,7 +2209,7 @@
       button2.style.left = `${percent}%`;
       if (cue.color) button2.style.setProperty("--cue", cue.color);
       const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
-      button2.title = label;
+      tip(button2, "playerCue", label);
       button2.setAttribute("aria-label", label);
       button2.addEventListener("click", () => {
         seek(cue.seconds);
@@ -2061,10 +2230,10 @@
   function paintRows() {
     const view = state.view || [];
     const height = el("list").clientHeight || 600;
-    const start = Math.max(0, Math.floor(el("list").scrollTop / ROW) - 6);
+    const start2 = Math.max(0, Math.floor(el("list").scrollTop / ROW) - 6);
     const end = Math.min(view.length, Math.ceil((el("list").scrollTop + height) / ROW) + 6);
     spacer.style.height = `${view.length * ROW}px`;
-    rows.style.transform = `translateY(${start * ROW}px)`;
+    rows.style.transform = `translateY(${start2 * ROW}px)`;
     rows.replaceChildren();
     if (!view.length) {
       const empty = document.createElement("p");
@@ -2073,21 +2242,23 @@
       rows.append(empty);
       return;
     }
-    for (let index = start; index < end; index += 1) {
+    for (let index = start2; index < end; index += 1) {
       const track = view[index];
       const button2 = document.createElement("div");
+      tip(button2, "trackRow");
       button2.className = "row";
       button2.setAttribute("role", "option");
       button2.setAttribute("aria-selected", String(track.id === state.selectedId));
       button2.dataset.id = String(track.id);
       const titleCell = document.createElement("span");
       titleCell.className = "cell";
-      const line = document.createElement("span");
-      line.className = "title-line";
+      const line2 = document.createElement("span");
+      line2.className = "title-line";
       if (!track.entry) {
         const playingNow = getPlayerState();
         const playingThis = playingNow.trackId === track.id && playingNow.playing;
         const playButton = document.createElement("button");
+        tip(playButton, "rowPlay");
         playButton.type = "button";
         playButton.className = "row-play";
         const labelName = track.name || playerStrings.untitled;
@@ -2104,37 +2275,37 @@
           el("list").focus({ preventScroll: true });
         });
         playButton.addEventListener("dblclick", (event) => event.stopPropagation());
-        line.append(playButton);
+        line2.append(playButton);
       }
       const hex = colorHex(track.color);
       if (hex) {
         const swatch = document.createElement("span");
         swatch.className = "swatch";
         swatch.style.background = hex;
-        line.append(swatch);
+        line2.append(swatch);
       }
       if (track.emoji) {
         const emoji = document.createElement("span");
         emoji.textContent = track.emoji;
-        line.append(emoji);
+        line2.append(emoji);
       }
       const title2 = document.createElement("span");
       title2.className = "title";
       title2.textContent = track.name || "Untitled";
-      line.append(title2);
+      line2.append(title2);
       if (track.missing) {
         const missing = document.createElement("span");
         missing.className = "missing-word";
         missing.textContent = "missing";
-        line.append(missing);
+        line2.append(missing);
       }
       if (track.stems) {
         const stems = document.createElement("span");
         stems.className = "missing-word";
         stems.textContent = "stems";
-        line.append(stems);
+        line2.append(stems);
       }
-      titleCell.append(line);
+      titleCell.append(line2);
       const artist2 = document.createElement("span");
       artist2.className = "cell";
       artist2.textContent = track.artist ?? "";
@@ -2170,10 +2341,10 @@
   }
   function openTrackList() {
     const view = state.view || [];
-    const current = view.find((track) => track.id === state.selectedId) ?? view[0];
-    if (!current) return;
-    if (current.entry) bridge.selectEntry(current.id);
-    else void bridge.selectTrack(current.id);
+    const current2 = view.find((track) => track.id === state.selectedId) ?? view[0];
+    if (!current2) return;
+    if (current2.entry) bridge.selectEntry(current2.id);
+    else void bridge.selectTrack(current2.id);
   }
   function moveSelection(delta) {
     const view = state.view || [];
@@ -2259,12 +2430,12 @@
     const keep = /* @__PURE__ */ new Set();
     for (const crate of state.crates) {
       if (!terms.every((term) => crate.name.toLocaleLowerCase().includes(term))) continue;
-      let current = crate;
+      let current2 = crate;
       const guard = /* @__PURE__ */ new Set();
-      while (current && !guard.has(current.id)) {
-        guard.add(current.id);
-        keep.add(current.id);
-        current = byId.get(current.parent);
+      while (current2 && !guard.has(current2.id)) {
+        guard.add(current2.id);
+        keep.add(current2.id);
+        current2 = byId.get(current2.parent);
       }
     }
     return keep;
@@ -2377,6 +2548,7 @@
     if (crate.childCount) {
       const open = state.crateQuery ? true : state.expanded.has(crate.id);
       const twist = document.createElement("button");
+      tip(twist, open ? "crateCollapse" : "crateExpand");
       twist.type = "button";
       twist.className = "twist";
       twist.tabIndex = -1;
@@ -2391,6 +2563,7 @@
       row.append(gap);
     }
     const button2 = document.createElement("button");
+    tip(button2, "crateRow");
     button2.type = "button";
     button2.className = "crate";
     button2.dataset.id = String(crate.id);
@@ -2429,9 +2602,9 @@
   function placeCrateFocus(previousId) {
     const items = [...el("crate-list").querySelectorAll(".crate")];
     if (!items.length) return null;
-    const current = items.find((item) => item.dataset.id === previousId) || items[0];
-    for (const item of items) item.tabIndex = item === current ? 0 : -1;
-    return current;
+    const current2 = items.find((item) => item.dataset.id === previousId) || items[0];
+    for (const item of items) item.tabIndex = item === current2 ? 0 : -1;
+    return current2;
   }
   function renderCrates() {
     const scroll = el("crate-list").scrollTop;
@@ -2479,8 +2652,8 @@
     document.querySelector(".rule-edit")?.remove();
     const crate = state.crates.find((item) => item.id === state.activeCrate);
     if (!crate || !crate.rules || state.mode !== "crates") return;
-    const line = document.createElement("p");
-    line.className = "rules";
+    const line2 = document.createElement("p");
+    line2.className = "rules";
     if (Array.isArray(crate.rules.rules)) {
       const lead = document.createElement("strong");
       lead.textContent = "Matches";
@@ -2490,15 +2663,17 @@
         return `${attribute} ${operation} “${rule.value ?? ""}”`;
       });
       const join = crate.rules.conjunction === "OR" ? " or " : " and ";
-      line.append(lead, document.createTextNode(` ${parts.join(join) || "no rules yet"}`));
+      line2.append(lead, document.createTextNode(` ${parts.join(join) || "no rules yet"}`));
     }
     const editor = document.createElement("div");
     editor.className = "rule-edit";
     const area = document.createElement("textarea");
+    tip(area, "smartRules");
     area.value = JSON.stringify(crate.rules, null, 2);
     area.disabled = !state.writable;
     area.setAttribute("aria-label", "Smart crate rules");
     const save2 = document.createElement("button");
+    tip(save2, "smartRulesSave");
     save2.type = "button";
     save2.className = "text-button";
     save2.textContent = "Save rules";
@@ -2507,7 +2682,7 @@
     editor.append(area, save2);
     const bar = document.querySelector(".browser-bar");
     bar.after(editor);
-    bar.after(line);
+    bar.after(line2);
   }
   function renderColumns() {
     const columns = state.mode === "history" ? [["name", "Title"], ["artist", "Artist"], ["deck", "Deck"], ["played", "Played"], ["start", "Time"]] : [["name", "Title"], ["artist", "Artist"], ["bpm", "BPM"], ["key", "Key"], ["length_ms", "Time"]];
@@ -2701,6 +2876,7 @@
     }
     if (entry.asset_id) {
       const open = document.createElement("button");
+      tip(open, "openInLibrary");
       open.type = "button";
       open.className = "text-button";
       open.textContent = "Open in library";
@@ -2709,11 +2885,12 @@
     }
     el("detail").replaceChildren(body);
   }
-  function fieldInput(name, label, value, wide = false) {
+  function fieldInput(name, label, value, tipKey, wide = false) {
     const wrap = document.createElement("label");
     if (wide) wrap.className = "wide";
     wrap.append(document.createTextNode(label));
     const input = name === "comments" ? document.createElement("textarea") : document.createElement("input");
+    tip(input, tipKey);
     input.name = name;
     input.value = String(value ?? "");
     if (name === "bpm") input.inputMode = "decimal";
@@ -2740,6 +2917,7 @@
       body.append(artist2);
     }
     const playButton = document.createElement("button");
+    tip(playButton, "rowPlay");
     playButton.type = "button";
     playButton.className = "detail-play";
     const playTitle = track.title || track.name || playerStrings.untitled;
@@ -2781,26 +2959,27 @@
     form.className = "editor";
     const edit = track.edit || {};
     const editorFields = [
-      ["name", "Title", true],
-      ["artist", "Artist", false],
-      ["album", "Album", false],
-      ["genre", "Genre", false],
-      ["year", "Year", false],
-      ["composer", "Composer", false],
-      ["remixer", "Remixer", false],
-      ["label", "Label", false],
-      ["grouping", "Grouping", false],
-      ["key", "Key", false],
-      ["bpm", "BPM", false],
-      ["emoji", "Emoji", false],
-      ["comments", "Comments", true]
+      ["name", "Title", "trackTitle", true],
+      ["artist", "Artist", "trackArtist", false],
+      ["album", "Album", "trackAlbum", false],
+      ["genre", "Genre", "trackGenre", false],
+      ["year", "Year", "trackYear", false],
+      ["composer", "Composer", "trackComposer", false],
+      ["remixer", "Remixer", "trackRemixer", false],
+      ["label", "Label", "trackLabel", false],
+      ["grouping", "Grouping", "trackGrouping", false],
+      ["key", "Key", "trackKey", false],
+      ["bpm", "BPM", "trackBpm", false],
+      ["emoji", "Emoji", "trackEmoji", false],
+      ["comments", "Comments", "trackComments", true]
     ];
-    for (const [name, label, wide] of editorFields) {
-      form.append(fieldInput(name, label, String(edit[name] ?? ""), wide));
+    for (const [name, label, tipKey, wide] of editorFields) {
+      form.append(fieldInput(name, label, String(edit[name] ?? ""), tipKey, wide));
     }
     const colorLabel = document.createElement("label");
     colorLabel.append(document.createTextNode("Color"));
     const colorSelect = document.createElement("select");
+    tip(colorSelect, "trackColor");
     colorSelect.name = "color";
     const currentColor = Number(edit.color ?? 16777215);
     const palette = COLORS.some(([value]) => value === currentColor) ? COLORS : [...COLORS, [currentColor, colorHex(currentColor) || "Custom"]];
@@ -2816,6 +2995,7 @@
     const ratingLabel = document.createElement("label");
     ratingLabel.append(document.createTextNode("Rating"));
     const ratingSelect = document.createElement("select");
+    tip(ratingSelect, "trackRating");
     ratingSelect.name = "rating";
     const ratings = [["", "Not rated"], ["0.2", "1 star"], ["0.4", "2 stars"], ["0.6", "3 stars"], ["0.8", "4 stars"], ["1", "5 stars"]];
     if (edit.rating != null && !ratings.some(([value]) => Number(value) === Number(edit.rating))) {
@@ -2833,12 +3013,14 @@
     const lock = document.createElement("label");
     lock.className = "check";
     const lockInput = document.createElement("input");
+    tip(lockInput, "trackGridLock");
     lockInput.type = "checkbox";
     lockInput.name = "is_beatgrid_locked";
     lockInput.checked = Boolean(edit.is_beatgrid_locked);
     lock.append(lockInput, document.createTextNode("Beatgrid locked"));
     form.append(lock);
     const save2 = document.createElement("button");
+    tip(save2, "trackSave");
     save2.type = "submit";
     save2.className = "text-button wide";
     save2.textContent = "Save track";
@@ -2851,30 +3033,35 @@
     body.append(form);
     const actions = document.createElement("div");
     actions.className = "actions";
-    const reveal = document.createElement("button");
-    reveal.type = "button";
+    const reveal2 = document.createElement("button");
+    tip(reveal2, "trackReveal");
+    reveal2.type = "button";
     const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
-    reveal.textContent = `Reveal in ${manager}`;
-    reveal.disabled = !track.file_on_disk;
-    reveal.addEventListener("click", () => revealTrack(track.id));
+    reveal2.textContent = `Reveal in ${manager}`;
+    reveal2.disabled = !track.file_on_disk;
+    reveal2.addEventListener("click", () => revealTrack(track.id));
     const prepare = document.createElement("button");
+    tip(prepare, track.in_prepare ? "prepareRemove" : "prepareSend");
     prepare.type = "button";
     prepare.textContent = track.in_prepare ? "Remove from Prepare" : "Send to Prepare";
     prepare.disabled = !writable;
     prepare.addEventListener("click", () => prepareTrack(track.id, !track.in_prepare));
     const relocate = document.createElement("button");
+    tip(relocate, "trackRelocate");
     relocate.type = "button";
     relocate.textContent = "Relocate";
     relocate.disabled = !writable;
     relocate.addEventListener("click", () => relocateTrack(track));
     const remove = document.createElement("button");
+    tip(remove, "trackRemove");
     remove.type = "button";
     remove.textContent = "Remove from library";
     remove.disabled = !writable;
     remove.addEventListener("click", () => removeTrack(track.id));
-    actions.append(reveal, prepare, relocate, remove);
+    actions.append(reveal2, prepare, relocate, remove);
     if (state.mode === "duplicates" && selectedDuplicateGroup()) {
       const merge = document.createElement("button");
+      tip(merge, "mergeCopies");
       merge.type = "button";
       merge.textContent = "Merge copies";
       merge.disabled = !writable;
@@ -2897,6 +3084,7 @@
       const open = group.name !== "Search copies";
       if (!open) {
         const toggle = document.createElement("button");
+        tip(toggle, "searchCopies");
         toggle.type = "button";
         toggle.className = "text-button";
         toggle.textContent = `Search copies, ${group.fields.length} fields`;
@@ -3027,6 +3215,7 @@
       const row = document.createElement("div");
       row.className = "copy-row";
       const button2 = document.createElement("button");
+      tip(button2, "duplicateCopy");
       button2.type = "button";
       button2.className = "text-button";
       button2.textContent = copy2.file || `Track ${copy2.id}`;
@@ -3096,6 +3285,7 @@
     section.append(suggestHeading);
     if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
     const crate = document.createElement("button");
+    tip(crate, "relatedCrate");
     crate.type = "button";
     crate.className = "text-button";
     crate.dataset.relatedCrate = "true";
@@ -3119,6 +3309,7 @@
       const label = other.title || "Untitled";
       if (other.asset_id != null && other.in_library) {
         const open = document.createElement("button");
+        tip(open, "relatedOpen");
         open.type = "button";
         open.className = "text-button";
         open.textContent = label;
@@ -3147,6 +3338,7 @@
         main.append(note);
       }
       const remove = document.createElement("button");
+      tip(remove, "relatedRemove");
       remove.type = "button";
       remove.className = "text-button";
       remove.textContent = "Remove";
@@ -3163,6 +3355,7 @@
     const label = document.createElement("label");
     label.append(document.createTextNode("Find a track to link"));
     const input = document.createElement("input");
+    tip(input, "relatedSearch");
     input.type = "search";
     input.autocomplete = "off";
     input.placeholder = "Title or artist";
@@ -3197,6 +3390,7 @@
       for (const hit of hits2) {
         const item = document.createElement("li");
         const choose = document.createElement("button");
+        tip(choose, "relatedChoose");
         choose.type = "button";
         choose.className = "text-button";
         choose.textContent = hit.artist ? `${hit.name || "Untitled"} · ${hit.artist}` : hit.name || "Untitled";
@@ -3218,6 +3412,7 @@
     const noteLabel = document.createElement("label");
     noteLabel.append(document.createTextNode("Note"));
     const note = document.createElement("input");
+    tip(note, "relatedNote");
     note.type = "text";
     note.maxLength = 500;
     note.placeholder = "blend out of";
@@ -3225,6 +3420,7 @@
     const ratingLabel = document.createElement("label");
     ratingLabel.append(document.createTextNode("Link rating"));
     const rating = document.createElement("select");
+    tip(rating, "relatedRating");
     for (const [value, text] of [["", "Not rated"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]]) {
       const option = document.createElement("option");
       option.value = value;
@@ -3235,10 +3431,12 @@
     const mutualLabel = document.createElement("label");
     mutualLabel.className = "check";
     const mutual = document.createElement("input");
+    tip(mutual, "relatedMutual");
     mutual.type = "checkbox";
     mutual.checked = true;
     mutualLabel.append(mutual, document.createTextNode("Two-way link"));
     const save2 = document.createElement("button");
+    tip(save2, "relatedSave");
     save2.type = "button";
     save2.className = "text-button";
     save2.textContent = "Save link";
@@ -3270,6 +3468,7 @@
       reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
       main.append(name, reasons);
       const save2 = document.createElement("button");
+      tip(save2, "relatedSuggestionSave");
       save2.type = "button";
       save2.className = "text-button";
       save2.textContent = "Save";
@@ -3348,6 +3547,7 @@
       const label = document.createElement("label");
       label.className = "member";
       const input = document.createElement("input");
+      tip(input, "crateMember");
       input.type = "checkbox";
       input.checked = chosen.has(crate.id);
       input.disabled = !writable;
@@ -3359,10 +3559,10 @@
     }
     const smart = state.crates.filter((crate) => crate.smart && chosen.has(crate.id));
     if (smart.length) {
-      const line = document.createElement("p");
-      line.className = "detail-kicker";
-      line.textContent = `Smart crates: ${smart.map((crate) => crate.name).join(", ")}`;
-      section.append(line);
+      const line2 = document.createElement("p");
+      line2.className = "detail-kicker";
+      line2.textContent = `Smart crates: ${smart.map((crate) => crate.name).join(", ")}`;
+      section.append(line2);
     }
     section.append(holder);
     return section;
@@ -3585,6 +3785,7 @@
     el("session-list").replaceChildren();
     for (const session of state.historySessions) {
       const button2 = document.createElement("button");
+      tip(button2, "historySession");
       button2.type = "button";
       button2.className = "crate";
       button2.setAttribute("role", "option");
@@ -3859,6 +4060,7 @@
       const last = index === crumbs.length - 1;
       if (!last && crumb.path) {
         const button2 = document.createElement("button");
+        tip(button2, "filesCrumb");
         button2.type = "button";
         button2.className = "files-crumb";
         button2.textContent = crumb.name;
@@ -3867,11 +4069,11 @@
         });
         item.append(button2);
       } else {
-        const current = document.createElement("span");
-        current.className = "files-crumb";
-        current.setAttribute("aria-current", "page");
-        current.textContent = crumb.name;
-        item.append(current);
+        const current2 = document.createElement("span");
+        current2.className = "files-crumb";
+        current2.setAttribute("aria-current", "page");
+        current2.textContent = crumb.name;
+        item.append(current2);
       }
       if (!last) {
         const sep = document.createElement("span");
@@ -3950,19 +4152,19 @@
     const view = list.clientHeight || 600;
     const maxScroll = Math.max(0, rows2.length * rowHeight - view);
     const scrollTop = Math.min(Math.max(0, list.scrollTop), maxScroll);
-    const start = Math.max(0, Math.floor(scrollTop / rowHeight) - FILE_OVERSCAN);
+    const start2 = Math.max(0, Math.floor(scrollTop / rowHeight) - FILE_OVERSCAN);
     const end = Math.min(rows2.length, Math.ceil((scrollTop + view) / rowHeight) + FILE_OVERSCAN);
     const spacer2 = fileSpacer(list);
     const windowEl = spacer2.querySelector(".files-window");
     if (!windowEl) return;
     spacer2.style.height = `${rows2.length * rowHeight}px`;
-    windowEl.style.transform = `translateY(${start * rowHeight}px)`;
+    windowEl.style.transform = `translateY(${start2 * rowHeight}px)`;
     windowEl.replaceChildren();
-    for (let index = start; index < end; index += 1) {
+    for (let index = start2; index < end; index += 1) {
       const entry = rows2[index];
       if (entry) windowEl.append(fileRow(entry, index));
     }
-    if (state.filesActive >= start && state.filesActive < end) {
+    if (state.filesActive >= start2 && state.filesActive < end) {
       list.setAttribute("aria-activedescendant", `files-item-${state.filesActive}`);
     } else list.removeAttribute("aria-activedescendant");
   }
@@ -3994,6 +4196,7 @@
     const copy2 = document.createElement("p");
     copy2.textContent = "Setup finds the folders Serato uses for your music.";
     const button2 = document.createElement("button");
+    tip(button2, "filesRunSetup");
     button2.type = "button";
     button2.id = "files-run-setup";
     button2.className = "files-primary";
@@ -4065,6 +4268,7 @@
     const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
     if (openKind) {
       const button2 = document.createElement("button");
+      tip(button2, entry.missing ? "filesDriveMissing" : "filesOpen", entry.detail ? `${entry.name} ${entry.detail}` : entry.name);
       button2.type = "button";
       button2.className = "files-open";
       button2.dataset.filesIndex = String(index);
@@ -4093,7 +4297,6 @@
           button2.append(detail);
         }
       }
-      button2.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
       if (entry.missing) {
         button2.setAttribute("aria-disabled", "true");
         button2.setAttribute("aria-label", `${entry.name}, Drive not connected`);
@@ -4116,6 +4319,7 @@
     }
     if (entry.kind !== "file") {
       const label2 = document.createElement("button");
+      tip(label2, "filesShortcut", entry.name);
       label2.type = "button";
       label2.className = "files-kind";
       label2.dataset.filesIndex = String(index);
@@ -4129,6 +4333,7 @@
     const label = document.createElement("label");
     label.className = "files-file";
     const box = document.createElement("input");
+    tip(box, "filesSelect", entry.path || entry.name);
     box.type = "checkbox";
     box.dataset.filesIndex = String(index);
     box.id = `files-item-${index}`;
@@ -4144,13 +4349,11 @@
     const name = document.createElement("span");
     name.className = "files-name";
     name.textContent = entry.name;
-    name.title = entry.path || entry.name;
     label.append(box, name);
     if (entry.detail) {
       const detail = document.createElement("span");
       detail.className = "files-match-detail";
       detail.textContent = entry.detail;
-      detail.title = entry.detail;
       label.append(detail);
     }
     if (entry.in_library) {
@@ -4427,9 +4630,9 @@
   function fillRekordboxReport(lines) {
     const list = el("rekordbox-report");
     list.replaceChildren();
-    for (const line of lines) {
+    for (const line2 of lines) {
       const item = document.createElement("li");
-      item.textContent = line;
+      item.textContent = line2;
       list.append(item);
     }
   }
@@ -4467,9 +4670,9 @@
     list.className = "merge-preview";
     const added = preview.crates_added || [];
     const item = (text) => {
-      const line = document.createElement("li");
-      line.textContent = text;
-      list.append(line);
+      const line2 = document.createElement("li");
+      line2.textContent = text;
+      list.append(line2);
     };
     if (added.length) {
       const names = added.map((crate) => crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name);
@@ -4570,6 +4773,7 @@
       label.className = "merge-choice";
       label.htmlFor = `merge-keep-${id}`;
       const input = document.createElement("input");
+      tip(input, "mergeKeep");
       input.type = "radio";
       input.name = "merge-keep";
       input.id = `merge-keep-${id}`;
@@ -5309,6 +5513,7 @@
     hits.forEach((hit, index) => {
       const item = document.createElement("li");
       const button2 = document.createElement("button");
+      tip(button2, "quickOpenResult", hit.detail);
       button2.type = "button";
       button2.className = "quick-open-option";
       button2.id = `quick-open-option-${index}`;
@@ -5326,7 +5531,6 @@
       const detail = document.createElement("span");
       detail.className = "quick-open-detail";
       detail.textContent = hit.detail;
-      detail.title = hit.detail;
       button2.append(kind, title2, detail);
       button2.addEventListener("click", () => {
         active = index;
@@ -5336,8 +5540,8 @@
       list.append(item);
     });
     const field = el("quick-open-query");
-    const current = hits[active];
-    if (current) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
+    const current2 = hits[active];
+    if (current2) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
     else field.removeAttribute("aria-activedescendant");
     const chosen = list.querySelector(".is-active");
     if (chosen && typeof chosen.scrollIntoView === "function") chosen.scrollIntoView({ block: "nearest" });
@@ -5488,6 +5692,10 @@
     if (named) return named;
     const key = chord.key.length === 1 ? chord.key.toUpperCase() : chord.key;
     return chord.mod ? `Ctrl/Cmd+${key}` : key;
+  }
+  function shortcutKeys(id) {
+    const shortcut = SHORTCUTS.find((item) => item.id === id);
+    return shortcut ? shortcut.keys.map(chordLabel).join(" or ") : null;
   }
   function isTypingTarget(target) {
     if (!(target instanceof HTMLElement)) return false;
@@ -5795,6 +6003,119 @@
     if (node && node.isConnected) node.focus();
   }
 
+  // src/tooltips.ts
+  var SHOW_DELAY_MS = 500;
+  var TOOLTIP_ID = "control-tooltip";
+  var GAP_PX = 6;
+  var EDGE_PX = 8;
+  var keysFor = () => null;
+  var current = null;
+  var timer2;
+  function tooltipNode() {
+    const found = document.getElementById(TOOLTIP_ID);
+    if (found) return found;
+    const node = document.createElement("div");
+    node.id = TOOLTIP_ID;
+    node.className = "tooltip";
+    node.setAttribute("role", "tooltip");
+    node.hidden = true;
+    document.body.append(node);
+    return node;
+  }
+  function line(className, text) {
+    const node = document.createElement("span");
+    node.className = className;
+    node.textContent = text;
+    return node;
+  }
+  function fill2(node, control) {
+    const key = control.dataset.tip;
+    const shortcut = TIP_SHORTCUTS[key];
+    const keys = [shortcut ?? []].flat().map(keysFor).filter(Boolean).join(" or ");
+    const lines = [];
+    if (control.dataset.tipDetail) lines.push(line("tooltip-detail", control.dataset.tipDetail));
+    lines.push(line("tooltip-text", tips[key]));
+    if (keys) lines.push(line("tooltip-keys", keys));
+    node.replaceChildren(...lines);
+  }
+  function describe(control) {
+    const ids = (control.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+    control.setAttribute("aria-describedby", [...ids, TOOLTIP_ID].join(" "));
+  }
+  function undescribe(control) {
+    const ids = (control.getAttribute("aria-describedby") ?? "").split(" ").filter((id) => id && id !== TOOLTIP_ID);
+    if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+    else control.removeAttribute("aria-describedby");
+  }
+  function place(node, control) {
+    const target = control.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    const fitsBelow = target.bottom + GAP_PX + box.height <= window.innerHeight - EDGE_PX;
+    const top = fitsBelow ? target.bottom + GAP_PX : target.top - GAP_PX - box.height;
+    const maxLeft = window.innerWidth - box.width - EDGE_PX;
+    const left = Math.max(EDGE_PX, Math.min(target.left, maxLeft));
+    node.style.top = `${Math.max(EDGE_PX, top)}px`;
+    node.style.left = `${left}px`;
+  }
+  function reveal(control) {
+    if (!control.isConnected) {
+      hide();
+      return;
+    }
+    const node = tooltipNode();
+    const host = control.closest("dialog") ?? document.body;
+    if (node.parentElement !== host) host.append(node);
+    node.hidden = false;
+    place(node, control);
+  }
+  function hide() {
+    clearTimeout(timer2);
+    if (current) undescribe(current);
+    current = null;
+    tooltipNode().hidden = true;
+  }
+  function start(control) {
+    if (control === current) return;
+    hide();
+    current = control;
+    fill2(tooltipNode(), control);
+    describe(control);
+    timer2 = setTimeout(() => reveal(control), SHOW_DELAY_MS);
+  }
+  function controlFor(node) {
+    if (!(node instanceof Element)) return null;
+    const tipped = node.closest("[data-tip]");
+    if (tipped) return tipped;
+    const control = node.closest("label")?.control;
+    return control instanceof HTMLElement && control.dataset.tip ? control : null;
+  }
+  function onOver(event) {
+    const control = controlFor(event.target);
+    if (control) start(control);
+    else hide();
+  }
+  function onOut(event) {
+    const next2 = event.relatedTarget;
+    if (controlFor(next2) !== current) hide();
+  }
+  function onFocus(event) {
+    const control = controlFor(event.target);
+    if (control?.matches(":focus-visible")) start(control);
+  }
+  function wireTooltips(lookup) {
+    keysFor = lookup;
+    hide();
+    document.addEventListener("mouseover", onOver);
+    document.addEventListener("mouseout", onOut);
+    document.addEventListener("focusin", onFocus);
+    document.addEventListener("focusout", hide);
+    document.addEventListener("keydown", hide);
+    document.addEventListener("pointerdown", hide);
+    document.addEventListener("click", hide);
+    document.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+  }
+
   // src/version.ts
   var VERSION_UNAVAILABLE = "Version unavailable";
   var COPY_FAILED = "Couldn't copy the version.";
@@ -5896,6 +6217,7 @@
   wireLibrary();
   wireVirtualScroll();
   wireShortcuts();
+  wireTooltips(shortcutKeys);
   wireDialogs();
   wireSnapshots();
   wireLayout();

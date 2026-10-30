@@ -243,6 +243,17 @@ export function chordLabel(chord: ShortcutChord): string {
 }
 
 /**
+ * Return the keys for a shortcut, for a tooltip.
+ *
+ * @param id Shortcut id.
+ * @returns The chord labels joined with "or", or null for an unknown id.
+ */
+export function shortcutKeys(id: string): string | null {
+  const shortcut = SHORTCUTS.find((item) => item.id === id);
+  return shortcut ? shortcut.keys.map(chordLabel).join(" or ") : null;
+}
+
+/**
  * Return whether the event target is a field the person is typing in.
  *
  * Checkboxes, radios, and buttons are not fields. A content-editable

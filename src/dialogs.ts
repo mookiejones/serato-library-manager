@@ -33,6 +33,7 @@ import {
   selectedFiles,
   setNotice,
 } from "./views";
+import { tip } from "./tips";
 
 let rekordboxXml = "";
 let mergePreview: MergePreview | null = null;
@@ -337,6 +338,7 @@ function renderMergeChoices() {
     label.className = "merge-choice";
     label.htmlFor = `merge-keep-${id}`;
     const input = document.createElement("input");
+    tip(input, "mergeKeep");
     input.type = "radio";
     input.name = "merge-keep";
     input.id = `merge-keep-${id}`;
