@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 import app_config
 import app_log
 import files
+import legacy_library
 import library
 import music_roots
 import rekordbox
@@ -61,6 +62,11 @@ FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
+LEGACY_ALLOWED_POSTS = frozenset({"/api/related", "/api/reveal"})
+"""POST routes, after settings, setup, and logs, that still answer while only an
+older ``database V2`` library is present. Every other POST is refused with 409,
+so a write route added later is blocked by default. Related links live in
+``related.sqlite`` beside ``settings.json``; reveal only opens a file manager."""
 
 
 def db_path() -> Path:
@@ -1544,6 +1550,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/setup":
                 self._get_setup(query)
                 return
+            if parsed.path == "/api/legacy-library":
+                self._get_legacy_library()
+                return
             if parsed.path == "/api/logs":
                 text, truncated = app_log.read_logs()
                 self.send_json({"text": text, "truncated": truncated})
@@ -1717,6 +1726,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/logs/open":
             self._post_open_logs()
+            return
+        if parsed.path not in LEGACY_ALLOWED_POSTS and setup_flow.legacy_folder() is not None:
+            self.send_json({"error": legacy_library.WRITE_BLOCKED, "read_only": True}, status=409)
             return
         try:
             if parsed.path == "/api/related":
@@ -1961,6 +1973,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": _safe_folder_error(exc.message)}, status=exc.status)
             return
         self.send_json(setup_flow.describe_library())
+
+    def _get_legacy_library(self) -> None:
+        """Return an older ``database V2`` library, read-only.
+
+        The answer has tracks, crates, missing and offline tracks, and
+        duplicate groups. A 404 means there is no older library, or a
+        newer library file is open.
+        """
+        folder = setup_flow.legacy_folder()
+        if folder is None:
+            self.send_json({"error": "No older Serato library was found."}, status=404)
+            return
+        try:
+            self.send_json(legacy_library.read_library(folder))
+        except legacy_library.LegacyLibraryError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
 
     def _post_setup(self, payload: dict[str, object]) -> None:
         """Check a folder the person picked in the wizard.

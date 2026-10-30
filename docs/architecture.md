@@ -302,6 +302,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | POST | `/api/setup` | `folder` | The same object as GET when `folder` is the open library directory, or, when no library file is open, a folder that already contains a Serato library. Otherwise `found` is false. The database is not created or modified. A remembered path is not included |
 | GET | `/api/logs` | none | `{ "text", "truncated" }` from the local log. The text can contain a path. It is not a report |
 | POST | `/api/logs/open` | none | Opens the logs folder. `{ "ok": true }`. The path is not in the body |
+| GET | `/api/legacy-library` | none | Older library (`database V2`, no `master.sqlite`), read-only: `{ "read_only", "write_blocked", "tracks", "crates", "missing", "offline", "duplicates" }`. 404 when there is none or a newer library is open |
 | GET | `/api/snapshots` | none | `{ "snapshots", "pending_undo", "write_block", "serato_running" }` |
 | GET | `/api/snapshots` | `id` | Dry-run plan for that snapshot. Nothing is written |
 | POST | `/api/snapshots` | `action` `create` | Saves a snapshot |
@@ -346,3 +347,18 @@ end
 A full ID3 rewrite from another program can drop Markers2 and BeatGrid. This program copies those Serato frames only in the cases `tags.py` allows, and only while replacing one library file with another. A rename or a move leaves the audio bytes to travel with the file.
 
 File saves use the same Serato-open check and the same backup as a track edit. The preview does not take that backup. The confirm step writes a journal, changes the files, then commits `master.sqlite` and the attached location databases together. On Windows, a delete that reaches the Recycle Bin before a failed commit is restored from the safety copy. The Recycle Bin may still hold a copy.
+
+
+## Older libraries (database V2 only, read-only)
+
+Issue #126. Serato DJ before version 4 has `_Serato_/database V2` and `.crate` files but no `master.sqlite`. When `master.sqlite` is missing, `setup_flow.legacy_folder()` looks for a `_Serato_` folder with a regular `database V2` file: the folder chosen in setup for this process, then `~/Music/_Serato_` (`%USERPROFILE%\Music\_Serato_` on Windows). A newer `master.sqlite` always wins. Shortcuts (symlinks) to the folder, to `database V2`, or to a crate are not followed.
+
+`GET /api/setup` then answers `found: false`, `legacy: true`, `read_only: true`, the summary "Found an older Serato library on <disk>, <n> tracks.", and a `next` sentence that says the app can show it but will not change it. The wizard shows those words in place of "No Serato library was found" and does not move on to the safety snapshot. Choosing that folder in setup is remembered for this process only; `library.json` is not written.
+
+`legacy_library.read_library` reads `database V2` with `snapshots.parse_database_v2` (`otrk` rows, `pfil` path, `tsng`, `tart`, `talb`, `tbpm`, `ttyp`, `bmis`) and crates with `snapshots.parse_serato_bytes`. Stored paths are relative to the drive: the disk root for the home folder, `/Volumes/<name>` or `E:\` for a `_Serato_` folder at the top of an external drive. A path with `..`, a drive letter, or a stream is `invalid`. A track whose drive is not mounted is `offline`, not `missing`. Duplicates are tracks whose file names match, ignoring case. Files are opened with `"rb"` only and nothing is created inside `_Serato_`.
+
+While only an older library is present, every `POST` except `/api/shutdown`, `/api/focus`, `/api/settings`, `/api/setup`, `/api/logs/open`, `/api/related`, and `/api/reveal` answers 409 (including `/api/track`, `/api/crate`, `/api/import.m3u`, `/api/duplicates/merge`, `/api/files`, and `/api/snapshots`, and any write route added later) with "This library was made by an older Serato DJ. This app can show it but cannot change it yet." Writes stay blocked until snapshot and restore are verified on a real older install. The tests use the synthetic Serato 4 and 5 fixtures, not a capture from a real older install.
+
+## database V2 tracks in snapshots
+
+`snapshots.parse_serato_bytes` and `snapshots.parse_database_v2` read the path in each `otrk` with one helper, `_otrk_path`: `ptrk` in a crate and `pfil` in `database V2`. `parse_database_v2` accepts only `pfil`, so a crate is never read as a database. The first non-empty path is used, so a track is listed once. Tracks that appear only in `database V2` therefore reach `_audio_paths`, and their Serato frames are part of a snapshot (#128). Home-folder `database V2` paths are relative to the disk root, while `_resolve_track` resolves against `~/Music`. Those paths still resolve only through the file-name fallback.
