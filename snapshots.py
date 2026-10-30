@@ -403,6 +403,50 @@ def parse_serato_bytes(data: bytes) -> list[str]:
     return tracks
 
 
+_DATABASE_V2_TEXT = {
+    "pfil": "path",
+    "tsng": "title",
+    "tart": "artist",
+    "talb": "album",
+    "tbpm": "bpm",
+    "ttyp": "type",
+}
+
+
+def parse_database_v2(data: bytes) -> list[dict[str, object]]:
+    """Return track rows from a ``database V2`` file.
+
+    ``database V2`` stores each track as an ``otrk`` whose ``pfil`` field
+    is the path relative to the drive root, encoded as UTF-16-BE. Title,
+    artist, album, BPM, and type are ``tsng``, ``tart``, ``talb``,
+    ``tbpm``, and ``ttyp``. ``bmis`` is Serato's missing flag.
+
+    Args:
+        data: File bytes. Nothing is written.
+
+    Returns:
+        One dict per ``otrk`` that has a non-empty ``pfil``, in file
+        order. Each has ``path`` and may have ``title``, ``artist``,
+        ``album``, ``bpm``, ``type``, and ``serato_missing``. A truncated
+        or unfamiliar file returns the rows it could parse.
+    """
+    rows: list[dict[str, object]] = []
+    for tag, body in _chunks(data):
+        if tag != "otrk":
+            continue
+        row: dict[str, object] = {}
+        for inner, payload in _chunks(body):
+            key = _DATABASE_V2_TEXT.get(inner)
+            if key is not None:
+                row[key] = _utf16be(payload)
+            elif inner == "bmis":
+                row["serato_missing"] = payload[:1] == b"\x01"
+        path = row.get("path")
+        if isinstance(path, str) and path:
+            rows.append(row)
+    return rows
+
+
 def current_store() -> SnapshotStore:
     """Return the snapshot store for the library this process has open.
 
