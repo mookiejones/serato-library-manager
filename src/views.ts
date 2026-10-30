@@ -29,6 +29,8 @@ import { el } from "./dom";
 import { clockLabel, colorHex, compare, durationLabel, sizeLabel } from "./format";
 import { failSnapshots, loadSnapshots } from "./restore";
 import { COLOR_NAMES, COLORS, FILE_ROW, ROOT_ROW, state } from "./state";
+import { play } from "./player";
+import { playerStrings } from "./player-strings";
 import { paintRows } from "./virtual-scroll";
 
 /**
@@ -836,6 +838,17 @@ function renderDetail(track: Track) {
     artist.textContent = track.artist ?? "";
     body.append(artist);
   }
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "detail-play";
+  const playTitle = track.title || track.name || playerStrings.untitled;
+  playButton.textContent = playerStrings.play;
+  playButton.setAttribute("aria-label", `${playerStrings.play} ${playTitle}`);
+  playButton.addEventListener("click", () => {
+    play(track.id);
+  });
+  body.append(playButton);
 
   const deck = document.createElement("div");
   deck.className = "deck";

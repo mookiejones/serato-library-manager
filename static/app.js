@@ -7,9 +7,9 @@
   async function readJSONOr(response, fallback) {
     return await response.json().catch(() => fallback);
   }
-  function failureOf(error) {
-    if (error instanceof Error) return error;
-    return new Error(typeof error === "string" ? error : "Request failed");
+  function failureOf(error2) {
+    if (error2 instanceof Error) return error2;
+    return new Error(typeof error2 === "string" ? error2 : "Request failed");
   }
   var ROOT_KINDS = ["music_library", "serato_drive", "user_folder"];
   function isLibraryRoot(value) {
@@ -24,10 +24,10 @@
       computed_at: ""
     });
     if (!response.ok) {
-      const error = new Error(payload.error || "Music folders could not be read.");
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
+      const error2 = new Error(payload.error || "Music folders could not be read.");
+      error2.status = response.status;
+      error2.payload = payload;
+      throw error2;
     }
     return {
       roots: Array.isArray(payload.roots) ? payload.roots.filter(isLibraryRoot) : [],
@@ -62,10 +62,10 @@
     });
     const payload = await readJSONOr(response, {});
     if (!response.ok) {
-      const error = new Error(payload.error || `Request failed (${response.status})`);
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
+      const error2 = new Error(payload.error || `Request failed (${response.status})`);
+      error2.status = response.status;
+      error2.payload = payload;
+      throw error2;
     }
     return payload;
   }
@@ -123,9 +123,9 @@
       handle.setPointerCapture?.(event.pointerId);
       handle.dataset.dragging = "true";
       document.body.classList.add("is-resizing");
-      const onMove = (next) => {
+      const onMove = (next2) => {
         moved = true;
-        move(startWidth + next.clientX - startX);
+        move(startWidth + next2.clientX - startX);
       };
       const onEnd = () => {
         handle.removeEventListener("pointermove", onMove);
@@ -141,15 +141,15 @@
     });
     handle.addEventListener("keydown", (event) => {
       const jump = event.shiftKey ? step * 4 : step;
-      let next;
-      if (event.key === "ArrowLeft") next = shown() - jump;
-      else if (event.key === "ArrowRight") next = shown() + jump;
-      else if (event.key === "Home") next = minFirst;
-      else if (event.key === "End") next = available() - minSecond;
+      let next2;
+      if (event.key === "ArrowLeft") next2 = shown() - jump;
+      else if (event.key === "ArrowRight") next2 = shown() + jump;
+      else if (event.key === "Home") next2 = minFirst;
+      else if (event.key === "End") next2 = available() - minSecond;
       else return;
       event.preventDefault();
       const before = current;
-      move(next);
+      move(next2);
       if (current !== before) onCommit(current);
     });
     handle.addEventListener("dblclick", () => {
@@ -174,7 +174,7 @@
     shortcutsIntro: "These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.",
     shortcutsClose: "Close",
     openShortcuts: "Shortcuts",
-    playNote: "Space and the left and right arrows play or move through a track once playback is available. Until then, they do nothing.",
+    playNote: "Space plays or pauses. Left moves 5 seconds back. Right moves 5 seconds forward.",
     quickOpenTitle: "Find a track or file",
     quickOpenLabel: "Name",
     quickOpenPlaceholder: "Track or file name",
@@ -361,9 +361,9 @@
     state.snapshotLoading = false;
     renderSnapshots();
   }
-  function failSnapshots(error) {
+  function failSnapshots(error2) {
     state.snapshotLoading = false;
-    state.snapshotError = failureOf(error).message || "The snapshots could not be read.";
+    state.snapshotError = failureOf(error2).message || "The snapshots could not be read.";
     renderSnapshots();
   }
   function renderSnapshots() {
@@ -396,7 +396,7 @@
       const retry = document.createElement("button");
       retry.type = "button";
       retry.textContent = "Try again";
-      retry.addEventListener("click", () => loadSnapshots().catch((error) => failSnapshots(error)));
+      retry.addEventListener("click", () => loadSnapshots().catch((error2) => failSnapshots(error2)));
       list.append(retry);
       return;
     }
@@ -411,8 +411,8 @@
       const card = document.createElement("article");
       card.className = "snapshot-card";
       card.setAttribute("role", "listitem");
-      const title = document.createElement("p");
-      title.textContent = `${item.created || "Unknown time"} · ${item.trigger || "snapshot"}`;
+      const title2 = document.createElement("p");
+      title2.textContent = `${item.created || "Unknown time"} · ${item.trigger || "snapshot"}`;
       const detail = document.createElement("p");
       const version = item.serato_version && item.serato_version !== "unknown" ? `Serato ${item.serato_version} (build ${item.serato_build})` : "Serato version unknown";
       const drives = (item.unavailable_drives || []).length ? ` Unavailable: ${(item.unavailable_drives || []).join(", ")}.` : "";
@@ -420,8 +420,8 @@
       const restore = document.createElement("button");
       restore.type = "button";
       restore.textContent = "Review restore";
-      restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));
-      card.append(title, detail, restore);
+      restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error2) => setSnapshotDialogStatus(failureOf(error2).message)));
+      card.append(title2, detail, restore);
       list.append(card);
     }
   }
@@ -528,11 +528,492 @@
       state.snapshotMessage = "Restore finished. The previous library was saved first, so this can be undone from the list.";
       await loadSnapshots();
       await reloadLibrary();
-    } catch (error) {
-      setSnapshotDialogStatus(failureOf(error).message);
+    } catch (error2) {
+      setSnapshotDialogStatus(failureOf(error2).message);
       confirm2.disabled = false;
     } finally {
       confirm2.textContent = "Restore";
+    }
+  }
+
+  // src/player-strings.ts
+  var playerStrings = {
+    region: "Player",
+    play: "Play",
+    pause: "Pause",
+    seek: "Seek",
+    volume: "Volume",
+    elapsed: "Elapsed",
+    duration: "Duration",
+    nothingPlaying: "Nothing playing",
+    untitled: "Untitled",
+    previous: "Previous",
+    next: "Next",
+    cue: "Cue",
+    cannotPlay: "This file cannot be played in this window.",
+    notInLibrary: "Not in the library or file missing"
+  };
+
+  // src/player.ts
+  var SEEK_STEP_SECONDS = 5;
+  var SEEK_STEP_LARGE_SECONDS = 30;
+  var listeners = /* @__PURE__ */ new Set();
+  var wired = /* @__PURE__ */ new WeakSet();
+  var CUE_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+  var media = null;
+  var trackId = null;
+  var title = "";
+  var artist = "";
+  var playing = false;
+  var currentTime = 0;
+  var duration = 0;
+  var volume = 1;
+  var error = "";
+  var seeking = false;
+  var ignoreMediaPause = false;
+  var cueToken = 0;
+  var cues = [];
+  var paintedCueKey = "";
+  var barUnsubscribe = null;
+  var titleNode = null;
+  var artistNode = null;
+  var statusNode = null;
+  var toggleNode = null;
+  var previousNode = null;
+  var nextNode = null;
+  var seekNode = null;
+  var cueLayer = null;
+  var elapsedNode = null;
+  var totalNode = null;
+  function formatPlayerTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const total = Math.floor(seconds);
+    const secs = total % 60;
+    const minutes = Math.floor(total / 60);
+    if (minutes >= 60) {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return `${hours}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    }
+    return `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+  function markersFromCues(rows2) {
+    if (!rows2 || rows2.length === 0) return [];
+    const found = [];
+    for (const cue of rows2) {
+      const start = Number(cue.start_ms);
+      if (!Number.isFinite(start) || start < 0) continue;
+      const index = Number(cue.index);
+      const named = typeof cue.name === "string" ? cue.name.trim() : "";
+      const fallback = Number.isInteger(index) ? index + 1 : found.length + 1;
+      const color = typeof cue.color === "string" && CUE_COLOR.test(cue.color) ? cue.color : "";
+      found.push({
+        seconds: start / 1e3,
+        color,
+        label: named || `${playerStrings.cue} ${fallback}`
+      });
+    }
+    return found;
+  }
+  function playbackErrorText(status) {
+    if (status === 403 || status === 404) return playerStrings.notInLibrary;
+    return playerStrings.cannotPlay;
+  }
+  function play(nextId) {
+    if (!Number.isInteger(nextId) || nextId < 0) return;
+    const element = ensureMedia();
+    ignoreMediaPause = true;
+    try {
+      if (trackId !== nextId || element.src === "") {
+        const row = state.byId.get(nextId);
+        title = row?.name || row?.title || playerStrings.untitled;
+        artist = row?.artist ?? "";
+        trackId = nextId;
+        currentTime = 0;
+        duration = 0;
+        element.src = trackUrl(nextId);
+        element.currentTime = 0;
+        loadCues(nextId);
+      }
+      error = "";
+      playing = true;
+      emit();
+      const pending = element.play();
+      if (pending && typeof pending.then === "function") {
+        pending.catch(() => {
+          if (trackId !== nextId) return;
+          noteFailure(nextId);
+        });
+      }
+    } finally {
+      ignoreMediaPause = false;
+    }
+  }
+  function pause() {
+    if (trackId === null) return;
+    playing = false;
+    ensureMedia().pause();
+    emit();
+  }
+  function togglePlayPause() {
+    if (trackId === null) {
+      const selected = selectedPlayableId();
+      if (selected !== null) play(selected);
+      return;
+    }
+    if (playing) pause();
+    else play(trackId);
+  }
+  function next() {
+    moveBy(1);
+  }
+  function previous() {
+    moveBy(-1);
+  }
+  function seek(seconds) {
+    if (!Number.isFinite(seconds) || trackId === null) return;
+    const element = ensureMedia();
+    let next2 = seconds < 0 ? 0 : seconds;
+    const limit = element.duration;
+    if (Number.isFinite(limit) && limit > 0 && next2 > limit) next2 = limit;
+    element.currentTime = next2;
+    currentTime = next2;
+    emit();
+  }
+  function seekBy(deltaSeconds) {
+    if (!Number.isFinite(deltaSeconds)) return;
+    seek(currentTime + deltaSeconds);
+  }
+  var playerControls = {
+    togglePlayPause,
+    seekBy
+  };
+  function getPlayerState() {
+    return { trackId, title, artist, playing, currentTime, duration, volume, error };
+  }
+  function subscribe(listener) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+  function mountPlayer(host) {
+    barUnsubscribe?.();
+    barUnsubscribe = null;
+    resetPlayback();
+    const root = host === void 0 ? document.getElementById("player-bar") : host;
+    if (!root) return;
+    root.classList.add("player-bar");
+    root.setAttribute("role", "region");
+    root.setAttribute("aria-label", playerStrings.region);
+    const element = ensureMedia();
+    root.replaceChildren();
+    if (element instanceof Node) root.append(element);
+    root.append(buildBar());
+    barUnsubscribe = subscribe(() => paintBar());
+    paintBar();
+  }
+  function resetPlayback() {
+    cueToken += 1;
+    trackId = null;
+    title = "";
+    artist = "";
+    playing = false;
+    currentTime = 0;
+    duration = 0;
+    error = "";
+    seeking = false;
+    cues = [];
+    paintedCueKey = "";
+  }
+  function ensureMedia() {
+    if (media) return media;
+    const audio = document.createElement("audio");
+    audio.id = "player-audio";
+    audio.preload = "none";
+    audio.className = "player-audio";
+    audio.volume = volume;
+    media = audio;
+    wire(audio);
+    return audio;
+  }
+  function wire(element) {
+    if (wired.has(element)) return;
+    wired.add(element);
+    element.addEventListener("play", () => {
+      playing = true;
+      emit();
+    });
+    element.addEventListener("pause", () => {
+      if (ignoreMediaPause) return;
+      playing = false;
+      emit();
+    });
+    element.addEventListener("ended", () => {
+      currentTime = Number.isFinite(element.currentTime) ? element.currentTime : currentTime;
+      if (!moveBy(1)) {
+        playing = false;
+        emit();
+      }
+    });
+    element.addEventListener("timeupdate", () => {
+      currentTime = element.currentTime;
+      if (Number.isFinite(element.duration)) duration = element.duration;
+      emit();
+    });
+    element.addEventListener("durationchange", () => {
+      duration = Number.isFinite(element.duration) ? element.duration : 0;
+      emit();
+    });
+    element.addEventListener("error", () => {
+      if (trackId === null) return;
+      noteFailure(trackId);
+    });
+  }
+  function trackUrl(nextId) {
+    const params = new URLSearchParams({ id: String(nextId), space: state.space });
+    return `/api/audio?${params.toString()}`;
+  }
+  function selectedPlayableId() {
+    if (state.mode === "history") return null;
+    const selected = state.selectedId;
+    if (selected === null) return null;
+    const row = state.byId.get(selected);
+    if (!row || row.entry) return null;
+    return row.id;
+  }
+  function playableRows() {
+    return state.view.filter((row) => !row.entry && Number.isInteger(row.id) && row.id >= 0);
+  }
+  function anchorIndex(rows2) {
+    if (trackId !== null) {
+      const playingIndex = rows2.findIndex((row) => row.id === trackId);
+      if (playingIndex >= 0) return playingIndex;
+    }
+    if (state.selectedId === null) return -1;
+    return rows2.findIndex((row) => row.id === state.selectedId);
+  }
+  function moveBy(delta) {
+    const rows2 = playableRows();
+    if (rows2.length === 0) return false;
+    const index = anchorIndex(rows2);
+    const target = index < 0 ? rows2[delta > 0 ? 0 : rows2.length - 1] : rows2[index + delta];
+    if (!target) return false;
+    play(target.id);
+    return true;
+  }
+  function loadCues(id) {
+    const token = ++cueToken;
+    cues = [];
+    void readCues(id).then(
+      (found) => {
+        if (token !== cueToken || trackId !== id) return;
+        cues = found;
+        emit();
+      },
+      () => {
+        if (token !== cueToken || trackId !== id) return;
+        cues = [];
+        emit();
+      }
+    );
+  }
+  async function readCues(id) {
+    if (typeof fetch !== "function") return [];
+    const params = new URLSearchParams({ id: String(id), space: state.space });
+    const response = await fetch(`/api/track?${params.toString()}`);
+    if (!response.ok) return [];
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object" || !("cues" in payload)) return [];
+    const rows2 = payload.cues;
+    return markersFromCues(rows2);
+  }
+  function noteFailure(forId) {
+    playing = false;
+    void classifyStatus(forId).then((message) => {
+      if (trackId !== forId) return;
+      playing = false;
+      error = message;
+      emit();
+    });
+  }
+  async function classifyStatus(forId) {
+    try {
+      if (typeof fetch !== "function") return playerStrings.cannotPlay;
+      const response = await fetch(trackUrl(forId), { method: "HEAD" });
+      return playbackErrorText(response.status);
+    } catch {
+      return playerStrings.cannotPlay;
+    }
+  }
+  function emit() {
+    const snapshot = getPlayerState();
+    for (const listener of [...listeners]) listener(snapshot);
+  }
+  function buildBar() {
+    const meta = document.createElement("div");
+    meta.className = "player-meta";
+    titleNode = document.createElement("p");
+    titleNode.className = "player-title";
+    artistNode = document.createElement("p");
+    artistNode.className = "player-artist";
+    statusNode = document.createElement("p");
+    statusNode.className = "player-status";
+    statusNode.setAttribute("role", "status");
+    meta.append(titleNode, artistNode, statusNode);
+    previousNode = document.createElement("button");
+    previousNode.type = "button";
+    previousNode.className = "player-toggle";
+    previousNode.textContent = playerStrings.previous;
+    previousNode.addEventListener("click", () => previous());
+    toggleNode = document.createElement("button");
+    toggleNode.type = "button";
+    toggleNode.className = "player-toggle player-play";
+    toggleNode.addEventListener("click", () => togglePlayPause());
+    nextNode = document.createElement("button");
+    nextNode.type = "button";
+    nextNode.className = "player-toggle";
+    nextNode.textContent = playerStrings.next;
+    nextNode.addEventListener("click", () => next());
+    const transport = document.createElement("div");
+    transport.className = "player-transport";
+    transport.append(previousNode, toggleNode, nextNode);
+    const seekWrap = document.createElement("div");
+    seekWrap.className = "player-seek";
+    const elapsedWrap = document.createElement("span");
+    elapsedWrap.className = "player-time";
+    const elapsedLabel = document.createElement("span");
+    elapsedLabel.className = "visually-hidden";
+    elapsedLabel.textContent = playerStrings.elapsed;
+    elapsedNode = document.createElement("span");
+    elapsedWrap.append(elapsedLabel, elapsedNode);
+    const track = document.createElement("div");
+    track.className = "player-seek-track";
+    seekNode = document.createElement("input");
+    seekNode.type = "range";
+    seekNode.className = "player-range";
+    seekNode.min = "0";
+    seekNode.max = "0";
+    seekNode.step = "0.1";
+    seekNode.value = "0";
+    seekNode.setAttribute("aria-label", playerStrings.seek);
+    seekNode.addEventListener("pointerdown", () => {
+      seeking = true;
+    });
+    const release = () => {
+      seeking = false;
+    };
+    seekNode.addEventListener("pointerup", release);
+    seekNode.addEventListener("pointercancel", release);
+    seekNode.addEventListener("input", () => {
+      if (!seekNode) return;
+      seek(Number(seekNode.value));
+    });
+    seekNode.addEventListener("keydown", onSeekKey);
+    cueLayer = document.createElement("div");
+    cueLayer.className = "player-cues";
+    track.append(seekNode, cueLayer);
+    const totalWrap = document.createElement("span");
+    totalWrap.className = "player-time";
+    const totalLabel = document.createElement("span");
+    totalLabel.className = "visually-hidden";
+    totalLabel.textContent = playerStrings.duration;
+    totalNode = document.createElement("span");
+    totalWrap.append(totalLabel, totalNode);
+    seekWrap.append(elapsedWrap, track, totalWrap);
+    const volumeLabel = document.createElement("label");
+    volumeLabel.className = "player-volume";
+    const volumeText = document.createElement("span");
+    volumeText.textContent = playerStrings.volume;
+    const volumeInput = document.createElement("input");
+    volumeInput.type = "range";
+    volumeInput.min = "0";
+    volumeInput.max = "1";
+    volumeInput.step = "0.01";
+    volumeInput.value = String(volume);
+    volumeInput.addEventListener("input", () => {
+      const next2 = Number(volumeInput.value);
+      if (!Number.isFinite(next2)) return;
+      volume = Math.min(1, Math.max(0, next2));
+      ensureMedia().volume = volume;
+      emit();
+    });
+    volumeLabel.append(volumeText, volumeInput);
+    const bar = document.createElement("div");
+    bar.className = "player-controls";
+    bar.append(meta, transport, seekWrap, volumeLabel);
+    return bar;
+  }
+  function onSeekKey(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+    const forward = event.key === "ArrowRight" || event.key === "ArrowUp";
+    const back = event.key === "ArrowLeft" || event.key === "ArrowDown";
+    if (!forward && !back) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = event.shiftKey ? SEEK_STEP_LARGE_SECONDS : SEEK_STEP_SECONDS;
+    seekBy((forward ? 1 : -1) * step);
+  }
+  function paintBar() {
+    if (!titleNode || !artistNode || !statusNode || !toggleNode || !previousNode || !nextNode) return;
+    if (!seekNode || !elapsedNode || !totalNode) return;
+    const loaded = trackId !== null;
+    const shownTitle = loaded ? title || playerStrings.untitled : playerStrings.nothingPlaying;
+    titleNode.textContent = shownTitle;
+    titleNode.title = shownTitle;
+    artistNode.textContent = artist;
+    artistNode.hidden = artist === "";
+    artistNode.title = artist;
+    statusNode.textContent = error;
+    statusNode.hidden = error === "";
+    statusNode.title = error;
+    const action = playing ? playerStrings.pause : playerStrings.play;
+    const named = loaded ? title || playerStrings.untitled : "";
+    toggleNode.textContent = action;
+    toggleNode.disabled = !loaded && selectedPlayableId() === null;
+    toggleNode.setAttribute("aria-pressed", String(playing));
+    toggleNode.setAttribute("aria-label", named ? `${action} ${named}` : action);
+    previousNode.disabled = !canMove(-1);
+    nextNode.disabled = !canMove(1);
+    previousNode.setAttribute("aria-label", playerStrings.previous);
+    nextNode.setAttribute("aria-label", playerStrings.next);
+    const limit = Number.isFinite(duration) && duration > 0 ? duration : 0;
+    seekNode.max = String(limit);
+    seekNode.disabled = !loaded || limit === 0;
+    if (!seeking) seekNode.value = String(Math.min(currentTime, limit || currentTime));
+    elapsedNode.textContent = formatPlayerTime(currentTime);
+    totalNode.textContent = formatPlayerTime(duration);
+    paintCues(limit);
+  }
+  function canMove(delta) {
+    const rows2 = playableRows();
+    if (rows2.length === 0) return false;
+    const index = anchorIndex(rows2);
+    if (index < 0) return true;
+    return Boolean(rows2[index + delta]);
+  }
+  function paintCues(limit) {
+    if (!cueLayer) return;
+    const key = `${limit}|${cues.map((cue) => `${cue.seconds}:${cue.label}:${cue.color}`).join(";")}`;
+    if (key === paintedCueKey) return;
+    paintedCueKey = key;
+    cueLayer.replaceChildren();
+    if (!(limit > 0) || cues.length === 0) return;
+    for (const cue of cues) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "player-cue";
+      const ratio = Math.min(1, Math.max(0, cue.seconds / limit));
+      const percent = Math.round(ratio * 1e3) / 10;
+      button.style.left = `${percent}%`;
+      if (cue.color) button.style.setProperty("--cue", cue.color);
+      const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.addEventListener("click", () => {
+        seek(cue.seconds);
+      });
+      cueLayer.append(button);
     }
   }
 
@@ -562,8 +1043,7 @@
     }
     for (let index = start; index < end; index += 1) {
       const track = view[index];
-      const button = document.createElement("button");
-      button.type = "button";
+      const button = document.createElement("div");
       button.className = "row";
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(track.id === state.selectedId));
@@ -572,6 +1052,28 @@
       titleCell.className = "cell";
       const line = document.createElement("span");
       line.className = "title-line";
+      if (!track.entry) {
+        const playingNow = getPlayerState();
+        const playingThis = playingNow.trackId === track.id && playingNow.playing;
+        const playButton = document.createElement("button");
+        playButton.type = "button";
+        playButton.className = "row-play";
+        const labelName = track.name || playerStrings.untitled;
+        playButton.setAttribute("aria-label", `${playerStrings.play} ${labelName}`);
+        playButton.setAttribute("aria-pressed", String(playingThis));
+        const icon = document.createElement("span");
+        icon.className = "row-play-icon";
+        icon.setAttribute("aria-hidden", "true");
+        playButton.append(icon);
+        playButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          bridge.selectTrack(track.id);
+          play(track.id);
+          el("list").focus({ preventScroll: true });
+        });
+        playButton.addEventListener("dblclick", (event) => event.stopPropagation());
+        line.append(playButton);
+      }
       const hex = colorHex(track.color);
       if (hex) {
         const swatch = document.createElement("span");
@@ -584,10 +1086,10 @@
         emoji.textContent = track.emoji;
         line.append(emoji);
       }
-      const title = document.createElement("span");
-      title.className = "title";
-      title.textContent = track.name || "Untitled";
-      line.append(title);
+      const title2 = document.createElement("span");
+      title2.className = "title";
+      title2.textContent = track.name || "Untitled";
+      line.append(title2);
       if (track.missing) {
         const missing = document.createElement("span");
         missing.className = "missing-word";
@@ -601,9 +1103,9 @@
         line.append(stems);
       }
       titleCell.append(line);
-      const artist = document.createElement("span");
-      artist.className = "cell";
-      artist.textContent = track.artist ?? "";
+      const artist2 = document.createElement("span");
+      artist2.className = "cell";
+      artist2.textContent = track.artist ?? "";
       const third = document.createElement("span");
       third.className = "cell num";
       const fourth = document.createElement("span");
@@ -619,8 +1121,15 @@
         fourth.textContent = track.key ?? "";
         fifth.textContent = lengthLabel(track.length_ms);
       }
-      button.append(titleCell, artist, third, fourth, fifth);
-      button.addEventListener("click", () => track.entry ? bridge.selectEntry(track.id) : bridge.selectTrack(track.id));
+      button.append(titleCell, artist2, third, fourth, fifth);
+      button.addEventListener("click", () => {
+        if (track.entry) bridge.selectEntry(track.id);
+        else bridge.selectTrack(track.id);
+        el("list").focus({ preventScroll: true });
+      });
+      button.addEventListener("dblclick", () => {
+        if (!track.entry) play(track.id);
+      });
       rows.append(button);
     }
   }
@@ -637,15 +1146,23 @@
   function moveSelection(delta) {
     const view = state.view || [];
     const index = view.findIndex((track) => track.id === state.selectedId);
-    const next = view[Math.max(0, Math.min(view.length - 1, index + delta))];
-    if (!next) return;
-    if (next.entry) bridge.selectEntry(next.id);
-    else bridge.selectTrack(next.id);
-    const rowTop = view.indexOf(next) * ROW;
+    const next2 = view[Math.max(0, Math.min(view.length - 1, index + delta))];
+    if (!next2) return;
+    if (next2.entry) bridge.selectEntry(next2.id);
+    else bridge.selectTrack(next2.id);
+    const rowTop = view.indexOf(next2) * ROW;
     if (rowTop < el("list").scrollTop) el("list").scrollTop = rowTop;
     if (rowTop + ROW > el("list").scrollTop + el("list").clientHeight) {
       el("list").scrollTop = rowTop + ROW - el("list").clientHeight;
     }
+  }
+  function focusedTrack(target) {
+    if (!(target instanceof Element)) return void 0;
+    const row = target.closest(".row");
+    if (!row) return void 0;
+    const id = Number(row.getAttribute("data-id"));
+    if (!Number.isInteger(id)) return void 0;
+    return state.view.find((item) => item.id === id);
   }
   function wireVirtualScroll() {
     el("list").addEventListener("scroll", () => paintRows());
@@ -656,7 +1173,21 @@
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         moveSelection(-1);
+      } else if (event.key === "Enter") {
+        const chosen = focusedTrack(event.target) ?? state.view.find((item) => item.id === state.selectedId);
+        if (!chosen || chosen.entry) return;
+        event.preventDefault();
+        void bridge.selectTrack(chosen.id);
+        play(chosen.id);
       }
+    });
+    let paintedId = null;
+    let paintedPlaying = false;
+    subscribe((next2) => {
+      if (next2.trackId === paintedId && next2.playing === paintedPlaying) return;
+      paintedId = next2.trackId;
+      paintedPlaying = next2.playing;
+      paintRows();
     });
   }
 
@@ -1060,9 +1591,9 @@
       space: state.space
     }).then((result) => {
       if (result.warning) setNotice(result.warning);
-    }).catch((error) => {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    }).catch((error2) => {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     });
   }
   function selectCrate(id) {
@@ -1093,11 +1624,11 @@
       if (token !== state.request) return;
       if (payload.serato) applyStatus(payload.serato);
       renderDetail(payload);
-    } catch (error) {
+    } catch (error2) {
       if (token !== state.request) return;
       const failure = document.createElement("p");
       failure.className = "detail-error";
-      failure.textContent = failureOf(error).message;
+      failure.textContent = failureOf(error2).message;
       el("detail").replaceChildren(failure);
     }
   }
@@ -1108,14 +1639,14 @@
     if (!entry) return;
     const body = document.createElement("div");
     body.className = "detail-body";
-    const title = document.createElement("h2");
-    title.textContent = entry.name || "Untitled";
-    body.append(title);
+    const title2 = document.createElement("h2");
+    title2.textContent = entry.name || "Untitled";
+    body.append(title2);
     if (entry.artist) {
-      const artist = document.createElement("p");
-      artist.className = "artist";
-      artist.textContent = entry.artist;
-      body.append(artist);
+      const artist2 = document.createElement("p");
+      artist2.className = "artist";
+      artist2.textContent = entry.artist;
+      body.append(artist2);
     }
     const lines = [
       ["Played", entry.played ? "Yes" : "No"],
@@ -1167,15 +1698,25 @@
       kicker.textContent = track.album;
       body.append(kicker);
     }
-    const title = document.createElement("h2");
-    title.textContent = track.title ?? "";
-    body.append(title);
+    const title2 = document.createElement("h2");
+    title2.textContent = track.title ?? "";
+    body.append(title2);
     if (track.artist) {
-      const artist = document.createElement("p");
-      artist.className = "artist";
-      artist.textContent = track.artist ?? "";
-      body.append(artist);
+      const artist2 = document.createElement("p");
+      artist2.className = "artist";
+      artist2.textContent = track.artist ?? "";
+      body.append(artist2);
     }
+    const playButton = document.createElement("button");
+    playButton.type = "button";
+    playButton.className = "detail-play";
+    const playTitle = track.title || track.name || playerStrings.untitled;
+    playButton.textContent = playerStrings.play;
+    playButton.setAttribute("aria-label", `${playerStrings.play} ${playTitle}`);
+    playButton.addEventListener("click", () => {
+      play(track.id);
+    });
+    body.append(playButton);
     const deck = document.createElement("div");
     deck.className = "deck";
     const facts = [["BPM", track.bpm], ["Key", track.key || "—"], ["Time", track.length]];
@@ -1306,7 +1847,7 @@
       merge.textContent = "Merge copies";
       merge.disabled = !writable;
       merge.addEventListener("click", () => {
-        bridge.openMergeDialog().catch((error) => setNotice(failureOf(error).message));
+        bridge.openMergeDialog().catch((error2) => setNotice(failureOf(error2).message));
       });
       actions.append(merge);
     }
@@ -1497,11 +2038,11 @@
       if (token !== relatedRequest || !section.isConnected) return;
       if (!response.ok) throw new Error(payload.error || "Related tracks could not be loaded.");
       renderRelated(track, section, writable, payload, query);
-    } catch (error) {
+    } catch (error2) {
       if (token !== relatedRequest || !section.isConnected) return;
       section.setAttribute("aria-busy", "false");
       const status = section.querySelector("[role=status]");
-      if (status) status.textContent = failureOf(error).message;
+      if (status) status.textContent = failureOf(error2).message;
     }
   }
   function renderRelated(track, section, writable, payload, query) {
@@ -1724,11 +2265,11 @@
       setNotice("Link saved.");
       const kept = section.querySelector(".related-search input");
       await loadRelated(track, section, Boolean(track.serato?.writable && state.writable), kept ? kept.value : query);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
       const status = section.querySelector("[role=status]");
-      if (status) status.textContent = failureOf(error).message;
+      if (status) status.textContent = failureOf(error2).message;
     }
   }
   async function removeRelated(track, section, link) {
@@ -1739,8 +2280,8 @@
       setNotice("Link removed.");
       const kept = section.querySelector(".related-search input");
       await loadRelated(track, section, Boolean(track.serato?.writable && state.writable), kept ? kept.value : "");
-    } catch (error) {
-      setNotice(failureOf(error).message);
+    } catch (error2) {
+      setNotice(failureOf(error2).message);
     }
   }
   async function refreshRelatedCrate(track, section) {
@@ -1751,12 +2292,12 @@
       setNotice(result.warning || `Crate “${result.name}” updated.`);
       await loadLibrary();
       selectTrack(track.id);
-    } catch (error) {
-      if (failureOf(error).status === 409) {
-        lockDown(error);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) {
+        lockDown(error2);
         if (button) button.disabled = true;
       } else {
-        setNotice(failureOf(error).message);
+        setNotice(failureOf(error2).message);
         if (button) button.disabled = !state.writable;
       }
     }
@@ -1804,8 +2345,8 @@
     el("status").textContent = info?.message || "Library";
     renderShell();
   }
-  function lockDown(error) {
-    const failed = failureOf(error);
+  function lockDown(error2) {
+    const failed = failureOf(error2);
     applyStatus(failed.payload?.serato || { writable: false, message: failed.message });
     setNotice(failed.message);
   }
@@ -1839,16 +2380,16 @@
       setNotice(result.warning || "Saved.");
       await loadLibrary();
       selectTrack(id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function revealTrack(id) {
     try {
       await postJSON("/api/reveal", { id });
-    } catch (error) {
-      setNotice(failureOf(error).message);
+    } catch (error2) {
+      setNotice(failureOf(error2).message);
     }
   }
   async function prepareTrack(id, add) {
@@ -1857,9 +2398,9 @@
       setNotice(result.warning || (add ? "Sent to Prepare." : "Removed from Prepare."));
       await loadLibrary();
       selectTrack(id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function relocateTrack(track) {
@@ -1874,9 +2415,9 @@
       setNotice(result.warning || "File location saved.");
       await loadLibrary();
       selectTrack(track.id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function removeTrack(id) {
@@ -1886,9 +2427,9 @@
       setNotice(result.warning || "Removed from the library.");
       state.selectedId = null;
       await loadLibrary();
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function setMembership(assetId, crateId, add, input) {
@@ -1902,10 +2443,10 @@
       if (result.warning) setNotice(result.warning);
       await loadLibrary();
       selectTrack(assetId);
-    } catch (error) {
+    } catch (error2) {
       input.checked = !add;
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function saveRules(id, text) {
@@ -1921,9 +2462,9 @@
       setNotice(result.warning || "Rules saved.");
       await loadLibrary();
       selectCrate(id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function createCrate() {
@@ -1935,9 +2476,9 @@
       setNotice(result.warning || "Crate created.");
       await loadLibrary();
       selectCrate(result.id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function renameCrate() {
@@ -1950,9 +2491,9 @@
       setNotice(result.warning || "Crate renamed.");
       await loadLibrary();
       selectCrate(crate.id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function colorCrate() {
@@ -1974,9 +2515,9 @@
       });
       setNotice(result.warning || "Crate color saved.");
       await loadLibrary();
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function deleteCrate() {
@@ -1988,9 +2529,9 @@
       state.activeCrate = "all";
       setNotice(result.warning || "Crate deleted.");
       await loadLibrary();
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   async function importPlaylist(file) {
@@ -2003,9 +2544,9 @@
       setNotice(`${result.added} tracks added.${missed}${result.warning ? ` ${result.warning}` : ""}`);
       await loadLibrary();
       selectCrate(result.id);
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      else setNotice(failureOf(error).message);
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      else setNotice(failureOf(error2).message);
     }
   }
   function renderSessions() {
@@ -2098,29 +2639,29 @@
     if (mode === "history") {
       state.sort = "start";
       state.sortDir = -1;
-      if (!state.historySessions.length) loadHistory().catch((error) => setNotice(failureOf(error).message));
+      if (!state.historySessions.length) loadHistory().catch((error2) => setNotice(failureOf(error2).message));
     } else if (state.sort === "start" || state.sort === "deck" || state.sort === "played") {
       state.sort = "name";
       state.sortDir = 1;
     }
     if (mode === "duplicates" && state.duplicateSpace !== state.space) {
-      loadDuplicates().catch((error) => setNotice(failureOf(error).message));
+      loadDuplicates().catch((error2) => setNotice(failureOf(error2).message));
     }
     if (mode === "files") {
       state.filesLoading = true;
       const path = state.filesAtRoots ? "" : state.filesPath || "";
-      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error) => failFiles(error));
+      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error2) => failFiles(error2));
     }
     if (mode === "snapshots") {
-      loadSnapshots().catch((error) => failSnapshots(error));
+      loadSnapshots().catch((error2) => failSnapshots(error2));
     }
     renderList();
   }
-  function showFailure(error) {
+  function showFailure(error2) {
     el("count").textContent = "Library unavailable";
     const failure = document.createElement("p");
     failure.className = "detail-error";
-    failure.textContent = failureOf(error).message;
+    failure.textContent = failureOf(error2).message;
     el("detail").replaceChildren(failure);
   }
   function selectedDuplicateGroup() {
@@ -2138,9 +2679,9 @@
   function crateNamesFor(assetId) {
     return state.crates.filter((crate) => !crate.smart && (crate.tracks || []).includes(assetId)).map((crate) => crate.name);
   }
-  function failFiles(error) {
+  function failFiles(error2) {
     state.filesLoading = false;
-    state.filesError = failureOf(error).message || "That folder could not be read.";
+    state.filesError = failureOf(error2).message || "That folder could not be read.";
     renderFiles();
   }
   var filesRequest = 0;
@@ -2290,7 +2831,7 @@
         button.className = "files-crumb";
         button.textContent = crumb.name;
         button.addEventListener("click", () => {
-          loadFolder(crumb.path, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
+          loadFolder(crumb.path, { elsewhere: state.filesElsewhere }).catch((error2) => failFiles(error2));
         });
         item.append(button);
       } else {
@@ -2460,7 +3001,7 @@
   function openBrowserRow(entry) {
     if (entry.missing) return;
     const elsewhere = state.filesElsewhere && entry.kind === "dir";
-    loadFolder(entry.path, { elsewhere }).catch((error) => failFiles(error));
+    loadFolder(entry.path, { elsewhere }).catch((error2) => failFiles(error2));
   }
   function onFilesKey(event) {
     if (state.mode !== "files") return;
@@ -2653,11 +3194,11 @@
           renderFiles();
           return;
         }
-        loadFolder(state.filesPath, { elsewhere: state.filesElsewhere && Boolean(state.filesPath) }).catch((error) => failFiles(error));
+        loadFolder(state.filesPath, { elsewhere: state.filesElsewhere && Boolean(state.filesPath) }).catch((error2) => failFiles(error2));
         return;
       }
       filesSearchTimer = window.setTimeout(() => {
-        searchFiles(value.trim()).catch((error) => failFiles(error));
+        searchFiles(value.trim()).catch((error2) => failFiles(error2));
       }, FILES_SEARCH_MS);
     });
     el("search").addEventListener("input", () => {
@@ -2692,7 +3233,7 @@
     el("import-file").addEventListener("change", (event) => {
       const file = event.target.files?.[0];
       event.target.value = "";
-      if (file) importPlaylist(file).catch((error) => setNotice(failureOf(error).message));
+      if (file) importPlaylist(file).catch((error2) => setNotice(failureOf(error2).message));
     });
     el("space").addEventListener("change", () => {
       state.space = el("space").value;
@@ -2716,10 +3257,10 @@
       renderCrates();
       renderShell();
     });
-    el("crate-new").addEventListener("click", () => createCrate().catch((error) => setNotice(failureOf(error).message)));
-    el("crate-rename").addEventListener("click", () => renameCrate().catch((error) => setNotice(failureOf(error).message)));
-    el("crate-color").addEventListener("click", () => colorCrate().catch((error) => setNotice(failureOf(error).message)));
-    el("crate-delete").addEventListener("click", () => deleteCrate().catch((error) => setNotice(failureOf(error).message)));
+    el("crate-new").addEventListener("click", () => createCrate().catch((error2) => setNotice(failureOf(error2).message)));
+    el("crate-rename").addEventListener("click", () => renameCrate().catch((error2) => setNotice(failureOf(error2).message)));
+    el("crate-color").addEventListener("click", () => colorCrate().catch((error2) => setNotice(failureOf(error2).message)));
+    el("crate-delete").addEventListener("click", () => deleteCrate().catch((error2) => setNotice(failureOf(error2).message)));
     document.querySelector(".columns").addEventListener("click", (event) => {
       const button = event.target.closest("button");
       if (!button?.dataset.sort) return;
@@ -2976,14 +3517,14 @@
         el("merge-status").textContent = "Quit Serato before merging. The preview shows the plan.";
       }
       syncTrashChoice();
-    } catch (error) {
+    } catch (error2) {
       if (token !== mergeToken) return;
       mergePreview = null;
       el("merge-preview").replaceChildren();
       const failed = document.createElement("p");
       failed.textContent = "The preview could not be read.";
       el("merge-preview").append(failed);
-      el("merge-status").textContent = failureOf(error).message;
+      el("merge-status").textContent = failureOf(error2).message;
       syncTrashChoice();
     }
   }
@@ -3003,7 +3544,7 @@
       input.value = String(id);
       input.checked = id === state.selectedId;
       input.addEventListener("change", () => {
-        if (input.checked) refreshMergePreview().catch((error) => setNotice(failureOf(error).message));
+        if (input.checked) refreshMergePreview().catch((error2) => setNotice(failureOf(error2).message));
       });
       const text = document.createElement("span");
       const name = document.createElement("span");
@@ -3057,10 +3598,10 @@
       await loadLibrary();
       if (state.mode === "duplicates") await loadDuplicates();
       if (state.byId.has(keepId)) selectTrack(keepId);
-    } catch (error) {
-      el("merge-status").textContent = failureOf(error).message;
-      if (failureOf(error).status === 409) {
-        lockDown(error);
+    } catch (error2) {
+      el("merge-status").textContent = failureOf(error2).message;
+      if (failureOf(error2).status === 409) {
+        lockDown(error2);
         el("merge-dialog").close();
       }
     } finally {
@@ -3093,7 +3634,7 @@
       applyPrivacy(payload);
       status.textContent = value ? "Sharing is on. Anonymous counts and crash reports can be sent." : "Sharing is off. Nothing is sent.";
       return true;
-    } catch (error) {
+    } catch (error2) {
       status.textContent = "Couldn't save that choice. Try again.";
       return false;
     }
@@ -3157,8 +3698,8 @@
     el("files-dialog").showModal();
     if (action === "delete" || action === "move" || action === "move_folder") {
       el("files-cancel").focus();
-      reviewFiles().catch((error) => {
-        el("files-dialog-status").textContent = failureOf(error).message;
+      reviewFiles().catch((error2) => {
+        el("files-dialog-status").textContent = failureOf(error2).message;
       });
     } else if (action === "rename") el("files-name").focus();
     else el("files-replacement").focus();
@@ -3244,9 +3785,9 @@
       await loadLibrary();
       state.filesMessage = state.filesMessage;
       renderFiles();
-    } catch (error) {
-      if (failureOf(error).status === 409) lockDown(error);
-      el("files-dialog-status").textContent = failureOf(error).message;
+    } catch (error2) {
+      if (failureOf(error2).status === 409) lockDown(error2);
+      el("files-dialog-status").textContent = failureOf(error2).message;
       confirm2.disabled = false;
     }
   }
@@ -3258,8 +3799,8 @@
     el("rekordbox-hot-loops").addEventListener("change", saveExportBar);
     el("rekordbox-memory").addEventListener("change", saveExportBar);
     el("rekordbox-key").addEventListener("change", saveExportBar);
-    loadPrivacy().catch((error) => {
-      setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent.");
+    loadPrivacy().catch((error2) => {
+      setNotice(failureOf(error2).message || "Couldn't load sharing settings. Nothing is sent.");
     });
     el("export-rekordbox").addEventListener("click", () => {
       rekordboxXml = "";
@@ -3272,7 +3813,7 @@
         fillRekordboxReport(body.report || []);
         el("rekordbox-status").textContent = "";
         el("rekordbox-dialog").showModal();
-      }).catch((error) => setNotice(failureOf(error).message));
+      }).catch((error2) => setNotice(failureOf(error2).message));
     });
     el("rekordbox-cancel").addEventListener("click", () => {
       rekordboxXml = "";
@@ -3294,11 +3835,11 @@
       el("rekordbox-dialog").close();
     });
     el("merge-duplicates").addEventListener("click", () => {
-      openMergeDialog().catch((error) => setNotice(failureOf(error).message));
+      openMergeDialog().catch((error2) => setNotice(failureOf(error2).message));
     });
     el("merge-cancel").addEventListener("click", () => el("merge-dialog").close());
     el("merge-confirm").addEventListener("click", () => {
-      confirmMerge().catch((error) => setNotice(failureOf(error).message));
+      confirmMerge().catch((error2) => setNotice(failureOf(error2).message));
     });
     el("merge-trash").addEventListener("change", () => syncTrashChoice());
     el("consent-decline").addEventListener("click", () => {
@@ -3383,7 +3924,7 @@
           try {
             await navigator.clipboard.writeText(text);
             copied = true;
-          } catch (error) {
+          } catch (error2) {
             copied = false;
           }
         }
@@ -3397,7 +3938,7 @@
         el("log-fallback").focus();
         el("log-fallback").select();
         el("settings-status").textContent = "Couldn't copy automatically. Select the log text and copy it.";
-      } catch (error) {
+      } catch (error2) {
         el("settings-status").textContent = "Couldn't copy the logs.";
       } finally {
         button.disabled = false;
@@ -3405,16 +3946,16 @@
     });
     el("files-up").addEventListener("click", () => {
       if (state.filesParent) {
-        loadFolder(state.filesParent, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
+        loadFolder(state.filesParent, { elsewhere: state.filesElsewhere }).catch((error2) => failFiles(error2));
       }
     });
     el("files-refresh").addEventListener("click", () => {
       const path = state.filesAtRoots ? "" : state.filesPath;
-      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots, refresh: true }).catch((error) => failFiles(error));
+      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots, refresh: true }).catch((error2) => failFiles(error2));
     });
     el("files-elsewhere").addEventListener("click", () => {
-      if (state.filesElsewhere) loadFolder("").catch((error) => failFiles(error));
-      else loadFolder("", { elsewhere: true }).catch((error) => failFiles(error));
+      if (state.filesElsewhere) loadFolder("").catch((error2) => failFiles(error2));
+      else loadFolder("", { elsewhere: true }).catch((error2) => failFiles(error2));
     });
     el("files-rename").addEventListener("click", (event) => {
       if (selectedFiles().length !== 1) {
@@ -3471,13 +4012,13 @@
       openFilesDialog("delete", event.currentTarget);
     });
     el("files-review").addEventListener("click", () => {
-      reviewFiles().catch((error) => {
-        el("files-dialog-status").textContent = failureOf(error).message;
+      reviewFiles().catch((error2) => {
+        el("files-dialog-status").textContent = failureOf(error2).message;
       });
     });
     el("files-confirm").addEventListener("click", () => {
-      confirmFiles().catch((error) => {
-        el("files-dialog-status").textContent = failureOf(error).message;
+      confirmFiles().catch((error2) => {
+        el("files-dialog-status").textContent = failureOf(error2).message;
       });
     });
     el("files-cancel").addEventListener("click", () => closeFilesDialog());
@@ -3508,15 +4049,15 @@
     const text = haystack.toLocaleLowerCase();
     if (!query) return null;
     let score = 0;
-    let previous = -2;
+    let previous2 = -2;
     let from = 0;
     for (const letter of query) {
       const found = text.indexOf(letter, from);
       if (found < 0) return null;
       score += 8;
-      if (found === previous + 1) score += 16;
+      if (found === previous2 + 1) score += 16;
       if (found === 0 || BOUNDARY.test(text.charAt(found - 1))) score += 12;
-      previous = found;
+      previous2 = found;
       from = found + 1;
     }
     if (text.includes(query)) score += 40;
@@ -3669,14 +4210,14 @@
     return found.slice(0, LIMIT);
   }
   function scoreTrack(track, query) {
-    const title = track.name || "Untitled";
-    const artist = track.artist ?? "";
+    const title2 = track.name || "Untitled";
+    const artist2 = track.artist ?? "";
     const album = track.album ?? "";
     const file = track.file ?? "";
-    const score = scoreQuery(query, `${title} ${artist} ${album} ${file}`);
+    const score = scoreQuery(query, `${title2} ${artist2} ${album} ${file}`);
     if (score == null) return null;
-    const detail = [artist, album].filter((part) => part !== "").join(" · ");
-    return { kind: "track", key: `track:${track.id}`, title, detail, score, trackId: track.id };
+    const detail = [artist2, album].filter((part) => part !== "").join(" · ");
+    return { kind: "track", key: `track:${track.id}`, title: title2, detail, score, trackId: track.id };
   }
   function fileHits(payload) {
     const rows2 = Array.isArray(payload.entries) ? payload.entries : [];
@@ -3746,15 +4287,15 @@
       const kind = document.createElement("span");
       kind.className = "quick-open-kind";
       kind.textContent = hit.kind === "track" ? copy.quickOpenTrack : copy.quickOpenFile;
-      const title = document.createElement("span");
-      title.className = "quick-open-name";
-      title.textContent = hit.title;
-      title.title = hit.title;
+      const title2 = document.createElement("span");
+      title2.className = "quick-open-name";
+      title2.textContent = hit.title;
+      title2.title = hit.title;
       const detail = document.createElement("span");
       detail.className = "quick-open-detail";
       detail.textContent = hit.detail;
       detail.title = hit.detail;
-      button.append(kind, title, detail);
+      button.append(kind, title2, detail);
       button.addEventListener("click", () => {
         active = index;
         void activate(hit);
@@ -3883,6 +4424,9 @@
   var player = null;
   var returnFocus2 = null;
   var snapshotCursor = 0;
+  function registerPlayerControls(controls) {
+    player = controls;
+  }
   function chordMatches(chord, event) {
     if (event.altKey) return false;
     const mod = event.ctrlKey || event.metaKey;
@@ -4297,24 +4841,26 @@
   // src/app.ts
   function wireSnapshots() {
     el("snapshots-refresh").addEventListener("click", () => {
-      loadSnapshots().catch((error) => failSnapshots(error));
+      loadSnapshots().catch((error2) => failSnapshots(error2));
     });
     el("snapshots-take").addEventListener("click", () => {
-      takeSnapshot().catch((error) => failSnapshots(error));
+      takeSnapshot().catch((error2) => failSnapshots(error2));
     });
     el("snapshots-undo-button").addEventListener("click", () => {
       const pending = state.snapshotUndo;
       if (!pending || !pending.restore_id) return;
-      openSnapshotPlan(pending.restore_id).catch((error) => failSnapshots(error));
+      openSnapshotPlan(pending.restore_id).catch((error2) => failSnapshots(error2));
     });
     el("snapshot-cancel").addEventListener("click", () => {
       el("snapshot-dialog").close();
     });
     el("snapshot-confirm").addEventListener("click", () => {
-      confirmSnapshotRestore().catch((error) => setSnapshotDialogStatus(failureOf(error).message));
+      confirmSnapshotRestore().catch((error2) => setSnapshotDialogStatus(failureOf(error2).message));
     });
   }
   mountTrackList();
+  mountPlayer();
+  registerPlayerControls(playerControls);
   wireLibrary();
   wireVirtualScroll();
   wireShortcuts();

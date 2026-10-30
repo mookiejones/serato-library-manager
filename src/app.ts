@@ -22,10 +22,11 @@ import {
   setSnapshotDialogStatus,
   takeSnapshot,
 } from "./restore";
-import { wireShortcuts } from "./shortcuts";
+import { registerPlayerControls, wireShortcuts } from "./shortcuts";
 import { state } from "./state";
 import { loadVersion, wireVersion } from "./version";
 import { loadLibrary, showFailure, wireLibrary } from "./views";
+import { mountPlayer, playerControls } from "./player";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
 /**
@@ -61,6 +62,8 @@ function wireSnapshots(): void {
 }
 
 mountTrackList();
+mountPlayer();
+registerPlayerControls(playerControls);
 wireLibrary();
 wireVirtualScroll();
 wireShortcuts();

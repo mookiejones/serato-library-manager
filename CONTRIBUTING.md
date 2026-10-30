@@ -6,7 +6,7 @@ This is a local browser for a Serato DJ Pro library. The server binds `127.0.0.1
   <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/contribution-flow-dark.svg">
   <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/contribution-flow-dark.png">
   <source type="image/svg+xml" srcset="docs/images/contribution-flow-light.svg">
-  <img alt="Branch or fork, pull request, CI green on Ubuntu and Windows, Gatekeeper QA (mookiejones-qa) approval, then merge by the team, including agents. Docs are updated in the same PR; unmerged work is labelled PREVIEW." src="docs/images/contribution-flow-light.png" width="100%">
+  <img alt="Branch or fork, pull request, CI green on Ubuntu, Windows, and macOS, Gatekeeper QA (mookiejones-qa) approval, then merge by the team, including agents. Docs are updated in the same PR; unmerged work is labelled PREVIEW." src="docs/images/contribution-flow-light.png" width="100%">
 </picture>
 
 ## Merge flow
@@ -14,13 +14,17 @@ This is a local browser for a Serato DJ Pro library. The server binds `127.0.0.1
 1. Branch or fork.
 2. Open a pull request. Code and the docs that describe it go in that same pull request.
 3. Add tests and run every check locally. Paste the results in the pull request. See [Tests](#tests) and [Checks](#checks).
-4. Wait until CI is green, including Windows. These six checks are required ([`ci.yml`](.github/workflows/ci.yml), [`codeql.yml`](.github/workflows/codeql.yml)):
+4. Wait until CI is green, including Windows and macOS. These checks are required ([`ci.yml`](.github/workflows/ci.yml), [`codeql.yml`](.github/workflows/codeql.yml)):
    - `tests (ubuntu-latest, Python 3.12)`
    - `tests (ubuntu-latest, Python 3.14)`
    - `tests (windows-latest, Python 3.12)`
+   - `tests (macos-latest, Python 3.12)`
    - `frontend (ubuntu-latest)`
    - `frontend (windows-latest)`
+   - `frontend (macos-latest)`
    - `analyze Python`
+
+   The macOS jobs run on every pull request. Add their names to branch protection so they block a merge. Until an admin does that, the previous required set still gates `main`.
 
    `dependency audit` ([`ci.yml`](.github/workflows/ci.yml)) and `review dependency changes` ([`dependency-review.yml`](.github/workflows/dependency-review.yml), pull requests) also run, but are not required.
 5. Gatekeeper QA (`mookiejones-qa`) reviews the pull request.

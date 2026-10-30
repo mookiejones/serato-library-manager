@@ -17,12 +17,13 @@ The keys below work anywhere on the library screen, except while you are typing 
 | Ctrl+5 or Command+5 | Snapshots |
 | Esc | Close a dialog, or clear the search |
 | ? | Show this list |
-| Space | Play or pause, once playback is available |
-| Left or Right | Move 5 seconds back or forward, once playback is available |
+| Space | Play or pause |
+| Left | Back 5 seconds |
+| Right | Forward 5 seconds |
 
 On Windows the key with the command is Ctrl. On a Mac it is Command. Both are listed in the app as Ctrl/Cmd.
 
-Space and the left and right arrows do nothing until playback is connected. They do not change the library.
+Space plays or pauses. Left moves 5 seconds back. Right moves 5 seconds forward. They do not change the library.
 
 ## Find a track or a file
 

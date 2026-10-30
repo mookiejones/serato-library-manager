@@ -12,7 +12,7 @@ export const copy = {
     "These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.",
   shortcutsClose: "Close",
   openShortcuts: "Shortcuts",
-  playNote: "Space and the left and right arrows play or move through a track once playback is available. Until then, they do nothing.",
+  playNote: "Space plays or pauses. Left moves 5 seconds back. Right moves 5 seconds forward.",
   quickOpenTitle: "Find a track or file",
   quickOpenLabel: "Name",
   quickOpenPlaceholder: "Track or file name",

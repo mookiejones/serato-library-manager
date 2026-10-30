@@ -13,6 +13,7 @@ The first time you open it, setup finds your library and saves a safety copy bef
 ## What you can do
 
 - [Browse crates and tracks](guide/crates.md), and make, rename, color, and delete crates.
+- [Play a track](guide/playback.md) in the window before you crate or tag it. Playback does not change the file.
 - [Edit track details](guide/tags.md) that Serato stores in the library. Cue points stay in the audio file.
 - Read [History](guide/history.md), find [missing files](guide/missing.md), and see [stems](guide/stems.md).
 - [Merge duplicate copies](guide/duplicates.md) into the file you want to keep.
