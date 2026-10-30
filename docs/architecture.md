@@ -265,14 +265,76 @@ Sentry uses `server_name` `local`, environment `local`, release `app_config.APP_
 
 `app_log.py` writes `serato-library.log` with `RotatingFileHandler`: 1 MiB and three backups. The directory is `~/Library/Logs/Serato Library` on macOS, `%LOCALAPPDATA%\Serato Library\Logs` on Windows, and `$XDG_STATE_HOME/serato-library/logs` (or `~/.local/state/serato-library/logs`) elsewhere. `SERATO_LIBRARY_LOG_DIR` overrides it when the value is absolute. The startup line can include the database path. That file is not uploaded. Copying the log skips a symlink and skips a file that is not inside the log directory, and it keeps the newest 200,000 characters. Opening the folder runs `open` on macOS, `xdg-open` elsewhere, and `os.startfile` on Windows. The response does not include the path.
 
+## Portable drive check
+
+`drive_check.py` reads one portable drive and reports what to fix on the laptop before the gig. The drive is a folder with `_Serato_` at its root, or that `_Serato_` folder itself. `python3 drive_check.py DRIVE` prints the report. `GET /api/drive-check` returns the same JSON. The page does not show this check. The Gig view is still the open gig-check pull request, and the Files page owns the drive list.
+
+The check does not open `master.sqlite`. It does not write. Crate bytes are read with `O_RDONLY`. Audio files are not opened; a file size comes from `stat`. `database V2` is not a crate, so a track that appears only there is not a finding. `Export Backups` and `Lexicon` are not entered. A sibling such as `Export Backups-extra` is. A shortcut `_Serato_` folder is refused and not followed. A drive path whose leaf is a shortcut to another folder is refused too. A crate file that is a shortcut to somewhere outside `_Serato_` is not read. A directory shortcut inside `Subcrates` or `SmartCrates` is not entered. A missing drive is a report with `missing_drive` true and no per-track rows. The folder is not created.
+
+Track paths come from `snapshots.parse_serato_bytes`. A crate entry with no path is skipped, because that parser only returns paths. A path is on the drive when it resolves to a file inside the drive, including a case-insensitive match. A Mac path with no leading slash is also tried at the filesystem root and under the home directory, which is how a laptop track is stored. A Windows drive letter or a UNC path is that absolute path. The first place the file exists off the drive is `off_drive`. A path that exists nowhere we look is `missing`. The search does not scan the disk.
+
+A `.scrate` file is `smart_crate`. Serato's portable-library article says smart crates cannot be transferred to a portable library (https://support.serato.com/hc/en-us/articles/202304844-Using-a-USB-external-hard-drive-for-your-portable-library, read 2026-10-29). The rules are not resolved, and paths inside the file are not listed as tracks. The fix is to make a normal crate on the laptop and copy that.
+
+`unsafe_name` is a stored component that contains `\ / : * ? " < > |`, ends with a space or a period, or uses a reserved Windows name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, including an extension such as `CON.mp3`). `path_length` is a component over 255 characters, or a Windows path `X:\` plus the stored path over 259 characters (`MAX_PATH` includes the NUL). `file_size` is a file over `2**32 - 1` bytes when `filesystem` is FAT12, FAT16, FAT32, `vfat`, or `msdos`. exFAT is not that check. When the filesystem cannot be detected, `filesystem` is null and the size check does not run. Linux reports FAT volumes as `vfat`. The request cannot supply a filesystem name.
+
+`drive` is the drive root. `crate` may be repeated. `House` includes `House / Peak`. An unknown crate is 404. An empty `drive` is 400. A folder with no `_Serato_` directory is 404. A missing drive is 200.
+
+`ready` is false when any finding or read error is present, or the drive is not connected. `counts.tracks` counts a track once per crate. `summary` is the sentences a DJ can read without the list. For the venue failure it is `85 of 150 tracks are not on this drive.` Each finding has `kind`, `crate`, `track`, `path`, `found`, and `fix`. `track` is empty for `smart_crate`. `found` is empty unless the file was located off the drive. `kind` is `off_drive`, `missing`, `smart_crate`, `unsafe_name`, `path_length`, or `file_size`.
+
+```json
+{
+  "drive": "/Volumes/GIGDRIVE",
+  "name": "GIGDRIVE",
+  "filesystem": "FAT32",
+  "ready": false,
+  "missing_drive": false,
+  "summary": "1 of 2 tracks are not on this drive.",
+  "counts": {
+    "tracks": 2,
+    "off_drive": 1,
+    "missing": 0,
+    "smart_crates": 0,
+    "unsafe_names": 0,
+    "path_length": 0,
+    "file_size": 0
+  },
+  "crates": [
+    {
+      "name": "House",
+      "smart": false,
+      "tracks": 2,
+      "off_drive": 1,
+      "missing": 0,
+      "unsafe_names": 0,
+      "path_length": 0,
+      "file_size": 0
+    }
+  ],
+  "findings": [
+    {
+      "kind": "off_drive",
+      "crate": "House",
+      "track": "night.mp3",
+      "path": "Users/ada/Music/night.mp3",
+      "found": "/Users/ada/Music/night.mp3",
+      "fix": "Copy \"night.mp3\" onto this drive. It is in \"House\", and the file on the laptop is /Users/ada/Music/night.mp3."
+    }
+  ],
+  "errors": []
+}
+```
+
+A crate row has `name`, `smart`, `tracks`, `off_drive`, `missing`, `unsafe_names`, `path_length`, and `file_size`. An error row has `crate` and `message`.
+
 ## HTTP API
 
-The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413. Invalid JSON returns 400. Serato open or a database lock returns 409 with a `serato` object: `open`, `writable`, `pid`, `process`, `message`, and `file_manager`.
+The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413. Invalid JSON returns 400. Serato open or a database lock returns 409 with a `serato` object: `open`, `writable`, `pid`, `process`, `message`, and `file_manager`. Every request is refused with 403 unless `Host` is `localhost`, `127.0.0.1`, or `[::1]`, with or without a port. An `Origin` header, when the client sends one, must name one of those hosts. That blocks a DNS rebinding page from calling this computer. The message is "This page only answers on this computer."
 
 | Method | Path | Query or body | Result |
 |--------|------|---------------|--------|
 | GET | `/api/health` | none | `{"ok": true}`. Does not open the library |
 | GET | `/api/version` | none | `version`, `commit`, and `source`. Does not open the library. `version` is the release tag (`v1.2.3`, `v1.2.3-rc1`, or `v1.2.3-beta1`) when the build was stamped from that tag. A development checkout uses `git describe --tags --always --dirty`. When git is missing or fails, `version` is `0.0.0+dev`. `commit` is the first 12 hex digits of the commit, or `null`. `source` is `release`, `git`, or `dev` |
+| GET | `/api/drive-check` | `drive`, optional repeated `crate` | Portable-drive report. Does not open the library and does not write. See Portable drive check. A missing drive is 200 with `missing_drive` true. No `_Serato_` folder is 404. An unknown crate is 404. An empty `drive` is 400 |
 | POST | `/api/shutdown` | header `X-Serato-Library-Shutdown` | Stops the desktop server when the token matches. 404 when no token is set. 403 when it does not match |
 | POST | `/api/focus` | header `X-Serato-Library-Focus` | Brings the desktop window forward when the token matches. 404 when no token is set. 403 when it does not match. The token is not in the page |
 | GET | `/api/status` | none | Lock status |
@@ -312,7 +374,7 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 
 A restore plan has `crates` (`added`, `removed`, `changed`, `unavailable`), `tracks` (`added`, `removed`, `unavailable`), `cues`, `grids`, `dry_run`, and `restore_blocked`. `cues` and `grids` are one row per file that would change. An unavailable drive is not listed as removed.
 
-`GET /api/version` is answered with health, before any library call. `GET /api/settings`, `GET /api/setup`, and `GET /api/logs` do not take the library write lock. `POST /api/settings`, `POST /api/setup`, and `POST /api/logs/open` are handled before that lock. `GET /api/related` and `POST /api/related` with `add` or `remove` write only the sidecar file and do not take that lock. `action` `crate` takes the lock, then `library.crate_action`. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
+`GET /api/version` and `GET /api/drive-check` are answered with health, before any library call. The drive check does not write to the drive. `GET /api/settings`, `GET /api/setup`, and `GET /api/logs` do not take the library write lock. `POST /api/settings`, `POST /api/setup`, and `POST /api/logs/open` are handled before that lock. `GET /api/related` and `POST /api/related` with `add` or `remove` write only the sidecar file and do not take that lock. `action` `crate` takes the lock, then `library.crate_action`. An unexpected handler error returns 500 with "Something went wrong. The details are in the local log." A `LibraryError` is still returned as its own JSON and is not sent as a crash report.
 
 `GET /api/library` crate objects use `id`, `parent`, `name`, `smart`, `order`, `color`, `expanded`, `added`, `tracks`, and `rules` on smart crates. The space root crate is omitted. `root_id` is returned separately.
 

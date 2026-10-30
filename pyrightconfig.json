@@ -1,5 +1,5 @@
 {
   "typeCheckingMode": "strict",
   "pythonVersion": "3.14",
-  "include": ["library.py", "tags.py", "server.py", "tests"]
+  "include": ["library.py", "tags.py", "server.py", "drive_check.py", "tests"]
 }
