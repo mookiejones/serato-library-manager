@@ -817,8 +817,9 @@ class BackupTests(unittest.TestCase):
             library._write_complete_marker(uppercase)
             self.assertFalse(library.is_complete(uppercase))
             mixed = parent / "serato-web-old-Failed"
-            # A case-insensitive volume already has this directory.
-            if os.path.normcase(str(mixed)) != os.path.normcase(str(uppercase)):
+            # macOS and Windows treat this as the directory just created.
+            # normcase folds case only on Windows, so existence is the check.
+            if not mixed.exists():
                 mixed.mkdir()
                 (mixed / "master.sqlite").write_bytes(b"old")
                 library._write_complete_marker(mixed)
