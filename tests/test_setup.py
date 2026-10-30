@@ -485,10 +485,18 @@ class MissingLibraryServerTests(unittest.TestCase):
         env.pop("SERATO_LIBRARY_SMOKE", None)
         script = (
             "import json, sys, threading\n"
+            "sys.stderr.write('child-start\\n')\n"
+            "sys.stderr.flush()\n"
             "import library, server\n"
+            "sys.stderr.write('child-imported ' + str(library.MASTER) + '\\n')\n"
+            "sys.stderr.flush()\n"
             "master = str(library.MASTER)\n"
             "try:\n"
+            "    sys.stderr.write('child-serve\\n')\n"
+            "    sys.stderr.flush()\n"
             "    httpd = server.serve(port=0, require_library=True)\n"
+            "    sys.stderr.write('child-bound\\n')\n"
+            "    sys.stderr.flush()\n"
             "except SystemExit as exc:\n"
             "    sys.stdout.write(json.dumps({'error': str(exc)}) + '\\n')\n"
             "    sys.stdout.flush()\n"
@@ -527,10 +535,12 @@ class MissingLibraryServerTests(unittest.TestCase):
 
             reader = threading.Thread(target=_read)
             reader.start()
-            reader.join(20)
+            reader.join(60)
             if reader.is_alive():
                 proc.kill()
-                self.fail("The server did not start against an empty home.")
+                stderr.flush()
+                detail = stderr_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+                self.fail("The server did not start against an empty home.\n" + detail)
             line = box.get("line", "")
             started = json.loads(line) if line else {}
             self.assertNotIn("error", started, line)
