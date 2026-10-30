@@ -539,6 +539,47 @@ def _status_rows(conn: sqlite3.Connection) -> dict[str, object]:
     }
 
 
+LOCKED_MESSAGE = "Serato DJ Pro has the library open. Edits stay off until it quits."
+
+
+def open_error_status(exc: sqlite3.OperationalError) -> dict[str, object]:
+    """Build the busy status for a library file that exists but did not open.
+
+    A locked database keeps the plain Serato message. Any other open or
+    first-query error is also treated as Serato holding the file, so every
+    write refuses, but the message carries the SQLite text so a damaged
+    file is not hidden behind "Serato is open".
+
+    Args:
+        exc: The error from opening or first querying ``master.sqlite``.
+
+    Returns:
+        A status dict with ``open`` true, ``writable`` false, and
+        ``open_error`` set to the SQLite text (None for a plain lock).
+    """
+    text = str(exc).strip() or type(exc).__name__
+    if "locked" in text.lower():
+        return {
+            "open": True,
+            "writable": False,
+            "pid": None,
+            "process": "Serato DJ Pro",
+            "message": LOCKED_MESSAGE,
+            "open_error": None,
+        }
+    return {
+        "open": True,
+        "writable": False,
+        "pid": None,
+        "process": "Serato DJ Pro",
+        "message": (
+            "The library could not be opened (SQLite: "
+            f"{text}). Serato DJ Pro may have it open. Edits stay off until it opens."
+        ),
+        "open_error": text,
+    }
+
+
 def status(path: Path | None = None, *, from_copy: bool = False) -> dict[str, object]:
     """Report whether Serato has the library open.
 
@@ -549,10 +590,12 @@ def status(path: Path | None = None, *, from_copy: bool = False) -> dict[str, ob
             file. Setup uses this. The sidebar reads the live file.
 
     Returns:
-        A status dict. A locked database is reported as open. file_manager names Finder or File Explorer.
+        A status dict. A locked database is reported as open. Any other
+        ``OperationalError`` from opening or first querying a file that
+        exists is reported as open too, with the SQLite text in
+        ``message`` and ``open_error``. file_manager names Finder or File Explorer.
 
     Raises:
-        sqlite3.OperationalError: If the database fails for a reason other than a lock.
         LibraryError: If the database file does not exist.
     """
     info: dict[str, object]
@@ -565,15 +608,10 @@ def status(path: Path | None = None, *, from_copy: bool = False) -> dict[str, ob
         with opener as conn:
             info = _status_rows(conn)
     except sqlite3.OperationalError as exc:
-        if "locked" not in str(exc).lower():
-            raise
-        info = {
-            "open": True,
-            "writable": False,
-            "pid": None,
-            "process": "Serato DJ Pro",
-            "message": "Serato DJ Pro has the library open. Edits stay off until it quits.",
-        }
+        if not database.exists():
+            raise LibraryError(f"Serato library not found at {database}", 404) from exc
+        info = open_error_status(exc)
+    info.setdefault("open_error", None)
     info["file_manager"] = file_manager_name()
     import snapshots
 
@@ -1214,8 +1252,9 @@ def begin_write() -> sqlite3.Connection:
         A connection inside BEGIN IMMEDIATE. The caller commits and closes it.
 
     Raises:
-        SeratoOpen: If Serato holds the lock or the database is locked.
-        sqlite3.OperationalError: If the write transaction fails for another reason.
+        SeratoOpen: If Serato holds the lock, the database is locked, or
+            opening the write transaction raises any ``OperationalError``.
+            The message then carries the SQLite text.
     """
     info = status()
     if info["open"]:
@@ -1227,18 +1266,27 @@ def begin_write() -> sqlite3.Connection:
         raise LibraryError(blocked, 409)
     snapshots.snapshot_before_write()
     ensure_backup()
-    conn = sqlite3.connect(Path(MASTER), timeout=1)
-    conn.row_factory = sqlite3.Row
-    register(conn)
+    conn: sqlite3.Connection | None = None
     try:
+        conn = sqlite3.connect(Path(MASTER), timeout=1)
+        conn.row_factory = sqlite3.Row
+        register(conn)
         conn.execute("PRAGMA foreign_keys=OFF")
         conn.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError as exc:
+        if conn is not None:
+            conn.close()
+        info = status()
+        if not info["open"]:
+            info = {**info, **open_error_status(exc)}
+        raise SeratoOpen(info) from exc
+    try:
+        held = _status_rows(conn)["open"]
+    except sqlite3.OperationalError as exc:
+        conn.rollback()
         conn.close()
-        if "locked" in str(exc).lower():
-            raise SeratoOpen(status()) from exc
-        raise
-    if _status_rows(conn)["open"]:
+        raise SeratoOpen({**status(), **open_error_status(exc)}) from exc
+    if held:
         conn.rollback()
         conn.close()
         raise SeratoOpen(status())
