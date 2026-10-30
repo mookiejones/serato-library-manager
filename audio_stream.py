@@ -5,9 +5,11 @@ the raw query string and must be decimal digits, so a path, a ``..``
 segment, or a percent-encoded id is refused before the database is
 opened. The stored path is resolved with ``os.path.realpath``. It must be
 a regular audio file. Playback is allowed when that real path sits inside
-a music root (each root is realpath'd too) or when it is exactly the file
-the library row names and a symlink did not carry it outside those roots.
-A symlinked folder that stays inside a root still plays. The file is
+a music root (each root is realpath'd too) or when it is exactly the
+file the library row names. A file symlink is refused when its real path
+leaves the directory that row names, even if that outside folder was
+listed as a music root. A music folder that is itself a symlink still
+plays, including when it points at another disk. The file is
 opened read-only, in chunks, and nothing under the Serato folder is written.
 """
 
@@ -284,15 +286,16 @@ def library_allows(real: Path, nominal: Path) -> bool:
 
     Returns:
         True when ``real`` is inside a realpath'd music root, or when it
-        is exactly the file the library row names and a symlink did not
-        land outside those roots. False is what refuses a shortcut to a
-        file outside the roots. Returning True for every call is what
-        lets that shortcut through.
+        is exactly the file the library row names. A file symlink whose
+        real path leaves the directory that row names is False either
+        way, including when root discovery followed the link and listed
+        the outside folder. Returning True for every call is what lets
+        that shortcut through. A music folder that is itself a symlink
+        still returns True, because ``realpath`` of its parent contains
+        the file.
     """
-    # A file symlink, or a directory symlink that leaves the folder the
-    # library path names, is refused even when root discovery followed it
-    # and listed the outside folder. This does not depend on is_symlink
-    # for the leaf: realpath leaving the stored parent is enough.
+    # Checked before the music-root test. On Windows, root discovery can
+    # follow a file symlink and treat the outside folder as a root.
     if _left_stored_directory(nominal, real):
         return False
     roots = _music_root_reals()
@@ -451,37 +454,28 @@ def _inside(child: Path, root: Path) -> bool:
 
 
 def _left_stored_directory(nominal: Path, real: Path) -> bool:
-    """Return whether resolving ``nominal`` left the directory it names.
+    """Return whether the real file left the directory the library path names.
+
+    ``realpath`` of the parent follows a directory symlink, so a music
+    folder that points at another disk still contains the file. A file
+    symlink is different: the parent stays the folder that holds the
+    link, and the real file is elsewhere. That does not depend on
+    ``is_symlink`` for the leaf.
 
     Args:
         nominal: Stored path. A symlink leaf stays a symlink.
         real: Real path of the file.
 
     Returns:
-        True when ``real`` is outside the real directory of the stored
-        parent, or a directory symlink on that path points outside the
-        directory that contains the shortcut. An operating-system shortcut
-        such as ``/tmp`` on macOS points at a directory that still contains
-        the file's folder, so it is not an escape.
+        True when ``real`` is outside ``realpath`` of the stored parent.
+        An operating-system shortcut such as ``/tmp`` on macOS is followed
+        for that parent, so the file remains inside the resolved folder.
     """
     try:
         holder = Path(os.path.realpath(nominal.parent))
     except OSError:
         return True
-    if not _inside(real, holder):
-        return True
-    try:
-        probe = nominal.parent
-        while probe != probe.parent:
-            if probe.is_symlink():
-                target = Path(os.path.realpath(probe))
-                container = Path(os.path.realpath(probe.parent))
-                if not _inside(target, container) and _key(target) != _key(container):
-                    return True
-            probe = probe.parent
-    except OSError:
-        return True
-    return False
+    return not _inside(real, holder)
 
 
 def _key(path: Path) -> str:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import os
+import tempfile
 import threading
 import unittest
 import urllib.parse
@@ -391,6 +392,30 @@ class AudioRouteTests(unittest.TestCase):
         status, _headers, body = self.exchange("GET", f"/api/audio?id={asset_id}")
         self.assertEqual(status, 403)
         self.assertNotIn(SECRET, body)
+
+    def test_symlinked_music_folder_on_another_disk_is_allowed(self) -> None:
+        """Play a track when the music folder is a symlink to another disk.
+
+        The target sits outside the library folder. The stored path goes
+        through the shortcut, and the real file stays inside the realpath
+        of that music folder. A check that treats every ancestor symlink
+        as an escape would refuse this file.
+
+        Returns:
+            None. The test fails if the shortcut folder is refused.
+        """
+        with tempfile.TemporaryDirectory(prefix="serato-audio-vault-") as vault_name:
+            vault = Path(vault_name)
+            album = vault / "album"
+            album.mkdir()
+            song = album / "song.mp3"
+            song.write_bytes(BODY)
+            music = self.library.root / "music"
+            self.link_or_skip(music, vault, directory=True)
+            asset_id = self.insert_asset(music / "album" / "song.mp3")
+            status, _headers, body = self.exchange("GET", f"/api/audio?id={asset_id}")
+            self.assertIn(status, (200, 206))
+            self.assertEqual(body, BODY)
 
     def test_traversal_and_encoded_ids_are_refused(self) -> None:
         """Refuse a non-digit id, including encoded and double-encoded forms.
