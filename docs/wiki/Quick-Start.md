@@ -88,7 +88,7 @@ Later, open **Snapshots**. **Review restore** shows the plan before anything is 
 
 You land in **Crates**. The space menu reads **Library**, **Video**, **Apple Music**, or **Prepare**.
 
-Use **Search tracks**, then click a tune. Cue points show on the right. They are read from the audio file.
+Use **Search tracks**, then click a tune. Cue points show on the right. They are read from the audio file. Press `/` to jump to that search. Press Ctrl+K (Command+K on a Mac) to find a track or a file on disk. [Keyboard shortcuts](Keyboard-Shortcuts) lists the other keys.
 
 The other views are **History**, **Missing**, **Duplicates**, **Stems**, **Files**, and **Snapshots**.
 

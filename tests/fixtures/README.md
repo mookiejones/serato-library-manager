@@ -54,3 +54,5 @@ Protect Library are omitted because their storage is unknown until Byte Beat's
 - `edge/truncated.crate` and `edge/truncated-tags.mp3` are cut on purpose.
 - `edge/cut-header.mp3` is an ID3 header that stops early.
 - `drives/UNMOUNTED` is a crate for a volume the tests do not mount.
+- `drive_check/GIGDRIVE` is a portable drive for the read-only drive check.
+  Unsafe FAT names are inside the crate bytes, not file names.

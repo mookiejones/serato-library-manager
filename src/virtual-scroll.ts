@@ -133,6 +133,35 @@ export function paintRows() {
  * @param {number} delta 1 for the next row, -1 for the previous row.
  * @returns {void}
  */
+/**
+ * Move the track selection from a shortcut.
+ *
+ * The list's own arrow keys call the same helper. Does not fetch by
+ * itself; selecting a row does.
+ *
+ * @param delta 1 for the next row, -1 for the previous row.
+ * @returns {void}
+ */
+export function moveTrackList(delta: number): void {
+  moveSelection(delta);
+}
+
+/**
+ * Open the selected track in the detail pane.
+ *
+ * When nothing is selected, the first visible row opens. History rows
+ * use the entry already loaded with the session.
+ *
+ * @returns {void}
+ */
+export function openTrackList(): void {
+  const view = state.view || [];
+  const current = view.find((track) => track.id === state.selectedId) ?? view[0];
+  if (!current) return;
+  if (current.entry) bridge.selectEntry(current.id);
+  else void bridge.selectTrack(current.id);
+}
+
 function moveSelection(delta: number) {
   const view = state.view || [];
   const index = view.findIndex((track) => track.id === state.selectedId);

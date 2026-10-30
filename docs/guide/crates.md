@@ -42,7 +42,7 @@ From the keyboard, click the crate list first.
 | Left | Close a crate, or move to its parent |
 | Enter or Space | Select the crate |
 
-In the track list, Up and Down move the selection.
+In the track list, Up and Down move the selection. Enter opens the row. The other keys, including find and the view numbers, are in [Keyboard shortcuts](shortcuts.md).
 
 ## Tracks
 

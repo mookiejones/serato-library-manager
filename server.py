@@ -24,7 +24,9 @@ from urllib.parse import parse_qs, urlparse
 
 import app_config
 import app_log
+import drive_check
 import files
+import legacy_library
 import library
 import music_roots
 import rekordbox
@@ -61,6 +63,11 @@ FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
+LEGACY_ALLOWED_POSTS = frozenset({"/api/related", "/api/reveal"})
+"""POST routes, after settings, setup, and logs, that still answer while only an
+older ``database V2`` library is present. Every other POST is refused with 409,
+so a write route added later is blocked by default. Related links live in
+``related.sqlite`` beside ``settings.json``; reveal only opens a file manager."""
 
 
 def db_path() -> Path:
@@ -1472,6 +1479,52 @@ def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | N
     }
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def host_name(value: str) -> str:
+    """Return the host from a Host header or an Origin netloc.
+
+    Args:
+        value: ``localhost:8765``, ``127.0.0.1``, or ``[::1]:8765``.
+
+    Returns:
+        The host, lowercased, without a port. Empty when the value is not a host.
+    """
+    text = value.strip().lower()
+    if not text:
+        return ""
+    if text.startswith("["):
+        end = text.find("]")
+        if end < 0:
+            return ""
+        return text[1:end]
+    if text.count(":") == 1:
+        return text.split(":", 1)[0]
+    return text
+
+
+def request_hosts_allowed(host: str | None, origin: str | None) -> bool:
+    """Return whether this request is from this computer.
+
+    Args:
+        host: The ``Host`` header. Required. A DNS rebinding page sends another name.
+        origin: The ``Origin`` header, or None when the client did not send one.
+
+    Returns:
+        True when Host is ``localhost``, ``127.0.0.1``, or ``[::1]``, with or
+        without a port, and Origin is absent or names one of those hosts.
+    """
+    if host is None or host_name(host) not in _LOCAL_HOSTS:
+        return False
+    if origin is None or origin == "":
+        return True
+    named = urlparse(origin).hostname
+    if named is None:
+        return False
+    return named.lower() in _LOCAL_HOSTS
+
+
 class Handler(BaseHTTPRequestHandler):
     """Serve the JSON API and the files in static/."""
 
@@ -1512,12 +1565,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         """Answer a GET request.
 
-        Health and version are answered before the library is opened.
+        Health, version, and the portable-drive check are answered before the library is opened.
         Settings and logs are answered before the library routes. Library,
         status, track, history, duplicate, file, related-track, M3U, and
         rekordbox XML paths return data. Every other path is a file under static/.
+        A Host or Origin that is not this computer is refused first.
         """
         try:
+            if self._refuse_foreign_host():
+                return
             self._do_GET()
         except Exception as exc:
             self._report_failure(exc)
@@ -1525,9 +1581,9 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         """Answer a GET request.
 
-        Health and version do not open the library. Library, status, track,
-        history, duplicate, file, M3U, and rekordbox XML paths return data.
-        Every other path is a file under static/.
+        Health, version, and the portable-drive check do not open the library.
+        Library, status, track, history, duplicate, file, M3U, and rekordbox
+        XML paths return data. Every other path is a file under static/.
         """
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
@@ -1538,11 +1594,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(version_info.payload())
             return
         try:
+            if parsed.path == "/api/drive-check":
+                self._get_drive_check(query)
+                return
             if parsed.path == "/api/settings":
                 self.send_json(telemetry.public_settings())
                 return
             if parsed.path == "/api/setup":
                 self._get_setup(query)
+                return
+            if parsed.path == "/api/legacy-library":
+                self._get_legacy_library()
                 return
             if parsed.path == "/api/logs":
                 text, truncated = app_log.read_logs()
@@ -1595,6 +1657,7 @@ class Handler(BaseHTTPRequestHandler):
                         query_text(query, "path", "") or "",
                         elsewhere=elsewhere,
                         refresh=refresh,
+                        query=query_text(query, "q", "") or "",
                     )
                 )
                 return
@@ -1670,8 +1733,11 @@ class Handler(BaseHTTPRequestHandler):
 
         A body larger than BODY_LIMIT returns 413. Serato holding the database returns 409.
         Settings and the logs folder do not take the library write lock.
+        A Host or Origin that is not this computer is refused first.
         """
         try:
+            if self._refuse_foreign_host():
+                return
             self._do_POST()
         except Exception as exc:
             self._report_failure(exc)
@@ -1717,6 +1783,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/logs/open":
             self._post_open_logs()
+            return
+        if parsed.path not in LEGACY_ALLOWED_POSTS and setup_flow.legacy_folder() is not None:
+            self.send_json({"error": legacy_library.WRITE_BLOCKED, "read_only": True}, status=409)
             return
         try:
             if parsed.path == "/api/related":
@@ -1967,6 +2036,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_json(setup_flow.describe_library())
 
+    def _get_legacy_library(self) -> None:
+        """Return an older ``database V2`` library, read-only.
+
+        The answer has tracks, crates, missing and offline tracks, and
+        duplicate groups. A 404 means there is no older library, or a
+        newer library file is open.
+        """
+        folder = setup_flow.legacy_folder()
+        if folder is None:
+            self.send_json({"error": "No older Serato library was found."}, status=404)
+            return
+        try:
+            self.send_json(legacy_library.read_library(folder))
+        except legacy_library.LegacyLibraryError as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+
     def _post_setup(self, payload: dict[str, object]) -> None:
         """Check a folder the person picked in the wizard.
 
@@ -2168,6 +2253,35 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(store.restore(snapshot_id))
             return
         self.send_json({"error": "That action is not available."}, status=404)
+
+    def _refuse_foreign_host(self) -> bool:
+        """Refuse a request whose Host or Origin is not this computer.
+
+        Returns:
+            True when a 403 response has been sent.
+        """
+        if request_hosts_allowed(self.headers.get("Host"), self.headers.get("Origin")):
+            return False
+        self.send_json({"error": "This page only answers on this computer."}, status=403)
+        return True
+
+    def _get_drive_check(self, query: dict[str, list[str]]) -> None:
+        """Report whether a portable drive's crates can leave the laptop.
+
+        Args:
+            query: Parsed query. ``drive`` is the drive root. ``crate`` may
+                be repeated. A filesystem name in the query is ignored.
+
+        Raises:
+            library.LibraryError: The drive was not chosen, the folder has
+                no ``_Serato_`` directory, or a requested crate is not there.
+        """
+        raw = query_text(query, "drive", "") or ""
+        if not raw.strip():
+            raise library.LibraryError("Choose a drive.", 400)
+        crates = [item.strip() for item in query.get("crate", []) if item.strip()]
+        report = drive_check.check_drive(raw, crates or None)
+        self.send_json(report.to_dict())
 
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.

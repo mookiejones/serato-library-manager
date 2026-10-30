@@ -24,6 +24,7 @@ import type {
   Track,
 } from "./api-types";
 import { bridge } from "./bridge";
+import { copy, fill } from "./copy";
 import { el } from "./dom";
 import { clockLabel, colorHex, compare, durationLabel, sizeLabel } from "./format";
 import { failSnapshots, loadSnapshots } from "./restore";
@@ -2296,6 +2297,11 @@ export function failFiles(error: unknown) {
  */
 let filesRequest = 0;
 
+/** Wait before searching the disk, so a fast typist does not search every letter. */
+export const FILES_SEARCH_MS = 200;
+
+let filesSearchTimer = 0;
+
 const FILE_OVERSCAN = 8;
 
 /**
@@ -2312,6 +2318,11 @@ const FILE_OVERSCAN = 8;
  * @returns {Promise<void>}
  */
 export async function loadFolder(path: string, options: { keepMessage?: boolean; elsewhere?: boolean; refresh?: boolean } = {}) {
+  window.clearTimeout(filesSearchTimer);
+  state.filesQuery = "";
+  state.filesSearching = false;
+  const searchField = document.getElementById("files-search");
+  if (searchField instanceof HTMLInputElement) searchField.value = "";
   const elsewhere = options.elsewhere === true;
   const refresh = options.refresh === true;
   const atRoots = path === "" && !elsewhere;
@@ -2373,6 +2384,55 @@ export async function loadFolder(path: string, options: { keepMessage?: boolean;
 }
 
 /**
+ * Search file names under the open folder, or under every music folder.
+ *
+ * Uses GET /api/files?q=. The request is read-only. A newer folder open
+ * or a newer search replaces a slow reply.
+ *
+ * @param query Name to find.
+ * @returns {Promise<void>}
+ */
+async function searchFiles(query: string): Promise<void> {
+  const token = ++filesRequest;
+  const scope = state.filesAtRoots ? "" : state.filesPath;
+  const elsewhere = state.filesElsewhere && !state.filesAtRoots;
+  state.filesLoading = true;
+  state.filesError = "";
+  state.filesSearching = true;
+  state.filesQuery = query;
+  renderFiles();
+  const params = new URLSearchParams();
+  params.set("q", query);
+  if (scope) params.set("path", scope);
+  if (elsewhere) params.set("elsewhere", "1");
+  const response = await fetch(`/api/files?${params.toString()}`);
+  const payload = await readJSONOr<FilesPayload>(response, {});
+  if (token !== filesRequest) return;
+  if (!response.ok) throw new Error(payload.error || "Files could not be searched.");
+  const entries = Array.isArray(payload.entries) ? payload.entries.filter(isListedFile) : [];
+  state.filesEntries = entries;
+  state.filesTruncated = Boolean(payload.truncated);
+  state.filesLoading = false;
+  state.filesSearching = true;
+  state.filesActive = 0;
+  state.filesSelected = new Set();
+  el("files-list").scrollTop = 0;
+  renderFiles();
+}
+
+/**
+ * Return whether a JSON value is a file-list row.
+ *
+ * @param value Candidate.
+ * @returns True when name, path, and kind are strings.
+ */
+function isListedFile(value: unknown): value is FileEntry {
+  if (!value || typeof value !== "object") return false;
+  const row = value as FileEntry;
+  return typeof row.name === "string" && typeof row.path === "string" && typeof row.kind === "string";
+}
+
+/**
  * Paint the folder, the empty and loading states, and the action buttons.
  *
  * Uses text nodes. Shortcuts are labeled and cannot be selected. Writes
@@ -2396,7 +2456,7 @@ export function renderFiles() {
   if (state.filesLoading) notes.push(state.filesAtRoots ? "Reading music folders." : "Reading this folder.");
   if (state.filesError) notes.push(state.filesError);
   if (state.filesMessage) notes.push(state.filesMessage);
-  if (state.filesTruncated) notes.push("Some files are not listed.");
+  if (state.filesTruncated) notes.push(state.filesSearching ? copy.filesTruncated : "Some files are not listed.");
   el("files-status").textContent = notes.join(" ");
   const scroll = el("files-list").scrollTop;
   paintFileWindow();
@@ -2478,10 +2538,12 @@ function visibleCrumbs(): FileCrumb[] {
  * @returns {FileEntry[]} Rows for the virtual window.
  */
 function filesRowHeight(): number {
+  if (state.filesSearching) return FILE_ROW;
   return state.filesAtRoots ? ROOT_ROW : FILE_ROW;
 }
 
 function browserRows(): FileEntry[] {
+  if (state.filesSearching) return state.filesEntries;
   if (state.filesAtRoots) {
     return state.filesRoots.map((root) => {
       const entry: FileEntry = {
@@ -2514,9 +2576,17 @@ function paintFileWindow(): void {
   const list = el("files-list");
   const rows = browserRows();
   list.setAttribute("aria-busy", String(state.filesLoading));
-  list.setAttribute("aria-label", state.filesAtRoots ? "Music folders" : "Folder contents");
+  list.setAttribute(
+    "aria-label",
+    state.filesSearching ? copy.filesSearchResults : state.filesAtRoots ? "Music folders" : "Folder contents",
+  );
   if (state.filesLoading && !rows.length) {
-    list.replaceChildren(fileNote(state.filesAtRoots ? "Reading music folders." : "Reading this folder."));
+    const reading = state.filesSearching
+      ? copy.filesSearching
+      : state.filesAtRoots
+        ? "Reading music folders."
+        : "Reading this folder.";
+    list.replaceChildren(fileNote(reading));
     list.tabIndex = 0;
     return;
   }
@@ -2531,7 +2601,10 @@ function paintFileWindow(): void {
     return;
   }
   if (!rows.length) {
-    list.replaceChildren(fileNote("This folder is empty."));
+    const empty = state.filesSearching
+      ? fill(copy.filesNoMatches, { query: state.filesQuery })
+      : "This folder is empty.";
+    list.replaceChildren(fileNote(empty));
     list.tabIndex = 0;
     return;
   }
@@ -2711,7 +2784,7 @@ function onFilesKey(event: KeyboardEvent): void {
 function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "files-row";
-  if (entry.detail) row.classList.add("is-root");
+  if (entry.detail && (entry.kind === "folder" || entry.kind === "drive")) row.classList.add("is-root");
   if (entry.missing) row.classList.add("is-missing");
   if (index === state.filesActive) row.classList.add("is-active");
   row.setAttribute("role", "listitem");
@@ -2724,7 +2797,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     button.id = `files-item-${index}`;
     button.tabIndex = index === state.filesActive ? 0 : -1;
     if (entry.kind === "drive" || entry.kind === "folder") button.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
-    if (entry.detail) {
+    if (entry.detail && (entry.kind === "folder" || entry.kind === "drive")) {
       const copy = document.createElement("span");
       copy.className = "files-root-copy";
       const label = document.createElement("span");
@@ -2739,6 +2812,12 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
       const name = document.createElement("span");
       name.textContent = entry.name;
       button.append(name);
+      if (entry.detail) {
+        const detail = document.createElement("span");
+        detail.className = "files-match-detail";
+        detail.textContent = entry.detail;
+        button.append(detail);
+      }
     }
     button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
     if (entry.missing) {
@@ -2789,9 +2868,17 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     renderFiles();
   });
   const name = document.createElement("span");
+  name.className = "files-name";
   name.textContent = entry.name;
-  name.title = entry.name;
+  name.title = entry.path || entry.name;
   label.append(box, name);
+  if (entry.detail) {
+    const detail = document.createElement("span");
+    detail.className = "files-match-detail";
+    detail.textContent = entry.detail;
+    detail.title = entry.detail;
+    label.append(detail);
+  }
   if (entry.in_library) {
     const badge = document.createElement("span");
     badge.className = "files-badge";
@@ -2861,6 +2948,42 @@ function isFileCrumb(value: unknown): value is FileCrumb {
  *
  * @returns {object[]} Selected file entries.
  */
+/**
+ * Move the file-list cursor by one row.
+ *
+ * @param delta 1 for the next row, -1 for the previous row.
+ * @returns {void}
+ */
+export function moveFileList(delta: number): void {
+  if (!browserRows().length) return;
+  focusFilesIndex(state.filesActive + delta);
+}
+
+/**
+ * Open the active file row.
+ *
+ * A folder opens. A file toggles its checkbox. Does nothing when the
+ * list is empty.
+ *
+ * @returns {void}
+ */
+export function openFileList(): void {
+  if (!browserRows().length) return;
+  activateFilesIndex(state.filesActive);
+}
+
+/**
+ * Move the file-list cursor to a path from quick-open.
+ *
+ * @param path File path returned by the search.
+ * @returns {void}
+ */
+export function focusFileByPath(path: string): void {
+  const index = browserRows().findIndex((entry) => entry.path === path);
+  if (index < 0) return;
+  focusFilesIndex(index);
+}
+
 export function selectedFiles() {
   return state.filesEntries.filter((entry) => entry.kind === "file" && state.filesSelected.has(entry.path));
 }
@@ -2878,6 +3001,27 @@ export function wireLibrary(): void {
     if (state.mode === "files") paintFileWindow();
   });
   el("files-list").addEventListener("keydown", onFilesKey);
+  el("files-search").addEventListener("input", () => {
+    window.clearTimeout(filesSearchTimer);
+    const value = el("files-search").value;
+    state.filesQuery = value;
+    if (!value.trim()) {
+      if (state.filesAtRoots && !state.filesPath) {
+        state.filesSearching = false;
+        state.filesEntries = [];
+        state.filesError = "";
+        state.filesTruncated = false;
+        state.filesLoading = false;
+        renderFiles();
+        return;
+      }
+      loadFolder(state.filesPath, { elsewhere: state.filesElsewhere && Boolean(state.filesPath) }).catch((error) => failFiles(error));
+      return;
+    }
+    filesSearchTimer = window.setTimeout(() => {
+      searchFiles(value.trim()).catch((error) => failFiles(error));
+    }, FILES_SEARCH_MS);
+  });
 
   el("search").addEventListener("input", () => {
     state.query = el("search").value;

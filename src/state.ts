@@ -93,6 +93,8 @@ export interface PageState {
   filesBreadcrumb: FileCrumb[];
   filesElsewhere: boolean;
   filesActive: number;
+  filesQuery: string;
+  filesSearching: boolean;
   snapshots: SnapshotInfo[];
   snapshotLoading: boolean;
   snapshotError: string;
@@ -149,6 +151,8 @@ export const state: PageState = {
   filesBreadcrumb: [],
   filesElsewhere: false,
   filesActive: 0,
+  filesQuery: "",
+  filesSearching: false,
   snapshots: [],
   snapshotLoading: false,
   snapshotError: "",

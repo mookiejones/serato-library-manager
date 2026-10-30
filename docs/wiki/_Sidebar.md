@@ -20,5 +20,6 @@
 **The app**
 
 [First-run setup](First-Run-Wizard)
+[Keyboard shortcuts](Keyboard-Shortcuts)
 [Settings](Settings)
 [Where Serato data lives](Where-Serato-Data-Lives)
