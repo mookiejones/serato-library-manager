@@ -493,32 +493,36 @@ def _drive_path(drive: Path | str) -> Path:
         raise library.LibraryError("Choose a drive.", 400)
     expanded = os.path.abspath(os.path.expanduser(text))
     normalized = os.path.realpath(expanded)
-    # The leaf the caller named, after resolving shortcuts in its parents.
-    # A leaf that is itself a shortcut to another folder does not start there.
-    boundary = _caller_boundary(expanded)
-    checked = normalized if normalized.endswith(os.sep) else normalized + os.sep
-    if os.path.normcase(checked).startswith(os.path.normcase(boundary)):
-        return Path(normalized)
-    raise library.LibraryError("That drive path is a shortcut. The check will not follow it.", 400)
+    parent, name = _parent_and_leaf(expanded)
+    # Shortcuts in the parent folders are resolved. The leaf the caller named
+    # must still be that leaf inside the real parent, not a shortcut elsewhere.
+    real_parent = os.path.join(os.path.realpath(parent), "")
+    if not normalized.startswith(real_parent):
+        raise library.LibraryError(_SHORTCUT_DRIVE, 400)
+    if os.path.normcase(normalized[len(real_parent):]) != os.path.normcase(name):
+        raise library.LibraryError(_SHORTCUT_DRIVE, 400)
+    return Path(normalized)
 
 
-def _caller_boundary(expanded: str) -> str:
-    """Return the folder a resolved drive path must stay inside.
+_SHORTCUT_DRIVE = "That drive path is a shortcut. The check will not follow it."
+
+
+def _parent_and_leaf(expanded: str) -> tuple[str, str]:
+    """Split an absolute drive path into its parent folder and leaf name.
 
     Args:
         expanded: Absolute path, with ``..`` collapsed and shortcuts not followed.
 
     Returns:
-        The real path of the parent plus the leaf name, with a trailing
-        separator. The filesystem root is itself.
+        The parent folder and the leaf name. A filesystem root, a drive
+        root such as ``E:\\``, or a UNC share root is its own parent with an
+        empty leaf.
     """
     trimmed = expanded.rstrip("\\/")
     parent = os.path.dirname(trimmed)
-    name = os.path.basename(trimmed)
     if not trimmed or parent == trimmed:
-        return expanded if expanded.endswith(os.sep) else expanded + os.sep
-    expected = os.path.join(os.path.realpath(parent), name) if name else os.path.realpath(parent)
-    return expected if expected.endswith(os.sep) else expected + os.sep
+        return expanded, ""
+    return parent, os.path.basename(trimmed)
 
 
 def _volume_label(raw: str) -> str:
