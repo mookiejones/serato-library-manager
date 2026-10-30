@@ -62,15 +62,11 @@ FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
-LEGACY_BLOCKED_POSTS = frozenset({
-    "/api/track",
-    "/api/crate",
-    "/api/import.m3u",
-    "/api/duplicates/merge",
-    "/api/files",
-    "/api/snapshots",
-})
-"""POST routes refused while only an older ``database V2`` library is present."""
+LEGACY_ALLOWED_POSTS = frozenset({"/api/related", "/api/reveal"})
+"""POST routes, after settings, setup, and logs, that still answer while only an
+older ``database V2`` library is present. Every other POST is refused with 409,
+so a write route added later is blocked by default. Related links live in
+``related.sqlite`` beside ``settings.json``; reveal only opens a file manager."""
 
 
 def db_path() -> Path:
@@ -1731,7 +1727,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/logs/open":
             self._post_open_logs()
             return
-        if parsed.path in LEGACY_BLOCKED_POSTS and setup_flow.legacy_folder() is not None:
+        if parsed.path not in LEGACY_ALLOWED_POSTS and setup_flow.legacy_folder() is not None:
             self.send_json({"error": legacy_library.WRITE_BLOCKED, "read_only": True}, status=409)
             return
         try:

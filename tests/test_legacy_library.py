@@ -427,8 +427,9 @@ class LegacyApiTests(unittest.TestCase):
 
     def test_every_write_route_is_refused_and_nothing_changes(self) -> None:
         before = _tree_state(self.tree.serato)
-        self.assertEqual(len(server.LEGACY_BLOCKED_POSTS), 6)
-        for route in sorted(server.LEGACY_BLOCKED_POSTS):
+        self.assertEqual(server.LEGACY_ALLOWED_POSTS, frozenset({"/api/related", "/api/reveal"}))
+        routes = ["/api/track", "/api/crate", "/api/import.m3u", "/api/duplicates/merge", "/api/files", "/api/snapshots", "/api/some-future-write"]
+        for route in routes:
             with self.subTest(route=route):
                 status, body = self._call(route, {})
                 self.assertEqual(status, 409)
@@ -441,7 +442,15 @@ class LegacyApiTests(unittest.TestCase):
             status, _ = self._call("/api/legacy-library")
             self.assertEqual(status, 404)
             status, body = self._call("/api/crate", {})
+            self.assertNotEqual(status, 409)
             self.assertNotEqual(body.get("error"), legacy_library.WRITE_BLOCKED)
+
+    def test_related_and_reveal_are_not_blocked(self) -> None:
+        for route in ("/api/related", "/api/reveal"):
+            with self.subTest(route=route):
+                status, body = self._call(route, {})
+                self.assertNotEqual(status, 409)
+                self.assertNotEqual(body.get("error"), legacy_library.WRITE_BLOCKED)
 
 
 if __name__ == "__main__":
