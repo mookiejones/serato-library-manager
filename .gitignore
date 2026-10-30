@@ -28,6 +28,13 @@ dist/
 # Frontend toolchain. The bundled static/app.js is committed.
 node_modules/
 
+# Playwright. The waveform baselines under e2e/*.spec.ts-snapshots are committed.
+e2e/dist/
+e2e/output/
+test-results/
+playwright-report/
+blob-report/
+
 # MkDocs output from `mkdocs build -f docs/mkdocs.yml`
 /site/
 

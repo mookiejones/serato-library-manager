@@ -29,6 +29,8 @@ export interface Marker {
   index?: number;
   locked?: boolean;
   position?: number | string | null;
+  /** Stored beatgrid time in seconds. The panel string is `position`. */
+  position_seconds?: number;
   bpm?: number | string | null;
   beats?: number | string | null;
 }

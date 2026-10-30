@@ -33,14 +33,17 @@ macOS runs the suite once, on Python 3.12. Python 3.14 stays on Ubuntu. A macOS 
 
 The Windows test job runs `python scripts/release_bundle.py check-tag` with `shell: bash` and `RELEASE_TAG` set to `v0.0.0`. No tag is passed on the command line. That is the same environment path the release job uses, and it runs on `windows-latest` for every pull request. `v0.0.0` is not a published release.
 
-The frontend job runs on `ubuntu-latest`, `windows-latest`, and `macos-latest`. It installs Node 22. `package.json` sets `engines.node` to `>=22`. The job installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit`, runs ESLint so `any` is rejected, runs the Vitest suite (`npm test`), then runs `node scripts/build_frontend.mjs --check`. That check builds `static/app.js` and `static/wizard.js` in memory, does not write `static/`, and fails if either file or its sourcemap differs from the committed copy. The job does not start a browser. The check names are `frontend (ubuntu-latest)`, `frontend (windows-latest)`, and `frontend (macos-latest)`. On your machine:
+The frontend job runs on `ubuntu-latest`, `windows-latest`, and `macos-latest`. It installs Node 22. `package.json` sets `engines.node` to `>=22`. The job installs from `package-lock.json` with `npm ci`, runs `npx tsc --noEmit` and `npx tsc --noEmit -p e2e`, runs ESLint on `src` and `e2e` so `any` is rejected, runs the Vitest suite (`npm test`), runs `node scripts/build_frontend.mjs --check`, then installs Playwright's Chromium and runs `npx playwright test -c e2e/playwright.config.ts`. That check builds `static/app.js` and `static/wizard.js` in memory, does not write `static/`, and fails if either file or its sourcemap differs from the committed copy. The Playwright step screenshots the waveform, including cues, a loop, and the beatgrid, and compares those pixels to the committed baselines. Ubuntu installs the browser with `--with-deps`. Windows and macOS install Chromium only. The check names are `frontend (ubuntu-latest)`, `frontend (windows-latest)`, and `frontend (macos-latest)`. On your machine:
 
 ```bash
 npm ci
 npx tsc --noEmit
-npx eslint src
+npx tsc --noEmit -p e2e
+npx eslint src e2e
 npm test
 node scripts/build_frontend.mjs --check
+npx playwright install chromium
+npx playwright test -c e2e/playwright.config.ts
 ```
 
 The test job installs `requirements.txt`, then runs the suite. The Ubuntu Python 3.12 job also installs `pyright==1.1.407` and runs `python -m pyright waveform.py tests/test_waveform.py` in strict mode (`pyrightconfig.json`). Those files are on the strict include list. The rest of the include list is not gated by this step. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:

@@ -10,6 +10,12 @@ Play a file that is already in the library. The app streams it from this compute
 
 Cue points read from the file sit on the seek bar in their colors. The name shows when you point at a cue, and in the cue's label for a screen reader. Click a cue to jump there. A track with no cues has no marks.
 
+The bar also shows a waveform. The zoomed view keeps the playhead in the center and scrolls the track past it. Lows are red, mids are green, and highs are blue. The brighter core is the sustained level. The fainter edge is the peak. **+** and **−** zoom in and out. Hold **Ctrl**, or **Command** on a Mac, and roll the mouse wheel to zoom. Those controls are not shortcut keys.
+
+Under the zoomed view is the whole track. The part you have already played is darker. Click it, or drag, to move through the track. Cue points and loops are drawn on both views, in the colors stored on the file. A loop is a shaded region. Beat marks sit on the zoomed view. A downbeat is taller than the other beats.
+
+While the waveform is still being read, the overview uses the Serato Overview stored in the file, then switches to the computed one. If this computer cannot build a waveform for the file, for example an M4A when ffmpeg is not installed, the bar says **Waveform unavailable for this format**. The track still plays.
+
 Drag the seek bar to move through the track. With the seek bar focused, **Left** and **Right** move 5 seconds. **Shift** with **Left** or **Right** moves 30 seconds.
 
 **Play** and **Pause** are one button. Its name changes with the state.

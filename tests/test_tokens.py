@@ -454,6 +454,9 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     (".player-artist", ("--color-card",), 13, 400),
     (".player-status", ("--color-card",), 13, 400),
     (".player-toggle", ("--color-card",), 13, 600),
+    (".waveform-reading", ("--color-bg",), 11, 400),
+    (".waveform-note", ("--color-card",), 13, 400),
+    (".waveform-zoom-button", ("--color-card",), 14, 600),
     (".player-time", ("--color-card",), 13, 400),
     (".player-volume", ("--color-card",), 11, 400),
     (".detail-play", ("--color-card",), 13, 600),
@@ -665,7 +668,7 @@ class ContrastTests(unittest.TestCase):
             ratio = contrast(_over(mark, surface, alpha or 0), surface)
             self.assertGreaterEqual(ratio, 3, f"holds-selection on {background_name} is {ratio:.2f}:1")
 
-        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#copy-version", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice", ".player-toggle", ".detail-play"):
+        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#copy-version", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice", ".player-toggle", ".waveform-zoom-button", ".detail-play"):
             border = _paint(self._rule(selector)["border"], self.colors)
             ratio = contrast(border, self._surface("--color-card"))
             self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
@@ -728,6 +731,8 @@ class ContrastTests(unittest.TestCase):
             ".wizard-choice",
             ".quick-open-option.is-active",
             ".player-toggle",
+            ".waveform-zoom-button",
+            ".waveform-overview:focus-visible",
             ".detail-play",
         } | {selector for selector, _, _ in _CONTROL_EDGE}
         self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")

@@ -3,8 +3,10 @@
  *
  * One `<audio>` element plays `GET /api/audio`. The bar shows the title,
  * the artist, previous, play/pause, next, a seek bar with cue markers,
- * elapsed and total time, and volume. Strings live in `player-strings.ts`.
- * Cue points come from `GET /api/track` and are not written back.
+ * elapsed and total time, volume, and the waveform. Strings live in
+ * `player-strings.ts`. Cue points, loops, and the beatgrid come from
+ * `GET /api/track` and are not written back. The waveform is
+ * `waveform-view.ts`. Space and the seek keys stay in the shortcut table.
  *
  * Hotkeys import this module and call:
  *
@@ -31,6 +33,8 @@
 import type { Marker, Track } from "./api-types";
 import { playerStrings } from "./player-strings";
 import { state } from "./state";
+import { beatgridFromMarkers, loopsFromMarkers } from "./waveform";
+import { mountWaveform, type WaveformController } from "./waveform-view";
 
 export interface PlayerSnapshot {
   trackId: number | null;
@@ -110,6 +114,7 @@ let cueToken = 0;
 let cues: CueMarker[] = [];
 let paintedCueKey = "";
 let barUnsubscribe: (() => void) | null = null;
+let waveform: WaveformController | null = null;
 
 let titleNode: HTMLElement | null = null;
 let artistNode: HTMLElement | null = null;
@@ -210,6 +215,7 @@ export function play(nextId: number): void {
       duration = 0;
       element.src = trackUrl(nextId);
       element.currentTime = 0;
+      waveform?.setTrack(nextId);
       loadCues(nextId);
     }
     error = "";
@@ -385,6 +391,8 @@ export function attachMedia(next: PlayableMedia): void {
 export function mountPlayer(host?: HTMLElement | null): void {
   barUnsubscribe?.();
   barUnsubscribe = null;
+  waveform?.destroy();
+  waveform = null;
   resetPlayback();
   const root = host === undefined ? document.getElementById("player-bar") : host;
   if (!root) return;
@@ -500,29 +508,37 @@ function moveBy(delta: 1 | -1): boolean {
 function loadCues(id: number): void {
   const token = ++cueToken;
   cues = [];
+  waveform?.setMarkers(id, { cues: [], loops: [], beatgrid: [] });
   void readCues(id).then(
     (found) => {
       if (token !== cueToken || trackId !== id) return;
-      cues = found;
+      cues = found.cues;
+      waveform?.setMarkers(id, found);
       emit();
     },
     () => {
       if (token !== cueToken || trackId !== id) return;
       cues = [];
+      waveform?.setMarkers(id, { cues: [], loops: [], beatgrid: [] });
       emit();
     },
   );
 }
 
-async function readCues(id: number): Promise<CueMarker[]> {
-  if (typeof fetch !== "function") return [];
+async function readCues(id: number): Promise<{ cues: CueMarker[]; loops: ReturnType<typeof loopsFromMarkers>; beatgrid: ReturnType<typeof beatgridFromMarkers> }> {
+  const empty = { cues: [], loops: [], beatgrid: [] };
+  if (typeof fetch !== "function") return empty;
   const params = new URLSearchParams({ id: String(id), space: state.space });
   const response = await fetch(`/api/track?${params.toString()}`);
-  if (!response.ok) return [];
+  if (!response.ok) return empty;
   const payload: unknown = await response.json();
-  if (!payload || typeof payload !== "object" || !("cues" in payload)) return [];
-  const rows = (payload as { cues?: Marker[] }).cues;
-  return markersFromCues(rows);
+  if (!payload || typeof payload !== "object") return empty;
+  const record = payload as { cues?: Marker[]; loops?: Marker[]; beatgrid?: Marker[] };
+  return {
+    cues: markersFromCues(record.cues),
+    loops: loopsFromMarkers(record.loops),
+    beatgrid: beatgridFromMarkers(record.beatgrid),
+  };
 }
 
 function noteFailure(forId: number): void {
@@ -548,6 +564,7 @@ async function classifyStatus(forId: number): Promise<string> {
 function emit(): void {
   const snapshot = getPlayerState();
   for (const listener of [...listeners]) listener(snapshot);
+  waveform?.sync();
 }
 
 function buildBar(): HTMLElement {
@@ -651,7 +668,29 @@ function buildBar(): HTMLElement {
   const bar = document.createElement("div");
   bar.className = "player-controls";
   bar.append(meta, transport, seekWrap, volumeLabel);
-  return bar;
+
+  const waveHost = document.createElement("div");
+  waveform = mountWaveform(waveHost, {
+    seek,
+    seekBy,
+    getTime: () => {
+      const value = ensureMedia().currentTime;
+      return Number.isFinite(value) ? value : currentTime;
+    },
+    getDuration: () => {
+      const value = ensureMedia().duration;
+      if (Number.isFinite(value) && value > 0) return value;
+      return duration;
+    },
+    getPlaying: () => playing,
+    formatTime: formatPlayerTime,
+    seekStep: SEEK_STEP_SECONDS,
+    seekStepLarge: SEEK_STEP_LARGE_SECONDS,
+  });
+  const stack = document.createElement("div");
+  stack.className = "player-stack";
+  stack.append(waveHost, bar);
+  return stack;
 }
 
 function onSeekKey(event: KeyboardEvent): void {

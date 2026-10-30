@@ -503,16 +503,16 @@
     el("snapshot-status").textContent = message;
   }
   async function takeSnapshot() {
-    const button = el("snapshots-take");
-    button.disabled = true;
-    button.textContent = "Saving snapshot…";
+    const button2 = el("snapshots-take");
+    button2.disabled = true;
+    button2.textContent = "Saving snapshot…";
     try {
       await postJSON("/api/snapshots", { action: "create" });
       state.snapshotMessage = "Snapshot saved.";
       await loadSnapshots();
     } finally {
-      button.disabled = false;
-      button.textContent = "Take a snapshot";
+      button2.disabled = false;
+      button2.textContent = "Take a snapshot";
     }
   }
   async function confirmSnapshotRestore() {
@@ -551,8 +551,956 @@
     next: "Next",
     cue: "Cue",
     cannotPlay: "This file cannot be played in this window.",
-    notInLibrary: "Not in the library or file missing"
+    notInLibrary: "Not in the library or file missing",
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
+    overview: "Track overview",
+    overviewSeek: "Click or drag to seek",
+    waveformReading: "Reading the waveform…",
+    waveformUnavailable: "Waveform unavailable for this format"
   };
+
+  // src/waveform.ts
+  var TILE_CSS_WIDTH = 256;
+  var ZOOM_DEFAULT_PPS = 80;
+  var ZOOM_MIN_PPS = 10;
+  var ZOOM_MAX_PPS = 320;
+  var ZOOM_FACTOR = 1.25;
+  var WAVE_BG = { r: 35, g: 25, b: 16 };
+  var OUTER_ALPHA = 0.6;
+  var PLAYED_SHADE = 0.45;
+  var BEAT_GUTTER_CSS = 12;
+  var DEFAULT_MARKER_COLOR = { r: 226, g: 59, b: 22 };
+  var PLAYHEAD_COLOR = { r: 226, g: 59, b: 22 };
+  var DOWNBEAT_COLOR = { r: 243, g: 236, b: 223 };
+  var BEAT_COLOR = { r: 200, g: 187, b: 168 };
+  var HEADER_BYTES = 64;
+  var HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+  var MAX_POINTS = 2e7;
+  var MAX_TICKS = 8192;
+  function parseSwf1(input) {
+    const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+    if (bytes.byteLength < HEADER_BYTES) return null;
+    if (bytes[0] !== 83 || bytes[1] !== 87 || bytes[2] !== 70 || bytes[3] !== 49) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (view.getUint16(4, true) !== HEADER_BYTES) return null;
+    const version = view.getUint16(6, true);
+    const flags = view.getUint16(8, true);
+    const analyzerVersion = view.getUint16(10, true);
+    const sampleRate = view.getUint32(12, true);
+    const detailHzMilli = view.getUint32(16, true);
+    const durationMs = view.getUint32(20, true);
+    const detailCount = view.getUint32(24, true);
+    const overviewCount = view.getUint32(28, true);
+    const seratoColumns = view.getUint32(32, true);
+    const seratoBands = view.getUint16(36, true);
+    const lowHzMilli = view.getUint32(40, true);
+    const highHzMilli = view.getUint32(44, true);
+    if (detailCount > MAX_POINTS || overviewCount > MAX_POINTS || seratoColumns > MAX_POINTS) return null;
+    const detailBytes = detailCount * 6;
+    const overviewBytes = overviewCount * 6;
+    const seratoBytes = seratoColumns * seratoBands;
+    if (!Number.isSafeInteger(detailBytes + overviewBytes + seratoBytes)) return null;
+    const end = HEADER_BYTES + detailBytes + overviewBytes + seratoBytes;
+    if (end !== bytes.byteLength) return null;
+    let offset = HEADER_BYTES;
+    const detail = bytes.slice(offset, offset + detailBytes);
+    offset += detailBytes;
+    const overview = bytes.slice(offset, offset + overviewBytes);
+    offset += overviewBytes;
+    const serato = bytes.slice(offset, offset + seratoBytes);
+    return {
+      version,
+      flags,
+      analyzerVersion,
+      sampleRate,
+      pointsPerSecond: detailHzMilli / 1e3,
+      durationMs,
+      detail,
+      overview,
+      serato,
+      detailCount,
+      overviewCount,
+      seratoColumns,
+      seratoBands,
+      lowHz: lowHzMilli / 1e3,
+      highHz: highHzMilli / 1e3
+    };
+  }
+  function bandColor(low, mid, high) {
+    const l = clamp255(low);
+    const m = clamp255(mid);
+    const h = clamp255(high);
+    const max = Math.max(l, m, h);
+    if (max === 0) return { r: 0, g: 0, b: 0 };
+    return {
+      r: Math.round(l / max * 255),
+      g: Math.round(m / max * 255),
+      b: Math.round(h / max * 255)
+    };
+  }
+  function bandLevel(low, mid, high) {
+    return Math.max(clamp255(low), clamp255(mid), clamp255(high)) / 255;
+  }
+  function seratoColumnLevels(column) {
+    let low = 0;
+    let mid = 0;
+    let high = 0;
+    const count = Math.min(column.length, 16);
+    for (let index = 0; index < count; index += 1) {
+      const value = clamp255(column[index] ?? 0);
+      if (index <= 4) low = Math.max(low, value);
+      else if (index <= 10) mid = Math.max(mid, value);
+      else high = Math.max(high, value);
+    }
+    return { low, mid, high };
+  }
+  function beatgridTicks(markers, startSeconds, endSeconds) {
+    if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || endSeconds <= startSeconds) return [];
+    const ordered = markers.filter((marker) => Number.isFinite(marker.positionSeconds)).slice();
+    ordered.sort((left, right) => left.positionSeconds - right.positionSeconds);
+    if (ordered.length === 0) return [];
+    const ticks = [];
+    let beatIndex = 0;
+    for (let index = 0; index < ordered.length; index += 1) {
+      const marker = ordered[index];
+      if (!marker) continue;
+      const next2 = ordered[index + 1];
+      if (next2) {
+        const beats = marker.beats;
+        if (beats === void 0 || !Number.isFinite(beats) || beats < 1) continue;
+        const count = Math.round(beats);
+        const spacing2 = (next2.positionSeconds - marker.positionSeconds) / beats;
+        if (!(spacing2 > 0) || count < 1) continue;
+        pushRange(ticks, marker.positionSeconds, spacing2, beatIndex, count, startSeconds, endSeconds);
+        beatIndex += count;
+        continue;
+      }
+      const bpm = marker.bpm;
+      if (bpm === void 0 || !Number.isFinite(bpm) || bpm <= 0) continue;
+      const spacing = 60 / bpm;
+      if (!(spacing > 0)) continue;
+      const first = Math.max(0, Math.ceil((startSeconds - marker.positionSeconds) / spacing - 1e-9));
+      const lastExclusive = Math.ceil((endSeconds - marker.positionSeconds) / spacing - 1e-9);
+      if (lastExclusive <= first) continue;
+      const emit2 = Math.min(lastExclusive, first + MAX_TICKS);
+      pushRange(ticks, marker.positionSeconds, spacing, beatIndex, emit2, startSeconds, endSeconds, first);
+    }
+    return ticks;
+  }
+  function timeToX(timeSeconds, playheadSeconds, pixelsPerSecond, width) {
+    if (!(pixelsPerSecond > 0) || !Number.isFinite(timeSeconds) || !Number.isFinite(playheadSeconds) || !Number.isFinite(width)) {
+      return width / 2;
+    }
+    return width / 2 + (timeSeconds - playheadSeconds) * pixelsPerSecond;
+  }
+  function overviewXToTime(x, width, durationSeconds) {
+    if (!(width > 0) || !(durationSeconds > 0) || !Number.isFinite(x)) return 0;
+    const ratio = Math.min(1, Math.max(0, x / width));
+    return ratio * durationSeconds;
+  }
+  function zoomPixelsPerSecond(current, direction) {
+    const base = Number.isFinite(current) && current > 0 ? current : ZOOM_DEFAULT_PPS;
+    const next2 = base * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR);
+    if (next2 >= ZOOM_MAX_PPS) return ZOOM_MAX_PPS;
+    if (next2 <= ZOOM_MIN_PPS) return ZOOM_MIN_PPS;
+    return next2;
+  }
+  function tileDeviceWidth(dpr) {
+    const scale = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+    return Math.max(1, Math.round(TILE_CSS_WIDTH * scale));
+  }
+  function colorFromHex(value) {
+    if (!HEX_COLOR.test(value)) return null;
+    let hex = value.slice(1);
+    if (hex.length === 3) {
+      const r = hex[0] ?? "";
+      const g = hex[1] ?? "";
+      const b = hex[2] ?? "";
+      hex = `${r}${r}${g}${g}${b}${b}`;
+    }
+    if (hex.length === 8) hex = hex.slice(0, 6);
+    const parsed = Number.parseInt(hex, 16);
+    if (!Number.isFinite(parsed)) return null;
+    return { r: parsed >> 16 & 255, g: parsed >> 8 & 255, b: parsed & 255 };
+  }
+  function beatgridFromMarkers(rows2) {
+    if (!rows2 || rows2.length === 0) return [];
+    const found = [];
+    for (const row of rows2) {
+      const position = finiteNumber(row.position_seconds) ?? finiteNumber(row.position);
+      if (position === null) continue;
+      const marker = { positionSeconds: position };
+      const beats = finiteNumber(row.beats);
+      const bpm = finiteNumber(row.bpm);
+      if (beats !== null) marker.beats = beats;
+      if (bpm !== null) marker.bpm = bpm;
+      found.push(marker);
+    }
+    return found;
+  }
+  function loopsFromMarkers(rows2) {
+    if (!rows2 || rows2.length === 0) return [];
+    const found = [];
+    for (const row of rows2) {
+      const start = finiteNumber(row.start_ms);
+      const end = finiteNumber(row.end_ms);
+      if (start === null || end === null || end <= start || start < 0) continue;
+      found.push({
+        startSeconds: start / 1e3,
+        endSeconds: end / 1e3,
+        color: typeof row.color === "string" ? row.color : ""
+      });
+    }
+    return found;
+  }
+  var DetailTiles = class {
+    /**
+     * Remember one detail buffer.
+     *
+     * @param detail `N * 6` uint8 bytes.
+     * @param pointCount N.
+     * @param pointsPerSecond Detail rate from the header. 150 in SWF1.
+     */
+    constructor(detail, pointCount, pointsPerSecond) {
+      this.detail = detail;
+      this.pointCount = pointCount;
+      this.pointsPerSecond = pointsPerSecond;
+    }
+    detail;
+    pointCount;
+    pointsPerSecond;
+    tiles = /* @__PURE__ */ new Map();
+    blank = null;
+    /**
+     * Drop cached tiles.
+     *
+     * Called when the zoom changes so the next frame rebuilds at the new scale.
+     */
+    clear() {
+      this.tiles.clear();
+    }
+    /**
+     * Paint one zoomed frame into `frame`.
+     *
+     * The playhead is the center column. Tiles outside the view, plus one
+     * tile of margin, are not generated. Markers are cues, shaded loops, and
+     * beat ticks. Downbeats are taller.
+     *
+     * @param frame RGBA buffer of `width * height`.
+     * @param width Device pixels.
+     * @param height Device pixels.
+     * @param dpr Device pixel ratio.
+     * @param playheadSeconds Audio position.
+     * @param pixelsPerSecond CSS pixels per second.
+     * @param markers Cues, loops, and the beatgrid. Beat ticks are not drawn
+     *   when the grid is empty.
+     * @returns How many detail points this call sampled. Zero when every
+     *   visible tile was already cached.
+     */
+    paint(frame, width, height, dpr, playheadSeconds, pixelsPerSecond, markers) {
+      const scale = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+      const pps = pixelsPerSecond > 0 ? pixelsPerSecond : ZOOM_DEFAULT_PPS;
+      this.ensureBlank(width, height);
+      const blank = this.blank;
+      if (!blank || frame.length !== blank.length) return { pointsRead: 0 };
+      frame.set(blank);
+      const cssWidth = width / scale;
+      const tileSeconds = TILE_CSS_WIDTH / pps;
+      const tileWidth = tileDeviceWidth(scale);
+      const viewStart = playheadSeconds - cssWidth / 2 / pps;
+      const viewEnd = playheadSeconds + cssWidth / 2 / pps;
+      const first = Math.floor(viewStart / tileSeconds) - 1;
+      const last = Math.floor(viewEnd / tileSeconds) + 1;
+      let pointsRead = 0;
+      const needed = /* @__PURE__ */ new Set();
+      for (let index = first; index <= last; index += 1) {
+        const key = `${Math.round(pps * 1e3)}|${scale}|${height}|${index}`;
+        needed.add(key);
+        let tile = this.tiles.get(key);
+        if (!tile) {
+          const rendered = renderTile(
+            this.detail,
+            this.pointCount,
+            this.pointsPerSecond,
+            index * tileSeconds,
+            tileSeconds,
+            tileWidth,
+            height,
+            scale
+          );
+          tile = rendered.pixels;
+          pointsRead += rendered.pointsRead;
+          this.tiles.set(key, tile);
+        }
+        const left = timeToX(index * tileSeconds, playheadSeconds, pps, cssWidth) * scale;
+        blit(frame, width, height, tile, tileWidth, Math.round(left));
+      }
+      if (this.tiles.size > 24) {
+        for (const key of this.tiles.keys()) {
+          if (!needed.has(key)) this.tiles.delete(key);
+        }
+      }
+      drawLoops(frame, width, height, scale, playheadSeconds, pps, cssWidth, markers.loops);
+      drawBeats(frame, width, height, scale, playheadSeconds, pps, cssWidth, markers.beatgrid, viewStart, viewEnd);
+      drawCues(frame, width, height, scale, playheadSeconds, pps, cssWidth, markers.cues);
+      drawPlayhead(frame, width, height);
+      return { pointsRead };
+    }
+    ensureBlank(width, height) {
+      const count = width * height * 4;
+      if (this.blank && this.blank.length === count) return;
+      const blank = new Uint8ClampedArray(count);
+      fillBackground(blank);
+      this.blank = blank;
+    }
+  };
+  function renderOverview(source, width, height) {
+    const pixels = new Uint8ClampedArray(width * height * 4);
+    fillBackground(pixels);
+    const columns = source.kind === "computed" ? source.count : source.columns.length;
+    if (columns < 1 || width < 1 || height < 1) return pixels;
+    for (let x = 0; x < width; x += 1) {
+      const start = Math.floor(x / width * columns);
+      const end = Math.max(start + 1, Math.floor((x + 1) / width * columns));
+      let lowPeak = 0;
+      let lowRms = 0;
+      let midPeak = 0;
+      let midRms = 0;
+      let highPeak = 0;
+      let highRms = 0;
+      for (let index = start; index < end && index < columns; index += 1) {
+        if (source.kind === "computed") {
+          const offset = index * 6;
+          lowPeak = Math.max(lowPeak, source.points[offset] ?? 0);
+          lowRms = Math.max(lowRms, source.points[offset + 1] ?? 0);
+          midPeak = Math.max(midPeak, source.points[offset + 2] ?? 0);
+          midRms = Math.max(midRms, source.points[offset + 3] ?? 0);
+          highPeak = Math.max(highPeak, source.points[offset + 4] ?? 0);
+          highRms = Math.max(highRms, source.points[offset + 5] ?? 0);
+        } else {
+          const levels = seratoColumnLevels(source.columns[index] ?? []);
+          lowPeak = Math.max(lowPeak, levels.low);
+          midPeak = Math.max(midPeak, levels.mid);
+          highPeak = Math.max(highPeak, levels.high);
+          lowRms = lowPeak;
+          midRms = midPeak;
+          highRms = highPeak;
+        }
+      }
+      paintColumn(pixels, x, width, height, 0, lowPeak, lowRms, midPeak, midRms, highPeak, highRms);
+    }
+    return pixels;
+  }
+  function shadePlayed(pixels, width, height, playedX) {
+    const end = Math.max(0, Math.min(width, Math.round(playedX)));
+    for (let y = 0; y < height; y += 1) {
+      const row = y * width;
+      for (let x = 0; x < end; x += 1) {
+        const offset = (row + x) * 4;
+        pixels[offset] = Math.round((pixels[offset] ?? 0) * PLAYED_SHADE);
+        pixels[offset + 1] = Math.round((pixels[offset + 1] ?? 0) * PLAYED_SHADE);
+        pixels[offset + 2] = Math.round((pixels[offset + 2] ?? 0) * PLAYED_SHADE);
+      }
+    }
+  }
+  function drawOverviewMarks(pixels, width, height, durationSeconds, playheadSeconds, markers) {
+    if (!(durationSeconds > 0) || width < 1) return;
+    const xOf = (seconds) => seconds / durationSeconds * width;
+    drawLoops(pixels, width, height, 1, 0, 1, width, markers.loops, xOf);
+    drawCues(pixels, width, height, 1, 0, 1, width, markers.cues, xOf);
+    const playX = Math.round(Math.min(width - 1, Math.max(0, xOf(playheadSeconds))));
+    fillSpan(pixels, width, height, playX, playX + 1, 0, height, PLAYHEAD_COLOR, 1);
+  }
+  function renderTile(detail, pointCount, pointsPerSecond, startSeconds, tileSeconds, width, height, dpr) {
+    const pixels = new Uint8ClampedArray(width * height * 4);
+    fillBackground(pixels);
+    let pointsRead = 0;
+    const rate = pointsPerSecond > 0 ? pointsPerSecond : 150;
+    for (let x = 0; x < width; x += 1) {
+      const t0 = startSeconds + x / width * tileSeconds;
+      const t1 = startSeconds + (x + 1) / width * tileSeconds;
+      let i0 = Math.floor(t0 * rate);
+      let i1 = Math.ceil(t1 * rate);
+      if (i1 <= i0) i1 = i0 + 1;
+      if (i0 < 0) i0 = 0;
+      if (i1 > pointCount) i1 = pointCount;
+      if (i0 >= i1) continue;
+      let lowPeak = 0;
+      let lowRms = 0;
+      let midPeak = 0;
+      let midRms = 0;
+      let highPeak = 0;
+      let highRms = 0;
+      for (let index = i0; index < i1; index += 1) {
+        pointsRead += 1;
+        const offset = index * 6;
+        lowPeak = Math.max(lowPeak, detail[offset] ?? 0);
+        lowRms = Math.max(lowRms, detail[offset + 1] ?? 0);
+        midPeak = Math.max(midPeak, detail[offset + 2] ?? 0);
+        midRms = Math.max(midRms, detail[offset + 3] ?? 0);
+        highPeak = Math.max(highPeak, detail[offset + 4] ?? 0);
+        highRms = Math.max(highRms, detail[offset + 5] ?? 0);
+      }
+      const gutter = Math.min(height - 1, Math.round(BEAT_GUTTER_CSS * dpr));
+      paintColumn(pixels, x, width, height, gutter, lowPeak, lowRms, midPeak, midRms, highPeak, highRms);
+    }
+    return { pixels, pointsRead };
+  }
+  function paintColumn(pixels, x, width, height, gutter, lowPeak, lowRms, midPeak, midRms, highPeak, highRms) {
+    const peakLevel = bandLevel(lowPeak, midPeak, highPeak);
+    const rmsLevel = bandLevel(lowRms, midRms, highRms);
+    if (peakLevel <= 0 && rmsLevel <= 0) return;
+    const top = Math.min(gutter, height - 1);
+    const bandHeight = height - top;
+    const mid = top + (bandHeight - 1) / 2;
+    const peakHalf = Math.max(peakLevel > 0 ? 0.5 : 0, peakLevel * (bandHeight / 2) * 0.92);
+    const rmsHalf = rmsLevel * (bandHeight / 2) * 0.92;
+    const y0 = Math.max(top, Math.floor(mid - Math.max(peakHalf, rmsHalf)));
+    const y1 = Math.min(height - 1, Math.ceil(mid + Math.max(peakHalf, rmsHalf)));
+    const peakColor = bandColor(lowPeak, midPeak, highPeak);
+    const rmsColor = bandColor(lowRms, midRms, highRms);
+    for (let y = y0; y <= y1; y += 1) {
+      const fromMid = Math.abs(y - mid);
+      const inner = rmsLevel > 0 && fromMid <= rmsHalf;
+      const outer = peakLevel > 0 && fromMid <= peakHalf;
+      if (!inner && !outer) continue;
+      const color = inner ? rmsColor : peakColor;
+      const alpha = inner ? 1 : OUTER_ALPHA;
+      blendPixel(pixels, width, x, y, color, alpha);
+    }
+  }
+  function drawLoops(pixels, width, height, dpr, playheadSeconds, pixelsPerSecond, cssWidth, loops, xOf) {
+    for (const loop of loops) {
+      const color = colorFromHex(loop.color) ?? DEFAULT_MARKER_COLOR;
+      const start = xOf ? xOf(loop.startSeconds) : timeToX(loop.startSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
+      const end = xOf ? xOf(loop.endSeconds) : timeToX(loop.endSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
+      const left = Math.min(start, end);
+      const right = Math.max(start, end);
+      fillSpan(pixels, width, height, Math.floor(left), Math.ceil(right), 0, height, color, 0.35);
+      const edge = Math.max(1, Math.round(dpr));
+      fillSpan(pixels, width, height, Math.round(left), Math.round(left) + edge, 0, height, color, 1);
+      fillSpan(pixels, width, height, Math.round(right) - edge, Math.round(right), 0, height, color, 1);
+    }
+  }
+  function drawCues(pixels, width, height, dpr, playheadSeconds, pixelsPerSecond, cssWidth, cues2, xOf) {
+    const edge = Math.max(1, Math.round(2 * dpr));
+    for (const cue of cues2) {
+      const color = colorFromHex(cue.color) ?? DEFAULT_MARKER_COLOR;
+      const x = xOf ? xOf(cue.seconds) : timeToX(cue.seconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
+      fillSpan(pixels, width, height, Math.round(x) - Math.floor(edge / 2), Math.round(x) - Math.floor(edge / 2) + edge, 0, height, color, 1);
+    }
+  }
+  function drawBeats(pixels, width, height, dpr, playheadSeconds, pixelsPerSecond, cssWidth, markers, viewStart, viewEnd) {
+    const ticks = beatgridTicks(markers, viewStart, viewEnd);
+    const regularHeight = Math.max(2, Math.round(6 * dpr));
+    const downbeatHeight = Math.max(regularHeight + 1, Math.round(BEAT_GUTTER_CSS * dpr));
+    for (const tick of ticks) {
+      const x = Math.round(timeToX(tick.seconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr);
+      const tickHeight = tick.downbeat ? downbeatHeight : regularHeight;
+      const color = tick.downbeat ? DOWNBEAT_COLOR : BEAT_COLOR;
+      const tickWidth = tick.downbeat ? Math.max(2, Math.round(2 * dpr)) : Math.max(1, Math.round(dpr));
+      fillSpan(pixels, width, height, x, x + tickWidth, 0, tickHeight, color, 1);
+    }
+  }
+  function drawPlayhead(pixels, width, height) {
+    const x = Math.floor(width / 2);
+    fillSpan(pixels, width, height, x, x + 2, 0, height, PLAYHEAD_COLOR, 1);
+  }
+  function fillSpan(pixels, width, height, x0, x1, y0, y1, color, alpha) {
+    const left = Math.max(0, x0);
+    const right = Math.min(width, x1);
+    const top = Math.max(0, y0);
+    const bottom = Math.min(height, y1);
+    for (let x = left; x < right; x += 1) {
+      for (let y = top; y < bottom; y += 1) blendPixel(pixels, width, x, y, color, alpha);
+    }
+  }
+  function blendPixel(pixels, width, x, y, color, alpha) {
+    const offset = (y * width + x) * 4;
+    const keep = 1 - alpha;
+    pixels[offset] = Math.round(color.r * alpha + (pixels[offset] ?? 0) * keep);
+    pixels[offset + 1] = Math.round(color.g * alpha + (pixels[offset + 1] ?? 0) * keep);
+    pixels[offset + 2] = Math.round(color.b * alpha + (pixels[offset + 2] ?? 0) * keep);
+    pixels[offset + 3] = 255;
+  }
+  function fillBackground(pixels) {
+    for (let index = 0; index < pixels.length; index += 4) {
+      pixels[index] = WAVE_BG.r;
+      pixels[index + 1] = WAVE_BG.g;
+      pixels[index + 2] = WAVE_BG.b;
+      pixels[index + 3] = 255;
+    }
+  }
+  function blit(dest, destWidth, destHeight, src, srcWidth, destX) {
+    let srcX = 0;
+    let copyWidth = srcWidth;
+    let dx = destX;
+    if (dx < 0) {
+      srcX = -dx;
+      copyWidth -= srcX;
+      dx = 0;
+    }
+    if (dx + copyWidth > destWidth) copyWidth = destWidth - dx;
+    if (copyWidth <= 0) return;
+    for (let y = 0; y < destHeight; y += 1) {
+      const srcStart = (y * srcWidth + srcX) * 4;
+      const destStart = (y * destWidth + dx) * 4;
+      dest.set(src.subarray(srcStart, srcStart + copyWidth * 4), destStart);
+    }
+  }
+  function pushRange(ticks, origin, spacing, beatIndex, count, startSeconds, endSeconds, first = 0) {
+    const begin = Math.max(first, Math.ceil((startSeconds - origin) / spacing - 1e-9));
+    for (let index = begin; index < count; index += 1) {
+      const seconds = origin + index * spacing;
+      if (seconds < startSeconds - 1e-6) continue;
+      if (seconds >= endSeconds - 1e-9) break;
+      if (ticks.length >= MAX_TICKS) return;
+      ticks.push({ seconds, downbeat: (beatIndex + index) % 4 === 0 });
+    }
+  }
+  function finiteNumber(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    if (typeof value !== "string" || value.trim() === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+  function clamp255(value) {
+    if (!Number.isFinite(value)) return 0;
+    if (value <= 0) return 0;
+    if (value >= 255) return 255;
+    return value;
+  }
+
+  // src/waveform-view.ts
+  var emptyMarkers = () => ({ cues: [], loops: [], beatgrid: [] });
+  function mountWaveform(host, hooks) {
+    return new WaveformView(host, hooks);
+  }
+  var WaveformView = class {
+    host;
+    hooks;
+    detail;
+    overviewCanvas;
+    overviewHit;
+    reading;
+    note;
+    detailWrap;
+    zoomIn;
+    zoomOut;
+    trackId = null;
+    token = 0;
+    pps = ZOOM_DEFAULT_PPS;
+    markers = emptyMarkers();
+    tiles = null;
+    parsed = null;
+    overviewSource = "";
+    seratoColumns = [];
+    overviewCache = null;
+    overviewKey = "";
+    raf = 0;
+    dragging = false;
+    disposed = false;
+    onWheel;
+    onResize;
+    resizeObserver = null;
+    constructor(host, hooks) {
+      this.host = host;
+      this.hooks = hooks;
+      host.classList.add("player-wave");
+      host.hidden = true;
+      const main = document.createElement("div");
+      main.className = "player-wave-main";
+      this.detailWrap = document.createElement("div");
+      this.detailWrap.className = "waveform-detail-wrap";
+      this.detail = document.createElement("canvas");
+      this.detail.className = "waveform-detail";
+      this.detail.setAttribute("aria-hidden", "true");
+      this.reading = document.createElement("p");
+      this.reading.className = "waveform-reading";
+      this.reading.textContent = playerStrings.waveformReading;
+      this.detailWrap.append(this.detail, this.reading);
+      this.note = document.createElement("p");
+      this.note.className = "waveform-note";
+      this.note.hidden = true;
+      this.note.textContent = playerStrings.waveformUnavailable;
+      this.overviewHit = document.createElement("div");
+      this.overviewHit.className = "waveform-overview";
+      this.overviewHit.tabIndex = 0;
+      this.overviewHit.setAttribute("role", "slider");
+      this.overviewHit.setAttribute("aria-label", playerStrings.overview);
+      this.overviewHit.setAttribute("aria-orientation", "horizontal");
+      this.overviewHit.title = playerStrings.overviewSeek;
+      this.overviewCanvas = document.createElement("canvas");
+      this.overviewCanvas.setAttribute("aria-hidden", "true");
+      this.overviewHit.append(this.overviewCanvas);
+      main.append(this.detailWrap, this.note, this.overviewHit);
+      const zoom = document.createElement("div");
+      zoom.className = "waveform-zoom";
+      this.zoomIn = button(playerStrings.zoomIn, "+");
+      this.zoomOut = button(playerStrings.zoomOut, "−");
+      this.zoomIn.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, 1)));
+      this.zoomOut.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, -1)));
+      zoom.append(this.zoomIn, this.zoomOut);
+      host.append(main, zoom);
+      this.onWheel = (event) => this.wheel(event);
+      host.addEventListener("wheel", this.onWheel, { passive: false });
+      this.overviewHit.addEventListener("pointerdown", (event) => this.pointerDown(event));
+      this.overviewHit.addEventListener("pointermove", (event) => this.pointerMove(event));
+      this.overviewHit.addEventListener("pointerup", (event) => this.pointerUp(event));
+      this.overviewHit.addEventListener("pointercancel", (event) => this.pointerUp(event));
+      this.overviewHit.addEventListener("keydown", (event) => this.overviewKeyDown(event));
+      this.onResize = () => this.paint();
+      if (typeof ResizeObserver === "function") {
+        this.resizeObserver = new ResizeObserver(this.onResize);
+        this.resizeObserver.observe(host);
+      }
+      this.syncZoomButtons();
+    }
+    /**
+     * Load one track, or hide the waveform when playback is cleared.
+     *
+     * The same id does not fetch again. Overview and the SWF1 body are
+     * requested together. Playback is not paused from here.
+     *
+     * @param id Library track id, or null when nothing is loaded.
+     */
+    setTrack(id) {
+      if (this.disposed) return;
+      if (id !== null && id === this.trackId) return;
+      this.token += 1;
+      this.trackId = id;
+      this.parsed = null;
+      this.tiles = null;
+      this.markers = emptyMarkers();
+      this.overviewCache = null;
+      this.overviewKey = "";
+      this.overviewSource = "";
+      this.seratoColumns = [];
+      delete this.overviewHit.dataset.waveformOverview;
+      if (id === null || !Number.isInteger(id) || id < 0) {
+        this.host.hidden = true;
+        this.stopLoop();
+        return;
+      }
+      this.host.hidden = false;
+      this.setPhase("reading");
+      const mine = this.token;
+      void this.load(id, mine);
+    }
+    /**
+     * Store cues, loops, and the beatgrid for the loaded track.
+     *
+     * A response for a track that is no longer loaded is ignored.
+     *
+     * @param id Track the rows belong to.
+     * @param markers Marks to draw. Colors stay as stored.
+     */
+    setMarkers(id, markers) {
+      if (id !== this.trackId) return;
+      this.markers = markers;
+      this.paint();
+    }
+    /**
+     * Show a parsed waveform without fetching.
+     *
+     * The screenshot harness and tests use this. The host is shown.
+     *
+     * @param parsed SWF1 sections.
+     */
+    showComputed(parsed) {
+      this.trackId = this.trackId ?? 1;
+      this.host.hidden = false;
+      this.applyComputed(parsed);
+    }
+    /**
+     * Follow play, pause, and seek.
+     *
+     * While audio is playing, frames are scheduled from the audio clock.
+     * A paused seek paints once.
+     */
+    sync() {
+      if (this.disposed || this.host.hidden) return;
+      if (this.hooks.getPlaying()) this.startLoop();
+      else this.stopLoop();
+      this.paint();
+    }
+    /**
+     * Current zoom in CSS pixels per second.
+     *
+     * @returns The zoom the buttons and the wheel last set.
+     */
+    pixelsPerSecond() {
+      return this.pps;
+    }
+    /**
+     * Remove listeners and stop the animation frame.
+     */
+    destroy() {
+      this.disposed = true;
+      this.token += 1;
+      this.stopLoop();
+      this.host.removeEventListener("wheel", this.onWheel);
+      this.resizeObserver?.disconnect();
+      this.resizeObserver = null;
+    }
+    async load(id, mine) {
+      const overview = this.fetchOverview(id);
+      const body = this.fetchWaveform(id);
+      void overview.then((serato) => {
+        if (mine !== this.token || !serato || serato.length === 0) return;
+        if (this.overviewSource === "computed") return;
+        this.seratoColumns = serato;
+        this.overviewSource = "serato";
+        this.overviewHit.dataset.waveformOverview = "serato";
+        this.overviewCache = null;
+        this.overviewKey = "";
+        this.overviewHit.hidden = false;
+        this.paint();
+      });
+      const waveform2 = await body;
+      if (mine !== this.token) return;
+      if (waveform2 === "unavailable") {
+        this.parsed = null;
+        this.tiles = null;
+        this.setPhase("unavailable");
+        this.paint();
+        return;
+      }
+      if (waveform2) this.applyComputed(waveform2);
+    }
+    applyComputed(parsed) {
+      this.parsed = parsed;
+      const rate = parsed.pointsPerSecond > 0 ? parsed.pointsPerSecond : 150;
+      this.tiles = new DetailTiles(parsed.detail, parsed.detailCount, rate);
+      this.overviewSource = "computed";
+      this.overviewHit.dataset.waveformOverview = "computed";
+      this.overviewCache = null;
+      this.overviewKey = "";
+      this.setPhase("ready");
+      this.paint();
+    }
+    async fetchOverview(id) {
+      try {
+        if (typeof fetch !== "function") return null;
+        const response = await fetch(waveformUrl(id, true));
+        if (!response.ok) return null;
+        const payload = await response.json();
+        if (!payload || typeof payload !== "object") return null;
+        const record = payload;
+        if (record.available !== true || !Array.isArray(record.data)) return null;
+        const columns = [];
+        for (const column of record.data) {
+          if (!Array.isArray(column)) continue;
+          columns.push(column.map((value) => typeof value === "number" && Number.isFinite(value) ? value : 0));
+        }
+        return columns;
+      } catch {
+        return null;
+      }
+    }
+    async fetchWaveform(id) {
+      try {
+        if (typeof fetch !== "function") return null;
+        const response = await fetch(waveformUrl(id, false));
+        if (!response.ok) return null;
+        const buffer = await response.arrayBuffer();
+        const parsed = parseSwf1(buffer);
+        if (parsed) return parsed;
+        const text = new TextDecoder().decode(buffer);
+        try {
+          const payload = JSON.parse(text);
+          if (payload && typeof payload === "object" && payload.available === false) {
+            return "unavailable";
+          }
+        } catch {
+          return null;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    }
+    setPhase(phase2) {
+      this.host.dataset.waveformState = phase2;
+      const unavailable = phase2 === "unavailable";
+      this.note.hidden = !unavailable;
+      this.reading.hidden = phase2 !== "reading";
+      this.detailWrap.hidden = unavailable;
+      this.overviewHit.hidden = this.overviewSource === "";
+      this.syncZoomButtons();
+    }
+    setZoom(next2) {
+      if (next2 === this.pps) {
+        this.syncZoomButtons();
+        return;
+      }
+      this.pps = next2;
+      this.tiles?.clear();
+      this.syncZoomButtons();
+      this.paint();
+    }
+    syncZoomButtons() {
+      const unavailable = this.host.dataset.waveformState === "unavailable";
+      this.zoomIn.disabled = unavailable || this.pps >= ZOOM_MAX_PPS - 1e-9;
+      this.zoomOut.disabled = unavailable || this.pps <= ZOOM_MIN_PPS + 1e-9;
+    }
+    wheel(event) {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (this.host.dataset.waveformState === "unavailable") return;
+      event.preventDefault();
+      if (event.deltaY < 0) this.setZoom(zoomPixelsPerSecond(this.pps, 1));
+      else if (event.deltaY > 0) this.setZoom(zoomPixelsPerSecond(this.pps, -1));
+    }
+    pointerDown(event) {
+      if (event.button !== 0) return;
+      this.dragging = true;
+      if (typeof this.overviewHit.setPointerCapture === "function") {
+        this.overviewHit.setPointerCapture(event.pointerId);
+      }
+      this.seekOverview(event);
+    }
+    pointerMove(event) {
+      if (!this.dragging) return;
+      this.seekOverview(event);
+    }
+    pointerUp(event) {
+      if (!this.dragging) return;
+      this.dragging = false;
+      if (typeof this.overviewHit.hasPointerCapture === "function" && this.overviewHit.hasPointerCapture(event.pointerId)) {
+        this.overviewHit.releasePointerCapture(event.pointerId);
+      }
+    }
+    seekOverview(event) {
+      const rect = this.overviewHit.getBoundingClientRect();
+      const duration2 = this.duration();
+      const x = event.clientX - rect.left;
+      this.hooks.seek(overviewXToTime(x, rect.width, duration2));
+    }
+    overviewKeyDown(event) {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      const forward = event.key === "ArrowRight" || event.key === "ArrowUp";
+      const back = event.key === "ArrowLeft" || event.key === "ArrowDown";
+      if (!forward && !back) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const step = event.shiftKey ? this.hooks.seekStepLarge : this.hooks.seekStep;
+      this.hooks.seekBy((forward ? 1 : -1) * step);
+    }
+    startLoop() {
+      if (this.raf !== 0) return;
+      const loop = () => {
+        this.paint();
+        if (this.hooks.getPlaying() && !this.disposed) this.raf = requestAnimationFrame(loop);
+        else this.raf = 0;
+      };
+      this.raf = requestAnimationFrame(loop);
+    }
+    stopLoop() {
+      if (this.raf === 0) return;
+      cancelAnimationFrame(this.raf);
+      this.raf = 0;
+    }
+    paint() {
+      if (this.disposed || this.host.hidden) return;
+      const time = this.hooks.getTime();
+      const duration2 = this.duration();
+      this.paintDetail(time);
+      this.paintOverview(time, duration2);
+      this.updateSlider(time, duration2);
+    }
+    paintDetail(time) {
+      if (!this.tiles || !this.parsed) return;
+      const size = sizeCanvas(this.detail, 96);
+      if (!size) return;
+      const frame = new Uint8ClampedArray(size.width * size.height * 4);
+      this.tiles.paint(frame, size.width, size.height, size.dpr, time, this.pps, this.markers);
+      const context = this.detail.getContext("2d");
+      if (!context) return;
+      const image = context.createImageData(size.width, size.height);
+      image.data.set(frame);
+      context.putImageData(image, 0, 0);
+    }
+    paintOverview(time, duration2) {
+      const size = sizeCanvas(this.overviewCanvas, 36);
+      if (!size) return;
+      const source = this.overviewPixels(size.width, size.height);
+      if (!source) return;
+      const frame = source.slice();
+      const played = duration2 > 0 ? Math.min(duration2, Math.max(0, time)) / duration2 * size.width : 0;
+      shadePlayed(frame, size.width, size.height, played);
+      drawOverviewMarks(frame, size.width, size.height, duration2 > 0 ? duration2 : this.headerDuration(), time, this.markers);
+      const context = this.overviewCanvas.getContext("2d");
+      if (!context) return;
+      const image = context.createImageData(size.width, size.height);
+      image.data.set(frame);
+      context.putImageData(image, 0, 0);
+    }
+    overviewPixels(width, height) {
+      const key = `${this.overviewSource}|${width}|${height}|${this.token}`;
+      if (this.overviewCache && this.overviewKey === key) return this.overviewCache;
+      if (this.overviewSource === "computed" && this.parsed && this.parsed.overviewCount > 0) {
+        this.overviewCache = renderOverview(
+          { kind: "computed", points: this.parsed.overview, count: this.parsed.overviewCount },
+          width,
+          height
+        );
+        this.overviewKey = key;
+        this.overviewHit.dataset.waveformOverview = "computed";
+        return this.overviewCache;
+      }
+      if (this.overviewSource === "serato" && this.seratoColumns.length > 0) {
+        this.overviewCache = renderOverview({ kind: "serato", columns: this.seratoColumns }, width, height);
+        this.overviewKey = key;
+        this.overviewHit.dataset.waveformOverview = "serato";
+        return this.overviewCache;
+      }
+      return null;
+    }
+    updateSlider(time, duration2) {
+      const max = duration2 > 0 ? duration2 : 0;
+      const now = Math.min(max, Math.max(0, Number.isFinite(time) ? time : 0));
+      this.overviewHit.setAttribute("aria-valuemin", "0");
+      this.overviewHit.setAttribute("aria-valuemax", String(max));
+      this.overviewHit.setAttribute("aria-valuenow", String(now));
+      this.overviewHit.setAttribute("aria-valuetext", this.hooks.formatTime(now));
+    }
+    duration() {
+      const fromAudio = this.hooks.getDuration();
+      if (Number.isFinite(fromAudio) && fromAudio > 0) return fromAudio;
+      return this.headerDuration();
+    }
+    headerDuration() {
+      if (!this.parsed || !(this.parsed.durationMs > 0)) return 0;
+      return this.parsed.durationMs / 1e3;
+    }
+  };
+  function button(label, text) {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = "waveform-zoom-button";
+    element.textContent = text;
+    element.title = label;
+    element.setAttribute("aria-label", label);
+    return element;
+  }
+  function waveformUrl(id, overview) {
+    const params = new URLSearchParams({ id: String(id), space: state.space });
+    const path = overview ? "/api/waveform/overview" : "/api/waveform";
+    return `${path}?${params.toString()}`;
+  }
+  function sizeCanvas(canvas, cssHeight) {
+    const cssWidth = canvas.clientWidth;
+    if (!(cssWidth > 0)) return null;
+    const dpr = typeof window !== "undefined" && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    const width = Math.max(1, Math.round(cssWidth * dpr));
+    const height = Math.max(1, Math.round(cssHeight * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    return { width, height, dpr };
+  }
 
   // src/player.ts
   var SEEK_STEP_SECONDS = 5;
@@ -575,6 +1523,7 @@
   var cues = [];
   var paintedCueKey = "";
   var barUnsubscribe = null;
+  var waveform = null;
   var titleNode = null;
   var artistNode = null;
   var statusNode = null;
@@ -633,6 +1582,7 @@
         duration = 0;
         element.src = trackUrl(nextId);
         element.currentTime = 0;
+        waveform?.setTrack(nextId);
         loadCues(nextId);
       }
       error = "";
@@ -700,6 +1650,8 @@
   function mountPlayer(host) {
     barUnsubscribe?.();
     barUnsubscribe = null;
+    waveform?.destroy();
+    waveform = null;
     resetPlayback();
     const root = host === void 0 ? document.getElementById("player-bar") : host;
     if (!root) return;
@@ -805,28 +1757,36 @@
   function loadCues(id) {
     const token = ++cueToken;
     cues = [];
+    waveform?.setMarkers(id, { cues: [], loops: [], beatgrid: [] });
     void readCues(id).then(
       (found) => {
         if (token !== cueToken || trackId !== id) return;
-        cues = found;
+        cues = found.cues;
+        waveform?.setMarkers(id, found);
         emit();
       },
       () => {
         if (token !== cueToken || trackId !== id) return;
         cues = [];
+        waveform?.setMarkers(id, { cues: [], loops: [], beatgrid: [] });
         emit();
       }
     );
   }
   async function readCues(id) {
-    if (typeof fetch !== "function") return [];
+    const empty = { cues: [], loops: [], beatgrid: [] };
+    if (typeof fetch !== "function") return empty;
     const params = new URLSearchParams({ id: String(id), space: state.space });
     const response = await fetch(`/api/track?${params.toString()}`);
-    if (!response.ok) return [];
+    if (!response.ok) return empty;
     const payload = await response.json();
-    if (!payload || typeof payload !== "object" || !("cues" in payload)) return [];
-    const rows2 = payload.cues;
-    return markersFromCues(rows2);
+    if (!payload || typeof payload !== "object") return empty;
+    const record = payload;
+    return {
+      cues: markersFromCues(record.cues),
+      loops: loopsFromMarkers(record.loops),
+      beatgrid: beatgridFromMarkers(record.beatgrid)
+    };
   }
   function noteFailure(forId) {
     playing = false;
@@ -849,6 +1809,7 @@
   function emit() {
     const snapshot = getPlayerState();
     for (const listener of [...listeners]) listener(snapshot);
+    waveform?.sync();
   }
   function buildBar() {
     const meta = document.createElement("div");
@@ -942,7 +1903,28 @@
     const bar = document.createElement("div");
     bar.className = "player-controls";
     bar.append(meta, transport, seekWrap, volumeLabel);
-    return bar;
+    const waveHost = document.createElement("div");
+    waveform = mountWaveform(waveHost, {
+      seek,
+      seekBy,
+      getTime: () => {
+        const value = ensureMedia().currentTime;
+        return Number.isFinite(value) ? value : currentTime;
+      },
+      getDuration: () => {
+        const value = ensureMedia().duration;
+        if (Number.isFinite(value) && value > 0) return value;
+        return duration;
+      },
+      getPlaying: () => playing,
+      formatTime: formatPlayerTime,
+      seekStep: SEEK_STEP_SECONDS,
+      seekStepLarge: SEEK_STEP_LARGE_SECONDS
+    });
+    const stack = document.createElement("div");
+    stack.className = "player-stack";
+    stack.append(waveHost, bar);
+    return stack;
   }
   function onSeekKey(event) {
     if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
@@ -1000,20 +1982,20 @@
     cueLayer.replaceChildren();
     if (!(limit > 0) || cues.length === 0) return;
     for (const cue of cues) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "player-cue";
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "player-cue";
       const ratio = Math.min(1, Math.max(0, cue.seconds / limit));
       const percent = Math.round(ratio * 1e3) / 10;
-      button.style.left = `${percent}%`;
-      if (cue.color) button.style.setProperty("--cue", cue.color);
+      button2.style.left = `${percent}%`;
+      if (cue.color) button2.style.setProperty("--cue", cue.color);
       const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
-      button.title = label;
-      button.setAttribute("aria-label", label);
-      button.addEventListener("click", () => {
+      button2.title = label;
+      button2.setAttribute("aria-label", label);
+      button2.addEventListener("click", () => {
         seek(cue.seconds);
       });
-      cueLayer.append(button);
+      cueLayer.append(button2);
     }
   }
 
@@ -1043,11 +2025,11 @@
     }
     for (let index = start; index < end; index += 1) {
       const track = view[index];
-      const button = document.createElement("div");
-      button.className = "row";
-      button.setAttribute("role", "option");
-      button.setAttribute("aria-selected", String(track.id === state.selectedId));
-      button.dataset.id = String(track.id);
+      const button2 = document.createElement("div");
+      button2.className = "row";
+      button2.setAttribute("role", "option");
+      button2.setAttribute("aria-selected", String(track.id === state.selectedId));
+      button2.dataset.id = String(track.id);
       const titleCell = document.createElement("span");
       titleCell.className = "cell";
       const line = document.createElement("span");
@@ -1121,16 +2103,16 @@
         fourth.textContent = track.key ?? "";
         fifth.textContent = lengthLabel(track.length_ms);
       }
-      button.append(titleCell, artist2, third, fourth, fifth);
-      button.addEventListener("click", () => {
+      button2.append(titleCell, artist2, third, fourth, fifth);
+      button2.addEventListener("click", () => {
         if (track.entry) bridge.selectEntry(track.id);
         else bridge.selectTrack(track.id);
         el("list").focus({ preventScroll: true });
       });
-      button.addEventListener("dblclick", () => {
+      button2.addEventListener("dblclick", () => {
         if (!track.entry) play(track.id);
       });
-      rows.append(button);
+      rows.append(button2);
     }
   }
   function moveTrackList(delta) {
@@ -1358,16 +2340,16 @@
       gap.setAttribute("aria-hidden", "true");
       row.append(gap);
     }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "crate";
-    button.dataset.id = String(crate.id);
-    if (crate.parent != null) button.dataset.parent = String(crate.parent);
-    button.setAttribute("role", "treeitem");
-    button.setAttribute("aria-level", String(crate.depth + 1));
-    button.setAttribute("aria-selected", String(state.activeCrate === crate.id));
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "crate";
+    button2.dataset.id = String(crate.id);
+    if (crate.parent != null) button2.dataset.parent = String(crate.parent);
+    button2.setAttribute("role", "treeitem");
+    button2.setAttribute("aria-level", String(crate.depth + 1));
+    button2.setAttribute("aria-selected", String(state.activeCrate === crate.id));
     if (crate.childCount) {
-      button.setAttribute("aria-expanded", String(state.crateQuery ? true : state.expanded.has(crate.id)));
+      button2.setAttribute("aria-expanded", String(state.crateQuery ? true : state.expanded.has(crate.id)));
     }
     const name = document.createElement("span");
     name.className = "name";
@@ -1379,19 +2361,19 @@
       name.append(swatch);
     }
     name.append(document.createTextNode(crate.name));
-    button.append(name);
+    button2.append(name);
     if (crate.smart) {
       const smart = document.createElement("span");
       smart.className = "smart";
       smart.textContent = "smart";
-      button.append(smart);
+      button2.append(smart);
     }
     const meta = document.createElement("span");
     meta.className = "meta";
     meta.textContent = crate.count.toLocaleString();
-    button.append(meta);
-    button.addEventListener("click", () => selectCrate(crate.id));
-    row.append(button);
+    button2.append(meta);
+    button2.addEventListener("click", () => selectCrate(crate.id));
+    row.append(button2);
     return row;
   }
   function placeCrateFocus(previousId) {
@@ -1481,10 +2463,10 @@
     const columns = state.mode === "history" ? [["name", "Title"], ["artist", "Artist"], ["deck", "Deck"], ["played", "Played"], ["start", "Time"]] : [["name", "Title"], ["artist", "Artist"], ["bpm", "BPM"], ["key", "Key"], ["length_ms", "Time"]];
     const buttons = [...document.querySelectorAll(".columns button")];
     columns.forEach(([key, label], index) => {
-      const button = buttons[index];
-      button.dataset.sort = key;
-      button.textContent = label;
-      button.dataset.active = String(button.dataset.sort === state.sort);
+      const button2 = buttons[index];
+      button2.dataset.sort = key;
+      button2.textContent = label;
+      button2.dataset.active = String(button2.dataset.sort === state.sort);
     });
   }
   function renderShell() {
@@ -1511,11 +2493,11 @@
     if (snapshotsMode) {
       el("mode-note").textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
     }
-    for (const button of document.querySelectorAll("#views button")) {
-      button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
+    for (const button2 of document.querySelectorAll("#views button")) {
+      button2.setAttribute("aria-selected", String(button2.dataset.view === state.mode));
     }
-    for (const button of document.querySelectorAll("[data-crate-sort]")) {
-      button.setAttribute("aria-pressed", String(button.dataset.crateSort === state.crateSort));
+    for (const button2 of document.querySelectorAll("[data-crate-sort]")) {
+      button2.setAttribute("aria-pressed", String(button2.dataset.crateSort === state.crateSort));
     }
     const crateChosen = state.activeCrate !== "all";
     el("crate-new").disabled = !state.writable;
@@ -1604,7 +2586,7 @@
   }
   function focusCrateItem(item) {
     if (!item) return;
-    for (const button of el("crate-list").querySelectorAll(".crate")) button.tabIndex = -1;
+    for (const button2 of el("crate-list").querySelectorAll(".crate")) button2.tabIndex = -1;
     item.tabIndex = 0;
     item.focus();
   }
@@ -1994,18 +2976,18 @@
     for (const copy2 of copies) {
       const row = document.createElement("div");
       row.className = "copy-row";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "text-button";
-      button.textContent = copy2.file || `Track ${copy2.id}`;
-      button.addEventListener("click", () => selectTrack(copy2.id));
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "text-button";
+      button2.textContent = copy2.file || `Track ${copy2.id}`;
+      button2.addEventListener("click", () => selectTrack(copy2.id));
       const rate = document.createElement("span");
       rate.textContent = copy2.bitrate == null ? "" : String(copy2.bitrate);
       const plays = document.createElement("span");
       plays.textContent = copy2.play_count == null ? "" : String(copy2.play_count);
       const crates = document.createElement("span");
       crates.textContent = copy2.missing ? "missing" : copy2.crates || "";
-      row.append(button, rate, plays, crates);
+      row.append(button2, rate, plays, crates);
       section.append(row);
     }
     return section;
@@ -2285,8 +3267,8 @@
     }
   }
   async function refreshRelatedCrate(track, section) {
-    const button = section.querySelector("[data-related-crate]");
-    if (button) button.disabled = true;
+    const button2 = section.querySelector("[data-related-crate]");
+    if (button2) button2.disabled = true;
     try {
       const result = await postJSON("/api/related", { action: "crate", asset: track.id, space: state.space });
       setNotice(result.warning || `Crate “${result.name}” updated.`);
@@ -2295,10 +3277,10 @@
     } catch (error2) {
       if (failureOf(error2).status === 409) {
         lockDown(error2);
-        if (button) button.disabled = true;
+        if (button2) button2.disabled = true;
       } else {
         setNotice(failureOf(error2).message);
-        if (button) button.disabled = !state.writable;
+        if (button2) button2.disabled = !state.writable;
       }
     }
   }
@@ -2552,20 +3534,20 @@
   function renderSessions() {
     el("session-list").replaceChildren();
     for (const session of state.historySessions) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "crate";
-      button.setAttribute("role", "option");
-      button.setAttribute("aria-selected", String(session.id === state.historyId));
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "crate";
+      button2.setAttribute("role", "option");
+      button2.setAttribute("aria-selected", String(session.id === state.historyId));
       const name = document.createElement("span");
       name.className = "name";
       name.textContent = session.name || "Session";
       const meta = document.createElement("span");
       meta.className = "meta";
       meta.textContent = String(session.played || 0);
-      button.append(name, meta);
-      button.addEventListener("click", () => openSession(session.id));
-      el("session-list").append(button);
+      button2.append(name, meta);
+      button2.addEventListener("click", () => openSession(session.id));
+      el("session-list").append(button2);
     }
   }
   async function loadHistory() {
@@ -2670,11 +3652,11 @@
   }
   function syncMergeButton() {
     const wrap = el("duplicate-actions");
-    const button = el("merge-duplicates");
-    if (!wrap || !button) return;
+    const button2 = el("merge-duplicates");
+    if (!wrap || !button2) return;
     const show = state.mode === "duplicates";
     wrap.hidden = !show;
-    button.disabled = !show || !state.writable || !selectedDuplicateGroup();
+    button2.disabled = !show || !state.writable || !selectedDuplicateGroup();
   }
   function crateNamesFor(assetId) {
     return state.crates.filter((crate) => !crate.smart && (crate.tracks || []).includes(assetId)).map((crate) => crate.name);
@@ -2826,14 +3808,14 @@
       const item = document.createElement("li");
       const last = index === crumbs.length - 1;
       if (!last && crumb.path) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "files-crumb";
-        button.textContent = crumb.name;
-        button.addEventListener("click", () => {
+        const button2 = document.createElement("button");
+        button2.type = "button";
+        button2.className = "files-crumb";
+        button2.textContent = crumb.name;
+        button2.addEventListener("click", () => {
           loadFolder(crumb.path, { elsewhere: state.filesElsewhere }).catch((error2) => failFiles(error2));
         });
-        item.append(button);
+        item.append(button2);
       } else {
         const current = document.createElement("span");
         current.className = "files-crumb";
@@ -2961,13 +3943,13 @@
     heading.textContent = "No music folders yet";
     const copy2 = document.createElement("p");
     copy2.textContent = "Setup finds the folders Serato uses for your music.";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.id = "files-run-setup";
-    button.className = "files-primary";
-    button.textContent = "Run setup";
-    button.addEventListener("click", () => bridge.openSetup());
-    box.append(heading, copy2, button);
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.id = "files-run-setup";
+    button2.className = "files-primary";
+    button2.textContent = "Run setup";
+    button2.addEventListener("click", () => bridge.openSetup());
+    box.append(heading, copy2, button2);
     return box;
   }
   function focusFilesIndex(index) {
@@ -3032,13 +4014,13 @@
     row.setAttribute("role", "listitem");
     const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
     if (openKind) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "files-open";
-      button.dataset.filesIndex = String(index);
-      button.id = `files-item-${index}`;
-      button.tabIndex = index === state.filesActive ? 0 : -1;
-      if (entry.kind === "drive" || entry.kind === "folder") button.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "files-open";
+      button2.dataset.filesIndex = String(index);
+      button2.id = `files-item-${index}`;
+      button2.tabIndex = index === state.filesActive ? 0 : -1;
+      if (entry.kind === "drive" || entry.kind === "folder") button2.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
       if (entry.detail && (entry.kind === "folder" || entry.kind === "drive")) {
         const copy2 = document.createElement("span");
         copy2.className = "files-root-copy";
@@ -3049,37 +4031,37 @@
         detail.className = "files-root-detail";
         detail.textContent = entry.detail;
         copy2.append(label2, detail);
-        button.append(copy2);
+        button2.append(copy2);
       } else {
         const name2 = document.createElement("span");
         name2.textContent = entry.name;
-        button.append(name2);
+        button2.append(name2);
         if (entry.detail) {
           const detail = document.createElement("span");
           detail.className = "files-match-detail";
           detail.textContent = entry.detail;
-          button.append(detail);
+          button2.append(detail);
         }
       }
-      button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
+      button2.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
       if (entry.missing) {
-        button.setAttribute("aria-disabled", "true");
-        button.setAttribute("aria-label", `${entry.name}, Drive not connected`);
+        button2.setAttribute("aria-disabled", "true");
+        button2.setAttribute("aria-label", `${entry.name}, Drive not connected`);
         const badge = document.createElement("span");
         badge.className = "files-badge";
         badge.textContent = "Drive not connected";
-        button.append(badge);
-        button.addEventListener("click", () => {
+        button2.append(badge);
+        button2.addEventListener("click", () => {
           state.filesActive = index;
         });
       } else {
-        button.setAttribute("aria-label", `Open ${entry.name}`);
-        button.addEventListener("click", () => {
+        button2.setAttribute("aria-label", `Open ${entry.name}`);
+        button2.addEventListener("click", () => {
           state.filesActive = index;
           openBrowserRow(entry);
         });
       }
-      row.append(button);
+      row.append(button2);
       return row;
     }
     if (entry.kind !== "file") {
@@ -3247,13 +4229,13 @@
       }).catch(showFailure);
     });
     el("views").addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (button?.dataset.view) setMode(button.dataset.view);
+      const button2 = event.target.closest("button");
+      if (button2?.dataset.view) setMode(button2.dataset.view);
     });
     document.querySelector(".sort-crates").addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (!button?.dataset.crateSort) return;
-      state.crateSort = button.dataset.crateSort;
+      const button2 = event.target.closest("button");
+      if (!button2?.dataset.crateSort) return;
+      state.crateSort = button2.dataset.crateSort;
       renderCrates();
       renderShell();
     });
@@ -3262,9 +4244,9 @@
     el("crate-color").addEventListener("click", () => colorCrate().catch((error2) => setNotice(failureOf(error2).message)));
     el("crate-delete").addEventListener("click", () => deleteCrate().catch((error2) => setNotice(failureOf(error2).message)));
     document.querySelector(".columns").addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (!button?.dataset.sort) return;
-      const key = button.dataset.sort;
+      const button2 = event.target.closest("button");
+      if (!button2?.dataset.sort) return;
+      const key = button2.dataset.sort;
       if (state.sort === key) state.sortDir *= -1;
       else {
         state.sort = key;
@@ -3299,7 +4281,7 @@
         event.preventDefault();
         if (!state.crateQuery && item.getAttribute("aria-expanded") === "true") toggleCrate(id);
         else if (item.dataset.parent) {
-          focusCrateItem(items.find((button) => button.dataset.id === item.dataset.parent));
+          focusCrateItem(items.find((button2) => button2.dataset.id === item.dataset.parent));
         }
       } else if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -3895,20 +4877,20 @@
       });
     });
     el("open-logs").addEventListener("click", () => {
-      const button = el("open-logs");
-      button.disabled = true;
+      const button2 = el("open-logs");
+      button2.disabled = true;
       el("settings-status").textContent = "Opening…";
       postJSON("/api/logs/open", {}).then(() => {
         el("settings-status").textContent = "Opened the logs folder.";
       }).catch(() => {
         el("settings-status").textContent = "Couldn't open the logs folder.";
       }).finally(() => {
-        button.disabled = false;
+        button2.disabled = false;
       });
     });
     el("copy-logs").addEventListener("click", async () => {
-      const button = el("copy-logs");
-      button.disabled = true;
+      const button2 = el("copy-logs");
+      button2.disabled = true;
       el("settings-status").textContent = "Copying…";
       try {
         const response = await fetch("/api/logs");
@@ -3941,7 +4923,7 @@
       } catch (error2) {
         el("settings-status").textContent = "Couldn't copy the logs.";
       } finally {
-        button.disabled = false;
+        button2.disabled = false;
       }
     });
     el("files-up").addEventListener("click", () => {
@@ -4276,14 +5258,14 @@
     else status.textContent = truncated ? copy.quickOpenTruncated : `${hits.length.toLocaleString()} matches`;
     hits.forEach((hit, index) => {
       const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "quick-open-option";
-      button.id = `quick-open-option-${index}`;
-      button.setAttribute("role", "option");
-      button.setAttribute("aria-selected", String(index === active));
-      button.tabIndex = -1;
-      if (index === active) button.classList.add("is-active");
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "quick-open-option";
+      button2.id = `quick-open-option-${index}`;
+      button2.setAttribute("role", "option");
+      button2.setAttribute("aria-selected", String(index === active));
+      button2.tabIndex = -1;
+      if (index === active) button2.classList.add("is-active");
       const kind = document.createElement("span");
       kind.className = "quick-open-kind";
       kind.textContent = hit.kind === "track" ? copy.quickOpenTrack : copy.quickOpenFile;
@@ -4295,12 +5277,12 @@
       detail.className = "quick-open-detail";
       detail.textContent = hit.detail;
       detail.title = hit.detail;
-      button.append(kind, title2, detail);
-      button.addEventListener("click", () => {
+      button2.append(kind, title2, detail);
+      button2.addEventListener("click", () => {
         active = index;
         void activate(hit);
       });
-      item.append(button);
+      item.append(button2);
       list.append(item);
     });
     const field = el("quick-open-query");

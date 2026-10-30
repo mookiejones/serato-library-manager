@@ -8,6 +8,12 @@ The bar under the list shows the title, the artist, **Previous**, **Play** or **
 
 Cue points from the file sit on the seek bar in their colors. Click a cue to jump there. A track with no cues has no marks. With the seek bar focused, **Left** and **Right** move 5 seconds. **Shift** with **Left** or **Right** moves 30 seconds.
 
+The bar also shows a waveform. The zoomed view keeps the playhead in the center and scrolls the track past it. Lows are red, mids are green, and highs are blue. **+** and **−** zoom in and out. Hold **Ctrl**, or **Command** on a Mac, and roll the mouse wheel to zoom. Those controls are not shortcut keys.
+
+Under that is the whole track. The part you have already played is darker. Click or drag there to move through the track. Cue points and loops are drawn on both views, in the colors stored on the file. A loop is a shaded region. Beat marks sit on the zoomed view, and a downbeat is taller.
+
+While the waveform is still being read, the overview uses the Serato Overview stored in the file, then switches to the computed one. If the file has no waveform, the bar says **Waveform unavailable for this format**. The track still plays.
+
 **Play** and **Pause** are one button. Its name changes with the state.
 
 **Space** plays or pauses. When nothing is playing, it starts the selected track. It does nothing while you are typing in a field. **Left** moves 5 seconds back. **Right** moves 5 seconds forward. Those are the only playback keys in the shortcut table. With the seek bar focused, **Shift** with **Left** or **Right** moves 30 seconds.

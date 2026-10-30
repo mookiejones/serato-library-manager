@@ -64,7 +64,7 @@ jobs:
   frontend:
     name: frontend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: true
       matrix:
@@ -83,16 +83,27 @@ jobs:
         run: npm ci
 
       - name: Typecheck the page
-        run: npx tsc --noEmit
+        run: npx tsc --noEmit && npx tsc --noEmit -p e2e
 
       - name: Reject any
-        run: npx eslint src
+        run: npx eslint src e2e
 
       - name: Test the page
         run: npm test
 
       - name: Rebuild the page and fail if the bundle is stale
         run: node scripts/build_frontend.mjs --check
+
+      - name: Install Playwright Chromium
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium
+        if: runner.os != 'Linux'
+        run: npx playwright install chromium
+
+      - name: Screenshot the waveform
+        run: npx playwright test -c e2e/playwright.config.ts
 
   audit:
     name: dependency audit
