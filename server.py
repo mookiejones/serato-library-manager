@@ -39,6 +39,65 @@ import version_info
 import waveform
 
 
+class _WaveformFlight:
+    """One analysis shared by every request that arrives while it runs."""
+
+    def __init__(self) -> None:
+        """Start an unfinished flight."""
+        self.event = threading.Event()
+        self.result: tuple[bytes, bool] | BaseException | None = None
+
+
+def load_shared_waveform(path: Path) -> tuple[bytes, bool]:
+    """Analyze ``path`` once when several requests ask at the same time.
+
+    Args:
+        path: Real audio file from the library access check.
+
+    Returns:
+        The ``SWF1`` body and whether it was already cached.
+
+    Raises:
+        waveform.WaveformUnavailable: The file cannot be decoded. Every
+            waiter receives that same error.
+    """
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise waveform.WaveformUnavailable() from exc
+    key = "\0".join(
+        (
+            os.path.normcase(os.path.normpath(os.fspath(path))),
+            str(info.st_size),
+            str(info.st_mtime_ns),
+            str(waveform.ANALYZER_VERSION),
+        )
+    )
+    with _waveform_flight_lock:
+        flight = _waveform_flights.get(key)
+        leader = flight is None
+        if flight is None:
+            flight = _WaveformFlight()
+            _waveform_flights[key] = flight
+    if leader:
+        try:
+            result: tuple[bytes, bool] | BaseException = waveform.load(path)
+        except BaseException as exc:
+            result = exc
+        flight.result = result
+        with _waveform_flight_lock:
+            _waveform_flights.pop(key, None)
+        flight.event.set()
+    else:
+        flight.event.wait()
+    found = flight.result
+    if isinstance(found, BaseException):
+        raise found
+    if found is None:
+        raise waveform.WaveformUnavailable()
+    return found
+
+
 def app_root() -> Path:
     """Return the directory that holds static/.
 
@@ -65,6 +124,8 @@ FOCUS_HEADER = "X-Serato-Library-Focus"
 LIBRARY_SPACE = library.LIBRARY_SPACE
 NAME_SPLIT = library.NAME_SPLIT
 BODY_LIMIT = 2_000_000
+_waveform_flights: dict[str, "_WaveformFlight"] = {}
+_waveform_flight_lock = threading.Lock()
 LEGACY_ALLOWED_POSTS = frozenset({"/api/related", "/api/reveal"})
 """POST routes, after settings, setup, and logs, that still answer while only an
 older ``database V2`` library is present. Every other POST is refused with 409,
@@ -2470,7 +2531,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(waveform.overview_document(target.path))
             return
         try:
-            body, cached = waveform.load(target.path)
+            body, cached = load_shared_waveform(target.path)
         except waveform.WaveformUnavailable as exc:
             self.send_json({"available": False, "error": exc.message})
             return

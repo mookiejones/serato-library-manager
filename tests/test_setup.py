@@ -480,6 +480,14 @@ class MissingLibraryServerTests(unittest.TestCase):
         env["XDG_STATE_HOME"] = str(home / "state")
         env[app_config.CONFIG_ENV] = str(config)
         env[app_config.LOG_ENV] = str(logs)
+        # HOME below is empty so the child cannot see a real Serato library.
+        # Packages installed with ``pip install --user`` live under the
+        # current home. Keep that directory on PYTHONPATH.
+        import site
+        user_site = site.getusersitepackages()
+        if user_site and Path(user_site).is_dir():
+            previous = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = user_site if not previous else user_site + os.pathsep + previous
         env.pop("HOMEDRIVE", None)
         env.pop("HOMEPATH", None)
         env.pop("SERATO_LIBRARY_SMOKE", None)

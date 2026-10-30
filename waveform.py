@@ -3,8 +3,9 @@
 The file is opened read-only. Nothing under the Serato library folder is
 written, and the audio file is not modified. Samples are decoded in
 chunks, mixed to mono, and split into low (under 250 Hz), mid (250 Hz to
-4 kHz), and high (over 4 kHz). Detail is 150 points per second. The
-overview is 1000 points, or fewer when the track is shorter than that.
+4 kHz), and high (over 4 kHz) with FFT overlap-save. Detail is 150 points
+per second. The overview is 1000 points, or fewer when the track is shorter
+than that. One decode chunk and one FFT block are in memory at a time.
 
 Decoding uses miniaudio (MIT; dr_mp3, dr_flac, and stb_vorbis, which are
 public domain). That covers ``.wav``, ``.aiff``, ``.aif``, ``.flac``,
@@ -58,25 +59,20 @@ size, mtime, and analyzer version. Failures are not cached.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import logging
 import os
 import shutil
 import struct
 import subprocess
+import threading
 import wave
 from collections.abc import Iterator
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
-try:
-    import miniaudio
-except ImportError:  # The server still starts. Analysis reports waveform unavailable.
-    miniaudio = None
-
-try:
-    import numpy as np
-except ImportError:
-    np = None
+import miniaudio
+import numpy as np
 
 import app_config
 import library
@@ -84,7 +80,7 @@ import tags
 
 logger = logging.getLogger("serato.waveform")
 
-ANALYZER_VERSION = 1
+ANALYZER_VERSION = 2
 HEADER_BYTES = 64
 DETAIL_HZ = 150
 OVERVIEW_POINTS = 1000
@@ -104,6 +100,8 @@ _FLAG_OVERVIEW = 2
 _FLAG_SERATO = 4
 
 _FILTERS: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+_fft_plan_cache: tuple[int, list[np.ndarray]] | None = None
+_PARTIAL_SEQ = itertools.count()
 
 
 class WaveformUnavailable(Exception):
@@ -169,8 +167,6 @@ def load(path: Path) -> tuple[bytes, bool]:
         WaveformUnavailable: No decoder could read samples. The audio file
             is not modified, and a failure is not written to the cache.
     """
-    if np is None:
-        raise WaveformUnavailable()
     try:
         info = path.lstat()
     except OSError as exc:
@@ -182,7 +178,7 @@ def load(path: Path) -> tuple[bytes, bool]:
         return cached, True
     try:
         body = _render(path, overview)
-    except (DecodeError, OSError, ValueError, WaveformUnavailable) as exc:
+    except (DecodeError, OSError, ValueError, WaveformUnavailable, subprocess.TimeoutExpired, miniaudio.DecodeError) as exc:
         raise WaveformUnavailable() from exc
     _write_cache(key, body)
     return body, False
@@ -204,8 +200,6 @@ def analyze_samples(samples: np.ndarray, sample_rate: int, overview: bytes | Non
     Raises:
         WaveformUnavailable: ``samples`` has no samples, or the rate is not usable.
     """
-    if np is None:
-        raise WaveformUnavailable()
     mono = _clean(samples)
     if sample_rate != ANALYZE_RATE:
         mono = _resample(mono, sample_rate, ANALYZE_RATE)
@@ -313,10 +307,8 @@ def iter_pcm(path: Path) -> Iterator[np.ndarray]:
         WaveformUnavailable: Every decoder refused the file, or ffmpeg is
             not on ``PATH`` for a format miniaudio cannot open.
     """
-    if np is None:
-        raise WaveformUnavailable()
     suffix = path.suffix.lower()
-    openers: list[object] = []
+    openers: list[Callable[[Path], Iterator[np.ndarray]]] = []
     if suffix not in FFMPEG_REQUIRED_SUFFIXES:
         openers.append(_open_miniaudio)
         if suffix == ".wav":
@@ -346,8 +338,17 @@ def _render(path: Path, overview: bytes | None) -> bytes:
 
     Raises:
         WaveformUnavailable: The decoder produced no samples.
+        DecodeError: A decoder refused the file while samples were still arriving.
+        miniaudio.DecodeError: miniaudio failed after the file had opened.
+        subprocess.TimeoutExpired: ffmpeg did not exit after its stdout closed.
     """
-    rows, total = _collect(iter_pcm(path))
+    stream = iter_pcm(path)
+    try:
+        rows, total = _collect(stream)
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            close()
     if total <= 0 or rows.shape[0] == 0:
         raise WaveformUnavailable()
     return _pack(rows, total, overview)
@@ -357,43 +358,39 @@ def _collect(chunks: Iterator[np.ndarray]) -> tuple[np.ndarray, int]:
     """Turn a stream of mono samples into peak and RMS rows.
 
     Args:
-        chunks: Mono chunks at :data:`ANALYZE_RATE`. One chunk is filtered
-            and reduced before the next is pulled.
+        chunks: Mono chunks at :data:`ANALYZE_RATE`. Samples are gathered
+            into one FFT block, filtered, and reduced before the next block
+            is kept. The PCM is not stored.
 
     Returns:
         A float array of shape ``(N, 6)`` and the number of input samples.
         Columns are low peak, low RMS, mid peak, mid RMS, high peak, high RMS.
         A remainder shorter than one detail point is not a row.
     """
-    low, mid, high = _filters(ANALYZE_RATE)
-    coeffs = (low, mid, high)
-    state = [np.zeros(_TAPS - 1, dtype=np.float64) for _ in coeffs]
-    pending = [np.zeros(0, dtype=np.float64) for _ in coeffs]
-    peaks: list[list[float]] = [[], [], []]
-    rms: list[list[float]] = [[], [], []]
+    fft_n, spectra = _fft_plan()
+    block_len = fft_n - (_TAPS - 1)
     hop = ANALYZE_RATE // DETAIL_HZ
+    state = np.zeros(_TAPS - 1, dtype=np.float64)
+    carry = np.zeros(0, dtype=np.float64)
+    pending = [np.zeros(0, dtype=np.float64) for _ in range(3)]
+    peaks: list[list[np.ndarray]] = [[], [], []]
+    rms: list[list[np.ndarray]] = [[], [], []]
     total = 0
     for chunk in chunks:
         mono = _clean(chunk)
         if mono.size == 0:
             continue
         total += int(mono.size)
-        for index, kernel in enumerate(coeffs):
-            filtered, state[index] = _stream_fir(mono, kernel, state[index])
-            buf = np.concatenate((pending[index], filtered))
-            while buf.size >= hop:
-                frame = buf[:hop]
-                buf = buf[hop:]
-                peaks[index].append(float(np.max(np.abs(frame))))
-                rms[index].append(float(np.sqrt(np.mean(frame * frame))))
-            pending[index] = buf
-    count = len(peaks[0])
-    rows = np.zeros((count, 6), dtype=np.float64)
-    for index in range(3):
-        if peaks[index]:
-            rows[:, index * 2] = peaks[index]
-            rows[:, index * 2 + 1] = rms[index]
-    return rows, total
+        carry = np.concatenate((carry, mono))
+        while carry.size >= block_len:
+            block = carry[:block_len]
+            carry = carry[block_len:]
+            filtered, state = _fft_filter(block, state, spectra, fft_n)
+            _reduce_hops(filtered, pending, peaks, rms, hop)
+    if carry.size:
+        filtered, state = _fft_filter(carry, state, spectra, fft_n)
+        _reduce_hops(filtered, pending, peaks, rms, hop)
+    return _stack_rows(peaks, rms), total
 
 
 def _pack(rows: np.ndarray, total_samples: int, overview: bytes | None) -> bytes:
@@ -580,22 +577,126 @@ def _lowpass(sample_rate: int, cutoff: float) -> np.ndarray:
     return kernel
 
 
-def _stream_fir(chunk: np.ndarray, kernel: np.ndarray, state: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Filter one chunk and keep the tail for the next chunk.
+def _fast_length(size: int) -> int:
+    """Return a FFT length at least ``size`` whose factors are 2, 3, and 5.
 
     Args:
-        chunk: Mono samples.
-        kernel: FIR coefficients.
-        state: The previous ``len(kernel) - 1`` input samples.
+        size: Minimum length.
 
     Returns:
-        Filtered samples the same length as ``chunk``, and the new state.
+        The next smooth length. PocketFFT is fastest on those sizes.
     """
-    if chunk.size == 0:
-        return chunk, state
-    joined = np.concatenate((state, chunk))
-    filtered = np.convolve(joined, kernel, mode="valid")
-    return filtered, joined[-(len(kernel) - 1):].copy()
+    if size < 1:
+        return 1
+    candidate = size
+    while True:
+        value = candidate
+        for factor in (2, 3, 5):
+            while value % factor == 0:
+                value //= factor
+        if value == 1:
+            return candidate
+        candidate += 1
+
+
+def _fft_plan() -> tuple[int, list[np.ndarray]]:
+    """Return the FFT length and the three band spectra.
+
+    Returns:
+        A length of 40,000 (already 2-3-5 smooth) and the rFFT of each
+        1023-tap kernel at that length. The plan is built once per process.
+    """
+    global _fft_plan_cache
+    if _fft_plan_cache is not None:
+        return _fft_plan_cache
+    fft_n = _fast_length(40_000)
+    kernels = _filters(ANALYZE_RATE)
+    spectra = [np.fft.rfft(kernel, n=fft_n) for kernel in kernels]
+    _fft_plan_cache = (fft_n, spectra)
+    return _fft_plan_cache
+
+
+def _fft_filter(
+    samples: np.ndarray,
+    state: np.ndarray,
+    spectra: list[np.ndarray],
+    fft_n: int,
+) -> tuple[list[np.ndarray], np.ndarray]:
+    """Filter one block with overlap-save.
+
+    Args:
+        samples: Mono samples. At most ``fft_n - len(state)`` long.
+        state: The previous ``_TAPS - 1`` input samples. The same history
+            feeds every band.
+        spectra: rFFT of the low, mid, and high kernels.
+        fft_n: FFT length.
+
+    Returns:
+        Three filtered arrays the same length as ``samples``, and the
+        input history for the next block. The forward transform is shared.
+    """
+    count = int(samples.size)
+    history = int(state.size)
+    block = np.zeros(fft_n, dtype=np.float64)
+    block[:history] = state
+    block[history:history + count] = samples
+    spectrum = np.fft.rfft(block)
+    bands: list[np.ndarray] = []
+    for kernel in spectra:
+        filtered = np.fft.irfft(spectrum * kernel, n=fft_n)
+        bands.append(filtered[history:history + count])
+    joined = np.concatenate((state, samples))
+    return bands, joined[-history:].copy()
+
+
+def _reduce_hops(
+    bands: list[np.ndarray],
+    pending: list[np.ndarray],
+    peaks: list[list[np.ndarray]],
+    rms: list[list[np.ndarray]],
+    hop: int,
+) -> None:
+    """Turn filtered samples into one peak and one RMS per hop.
+
+    Args:
+        bands: Low, mid, and high samples for this block.
+        pending: Samples shorter than one hop, kept from the previous block.
+        peaks: Peak pieces collected so far, one list per band.
+        rms: RMS pieces collected so far, one list per band.
+        hop: Samples per detail point.
+
+    Returns:
+        None. Complete hops are appended. A short tail stays in ``pending``.
+    """
+    for index, band in enumerate(bands):
+        buf = np.concatenate((pending[index], band))
+        usable = (buf.size // hop) * hop
+        if usable:
+            frames = buf[:usable].reshape(-1, hop)
+            peaks[index].append(np.max(np.abs(frames), axis=1))
+            rms[index].append(np.sqrt(np.mean(frames * frames, axis=1)))
+        pending[index] = buf[usable:].copy()
+
+
+def _stack_rows(peaks: list[list[np.ndarray]], rms: list[list[np.ndarray]]) -> np.ndarray:
+    """Join hop pieces into one ``(N, 6)`` array.
+
+    Args:
+        peaks: Peak pieces per band.
+        rms: RMS pieces per band.
+
+    Returns:
+        Columns low peak, low RMS, mid peak, mid RMS, high peak, high RMS.
+        Empty when no hop was completed.
+    """
+    if not peaks[0]:
+        return np.zeros((0, 6), dtype=np.float64)
+    count = int(sum(piece.size for piece in peaks[0]))
+    rows = np.empty((count, 6), dtype=np.float64)
+    for index in range(3):
+        rows[:, index * 2] = np.concatenate(peaks[index])
+        rows[:, index * 2 + 1] = np.concatenate(rms[index])
+    return rows
 
 
 def _clean(chunk: object) -> np.ndarray:
@@ -654,8 +755,6 @@ def _open_miniaudio(path: Path) -> Iterator[np.ndarray]:
     Raises:
         DecodeError: miniaudio cannot decode the file.
     """
-    if miniaudio is None or np is None:
-        raise DecodeError()
     try:
         stream = miniaudio.stream_file(
             os.fspath(path),
@@ -910,11 +1009,41 @@ def _open_ffmpeg(path: Path) -> Iterator[np.ndarray]:
                 usable = len(raw) - (len(raw) % 4)
                 if usable:
                     yield _clean(np.frombuffer(raw[:usable], dtype="<f4"))
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired as exc:
+                raise WaveformUnavailable() from exc
         finally:
-            stdout.close()
-            proc.wait(timeout=60)
+            try:
+                stdout.close()
+            except OSError:
+                pass
+            _reap_ffmpeg(proc)
 
     return chunks()
+
+
+def _reap_ffmpeg(proc: subprocess.Popen[bytes]) -> None:
+    """Kill ffmpeg if it is still running, then wait until it exits.
+
+    Args:
+        proc: Process started by :func:`_open_ffmpeg`.
+
+    Returns:
+        None. A second wait covers a process that ignored the first kill.
+        A timeout after that is ignored so closing the generator cannot
+        become a 500.
+    """
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return
 
 
 def _read_cache(key: str) -> bytes | None:
@@ -938,6 +1067,20 @@ def _read_cache(key: str) -> bytes | None:
     return body
 
 
+def _partial_cache_path(dest: Path) -> Path:
+    """Return a temporary name that no other writer in this process uses.
+
+    Args:
+        dest: Final cache file.
+
+    Returns:
+        A sibling path whose name includes the process id, the thread id,
+        and a process-wide counter. ``os.replace`` publishes ``dest``.
+    """
+    ticket = next(_PARTIAL_SEQ)
+    return dest.with_name(f"{dest.name}.{os.getpid()}.{threading.get_ident()}.{ticket}.partial")
+
+
 def _write_cache(key: str, body: bytes) -> None:
     """Store ``body`` outside the Serato library folder.
 
@@ -953,7 +1096,7 @@ def _write_cache(key: str, body: bytes) -> None:
     dest = _cache_path(key)
     if dest is None:
         return
-    temporary = dest.with_name(dest.name + f".{os.getpid()}.partial")
+    temporary = _partial_cache_path(dest)
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if _cache_blocked(dest.parent):

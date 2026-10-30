@@ -12,14 +12,18 @@ import json
 import math
 import os
 import struct
+import subprocess
 import tempfile
 import threading
+import time
+import tracemalloc
 import unittest
 import urllib.parse
 import wave
 from pathlib import Path
 from unittest import mock
 
+import miniaudio
 import numpy as np
 
 import app_config
@@ -349,13 +353,18 @@ class DecoderTests(unittest.TestCase):
         class _Process:
             def __init__(self) -> None:
                 self.stdout = _Stdout(samples.tobytes())
+                self.returncode: int | None = None
 
             def wait(self, timeout: int | None = None) -> int:
                 del timeout
+                self.returncode = 0
                 return 0
 
+            def poll(self) -> int | None:
+                return self.returncode
+
             def kill(self) -> None:
-                return None
+                self.returncode = -9
 
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "song.m4a"
@@ -371,6 +380,130 @@ class DecoderTests(unittest.TestCase):
         self.assertIs(popen.call_args.kwargs.get("shell", False), False)
         self.assertEqual(waveform.parse_waveform(body)["detail_count"], 75)
         self.assertGreater(_middle_means(body)[2], 100)
+
+    def test_mid_file_decode_error_is_unavailable(self) -> None:
+        """Turn a miniaudio failure after the first chunk into the stable sentence.
+
+        The HTTP route must answer 200 with ``available`` false. A 500
+        would mean the exception left :func:`waveform.load`.
+
+        Returns:
+            None. The test fails if the status is 500 or the sentence changes.
+        """
+        def fail_midway(_path: Path):
+            yield np.zeros(ANALYZE_SAFE, dtype=np.float64)
+            raise miniaudio.DecodeError("mid-file")
+
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "tone.wav"
+            _write_wav(path, _sine(440.0, 0.2))
+            with mock.patch("waveform.iter_pcm", fail_midway):
+                with self.assertRaises(waveform.WaveformUnavailable) as caught:
+                    waveform.load(path)
+        self.assertEqual(caught.exception.message, "waveform unavailable")
+
+    def test_ffmpeg_timeout_is_unavailable_and_the_process_is_killed(self) -> None:
+        """Kill ffmpeg when it does not exit, and do not raise 500.
+
+        The fake process raises ``TimeoutExpired`` from the first wait.
+        The reaper must kill it. ``load`` becomes waveform unavailable.
+
+        Returns:
+            None. The test fails if the process is left running or the error leaks.
+        """
+        seen: dict[str, object] = {}
+
+        class _Hung:
+            def __init__(self) -> None:
+                self.stdout = _OneRead(b"")
+                self.killed = False
+                self.waits = 0
+
+            def poll(self) -> int | None:
+                return -9 if self.killed else None
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                self.waits += 1
+                if self.waits == 1:
+                    raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=timeout or 60)
+                return -9
+
+        class _OneRead:
+            def __init__(self, payload: bytes) -> None:
+                self._payload = payload
+                self._done = False
+
+            def read(self, count: int) -> bytes:
+                del count
+                if self._done:
+                    return b""
+                self._done = True
+                return self._payload
+
+            def close(self) -> None:
+                return None
+
+        hung = _Hung()
+        seen["proc"] = hung
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"container")
+            with mock.patch("waveform.shutil.which", return_value="/usr/bin/ffmpeg"):
+                with mock.patch("waveform.subprocess.Popen", return_value=hung):
+                    with self.assertRaises(waveform.WaveformUnavailable):
+                        waveform.load(path)
+        self.assertTrue(hung.killed)
+
+    def test_closing_ffmpeg_early_kills_the_process(self) -> None:
+        """Reap ffmpeg when the caller closes the generator before it ends.
+
+        One chunk is taken. ``close`` is what a disconnected client does
+        to the generator. The process must be killed and waited on.
+
+        Returns:
+            None. The test fails if ``kill`` was not called.
+        """
+        class _Stdout:
+            def read(self, count: int) -> bytes:
+                return b"\x00" * min(count, 64)
+
+            def close(self) -> None:
+                return None
+
+        class _Alive:
+            def __init__(self) -> None:
+                self.stdout = _Stdout()
+                self.killed = False
+                self.waited = False
+
+            def poll(self) -> int | None:
+                return -9 if self.killed else None
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def wait(self, timeout: float | None = None) -> int:
+                del timeout
+                self.waited = True
+                return -9
+
+        proc = _Alive()
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"container")
+            with mock.patch("waveform.shutil.which", return_value="/usr/bin/ffmpeg"):
+                with mock.patch("waveform.subprocess.Popen", return_value=proc):
+                    stream = waveform.iter_pcm(path)
+                    next(iter(stream))
+                    stream.close()
+        self.assertTrue(proc.killed)
+        self.assertTrue(proc.waited)
+
+
+ANALYZE_SAFE = 44100
 
 
 class CacheTests(unittest.TestCase):
@@ -461,6 +594,114 @@ class CacheTests(unittest.TestCase):
             self.assertTrue(body.startswith(b"SWF1"))
             self.assertEqual(_tree(temp.root), before)
             self.assertFalse((temp.root / "waveforms").exists())
+
+    def test_partial_names_differ_by_thread(self) -> None:
+        """Give each cache writer its own temporary name.
+
+        Two threads call the helper at the same time. The names include
+        the thread id and a counter, so ``os.replace`` cannot clobber
+        the other writer's bytes.
+
+        Returns:
+            None. The test fails if both threads build the same path.
+        """
+        dest = Path("/tmp/waveform-cache-key")
+        found: list[Path] = []
+        lock = threading.Lock()
+
+        def grab() -> None:
+            path = waveform._partial_cache_path(dest)
+            with lock:
+                found.append(path)
+
+        threads = [threading.Thread(target=grab) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len({str(path) for path in found}), 4)
+
+
+class SharedAnalysisTests(unittest.TestCase):
+    """One in-flight analysis serves every overlapping request."""
+
+    def test_two_callers_decode_once(self) -> None:
+        """Run ``waveform.load`` once when two threads ask together.
+
+        The stand-in waits until both callers have entered. A second
+        decode would increment the counter past 1.
+
+        Returns:
+            None. The test fails if each caller analyzes on its own.
+        """
+        calls = {"n": 0}
+        entered = threading.Semaphore(0)
+        release = threading.Event()
+        body = waveform.analyze_samples(_sine(440.0, 0.2), _RATE)
+
+        def slow(path: Path) -> tuple[bytes, bool]:
+            del path
+            calls["n"] += 1
+            entered.release()
+            if not release.wait(timeout=2):
+                raise TimeoutError("the second caller did not arrive")
+            return body, False
+
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "tone.wav"
+            _write_wav(path, _sine(440.0, 0.2))
+            with mock.patch("waveform.load", slow):
+                results: list[tuple[bytes, bool]] = []
+                errors: list[BaseException] = []
+
+                def run() -> None:
+                    try:
+                        results.append(server.load_shared_waveform(path))
+                    except BaseException as exc:
+                        errors.append(exc)
+
+                threads = [threading.Thread(target=run) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                self.assertTrue(entered.acquire(timeout=2))
+                time.sleep(0.05)
+                release.set()
+                for thread in threads:
+                    thread.join(timeout=3)
+        self.assertEqual(errors, [])
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0][0], body)
+
+
+class BenchmarkTests(unittest.TestCase):
+    """Keep a short track inside a budget scaled from an hour in 10 seconds."""
+
+    def test_short_wav_stays_inside_the_scaled_budget(self) -> None:
+        """Analyze thirty seconds without holding the PCM.
+
+        An hour is budgeted at 10 seconds and 80 MiB of traced allocations.
+        Thirty seconds gets the same rate plus a second of fixed overhead.
+        The traced peak must stay under 80 MiB. The file is temporary.
+
+        Returns:
+            None. The test fails if the run is slower or larger than that.
+        """
+        seconds = 30
+        limit = 1.0 + (10.0 * seconds / 3600.0)
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "tone.wav"
+            _write_wav(path, _sine(440.0, float(seconds)))
+            tracemalloc.start()
+            started = time.perf_counter()
+            body, _cached = waveform.load(path)
+            elapsed = time.perf_counter() - started
+            _current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        parsed = waveform.parse_waveform(body)
+        self.assertGreater(parsed["detail_count"], 1000)
+        self.assertLess(elapsed, limit)
+        self.assertLess(peak, 80 * 1024 * 1024)
 
 
 class OverviewTests(unittest.TestCase):
@@ -689,6 +930,25 @@ class WaveformRouteTests(unittest.TestCase):
         self.assertEqual(audio_status, 200)
         self.assertEqual(audio_body, payload)
         self.assertEqual(path.read_bytes(), before)
+
+    def test_mid_decode_on_the_wire_is_unavailable(self) -> None:
+        """Answer 200 when miniaudio fails after decoding has started.
+
+        Returns:
+            None. The test fails if the status is 500.
+        """
+        asset_id, path = self.add_track("music/tone.wav", b"")
+        _write_wav(path, _sine(440.0, 0.2))
+
+        def fail_midway(_path: Path):
+            yield np.zeros(1024, dtype=np.float64)
+            raise miniaudio.DecodeError("mid-file")
+
+        with mock.patch("waveform.iter_pcm", fail_midway):
+            status, headers, body = self.exchange(f"/api/waveform?id={asset_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"].split(";")[0], "application/json")
+        self.assertEqual(json.loads(body), {"available": False, "error": "waveform unavailable"})
 
     def test_analysis_leaves_the_library_tree_unchanged(self) -> None:
         """Leave the temporary Serato folder byte-for-byte after a waveform.

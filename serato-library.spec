@@ -135,7 +135,11 @@ elif sys.platform == "win32":
 else:
     hidden += ["webview.platforms.gtk", "gi"]
 hidden.extend(telemetry_hiddenimports())
-hidden.extend(["version_info", "_version"])
+hidden.extend(["version_info", "_version", "miniaudio", "numpy", "numpy.fft", "cffi", "pycparser"])
+if importlib.util.find_spec("miniaudio") is not None:
+    binaries += collect_dynamic_libs("miniaudio")
+if importlib.util.find_spec("numpy") is not None:
+    binaries += collect_dynamic_libs("numpy")
 
 a = Analysis(
     ["desktop.py"],
