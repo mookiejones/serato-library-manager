@@ -6,22 +6,25 @@ This is a local browser for a Serato DJ Pro library. The server binds `127.0.0.1
   <source media="(prefers-color-scheme: dark)" type="image/svg+xml" srcset="docs/images/contribution-flow-dark.svg">
   <source media="(prefers-color-scheme: dark)" type="image/png" srcset="docs/images/contribution-flow-dark.png">
   <source type="image/svg+xml" srcset="docs/images/contribution-flow-light.svg">
-  <img alt="Branch or fork, pull request, CI green on Ubuntu and Windows, Gatekeeper QA review, Principal Developer review and merge. Docs are updated in the same PR; unmerged work is labelled PREVIEW." src="docs/images/contribution-flow-light.png" width="100%">
+  <img alt="Branch or fork, pull request, CI green on Ubuntu and Windows, Gatekeeper QA (mookiejones-qa) approval, then merge by the team, including agents. Docs are updated in the same PR; unmerged work is labelled PREVIEW." src="docs/images/contribution-flow-light.png" width="100%">
 </picture>
 
 ## Merge flow
 
 1. Branch or fork.
 2. Open a pull request. Code and the docs that describe it go in that same pull request.
-3. Wait until CI is green, including Windows. The checks live in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml), and [`.github/workflows/dependency-review.yml`](.github/workflows/dependency-review.yml):
+3. Add tests and run every check locally. Paste the results in the pull request. See [Tests](#tests) and [Checks](#checks).
+4. Wait until CI is green, including Windows. These six checks are required ([`ci.yml`](.github/workflows/ci.yml), [`codeql.yml`](.github/workflows/codeql.yml)):
    - `tests (ubuntu-latest, Python 3.12)`
    - `tests (ubuntu-latest, Python 3.14)`
    - `tests (windows-latest, Python 3.12)`
-   - `dependency audit`
+   - `frontend (ubuntu-latest)`
+   - `frontend (windows-latest)`
    - `analyze Python`
-   - `review dependency changes` (pull requests)
-4. Gatekeeper QA reviews the pull request.
-5. The Principal Developer reviews and merges. [`.github/CODEOWNERS`](.github/CODEOWNERS) names `@mookiejones` for the whole tree.
+
+   `dependency audit` ([`ci.yml`](.github/workflows/ci.yml)) and `review dependency changes` ([`dependency-review.yml`](.github/workflows/dependency-review.yml), pull requests) also run, but are not required.
+5. Gatekeeper QA (`mookiejones-qa`) reviews the pull request.
+6. The team, including agents, may merge once `mookiejones-qa` approved the latest commit and all required checks are green. Only releases and tags need Charles's (@mookiejones) explicit OK. Never push to `main`.
 
 Label work that is not merged **PREVIEW**. Do not describe it as shipped.
 
@@ -45,7 +48,19 @@ python3 -m venv .venv
 
 Page color and type tokens are in `static/tokens.css`. The page source is strict TypeScript in `src/`. Edit that, then run `npm run build` so the committed `static/app.js` stays current. Node 22 or newer matches `engines` in `package.json`. Do not hand-edit `static/app.js`.
 
+## Tests
+
+Every behavior change or bug fix ships with tests in the same pull request: Python `unittest` under `tests/`, page code as Vitest `*.test.ts` in `src/`. A bug fix needs a test that fails before the fix. Use only synthetic fixtures (`tests/fixtures/`), never a real `master.sqlite`, `root.sqlite`, or audio file.
+
+QA (Gatekeeper, `mookiejones-qa`) uses this bar:
+
+- Tests must fail if the logic is broken. QA may mutation-test; weak tests that pass anyway get blocked.
+- Cover the edge cases that apply: Windows and macOS paths, symlinks and unmounted drives, Serato 4 vs Serato 5 data, and an empty or missing library.
+- Never write extra files inside the Serato folder.
+
 ## Checks
+
+Before opening a pull request, run all of these and paste the results in it. Commit the rebuilt `static/app.js` and `static/wizard.js`.
 
 From the repository root:
 
@@ -75,7 +90,7 @@ Python has no separate linter. The page uses ESLint, which rejects `any`. The su
 ## What to update in the same pull request
 
 - `docs/architecture.md` when behavior, the API, the layout, or the run path changes.
-- `CLAUDE.md` when the run command or the layout summary changes.
+- `CLAUDE.md` and `AGENTS.md` (identical copies) when the run command or the layout summary changes.
 - `docs/github.md` when a workflow, a release check, or a GitHub setting changes.
 - `docs/index.md` and `docs/guide/` when a DJ can see the change.
 - `SECURITY.md` when the threat notes or the attestation commands change.
