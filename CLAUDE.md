@@ -113,3 +113,17 @@ QA (Gatekeeper, account `mookiejones-qa`) blocks a PR whose tests do not meet th
 ## Library safety
 
 The database lives outside this repo. Quit Serato before a write. Do not commit a copy of `master.sqlite`. Cue points live in the audio file, not in the crate row.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo's GitHub Issues, operated with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five triage roles. `needs-info` maps to the existing `question` label and `wontfix` exists. `needs-triage`, `ready-for-agent`, and `ready-for-human` must be created before `/triage` applies them. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root, created lazily by `/domain-modeling`. See `docs/agents/domain.md`.
