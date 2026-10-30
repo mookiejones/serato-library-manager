@@ -4,7 +4,13 @@
  * The renderer is the same one the player mounts. Nothing is fetched.
  */
 
-import { mountWaveformFixture } from "../src/waveform-view";
+import { mountWaveformFixture, type WaveformController } from "../src/waveform-view";
+
+declare global {
+  interface Window {
+    waveformFixture: WaveformController;
+  }
+}
 
 const host = document.getElementById("waveform-root");
-if (host) mountWaveformFixture(host);
+if (host) window.waveformFixture = mountWaveformFixture(host);

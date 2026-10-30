@@ -47,6 +47,7 @@ export interface WaveformController {
   sync(): void;
   destroy(): void;
   showComputed(parsed: ParsedWaveform): void;
+  showUnavailable(): void;
   pixelsPerSecond(): number;
 }
 
@@ -75,8 +76,9 @@ export function mountWaveform(host: HTMLElement, hooks: WaveformHooks): Waveform
  * canvases so a test can sample those pixels.
  *
  * @param host Element to fill.
+ * @returns The controller, so a test can zoom or show the unavailable note.
  */
-export function mountWaveformFixture(host: HTMLElement): void {
+export function mountWaveformFixture(host: HTMLElement): WaveformController {
   const playhead = 8;
   const duration = 20;
   const view = mountWaveform(host, {
@@ -101,6 +103,7 @@ export function mountWaveformFixture(host: HTMLElement): void {
     paint();
     requestAnimationFrame(paint);
   });
+  return view;
 }
 
 class WaveformView implements WaveformController {
@@ -242,6 +245,25 @@ class WaveformView implements WaveformController {
     this.trackId = this.trackId ?? 1;
     this.host.hidden = false;
     this.applyComputed(parsed);
+  }
+
+  /**
+   * Show the format note and hide the canvases.
+   *
+   * The screenshot harness uses this for a file that cannot be decoded.
+   * Playback is not touched.
+   */
+  showUnavailable(): void {
+    this.token += 1;
+    this.parsed = null;
+    this.tiles = null;
+    this.overviewSource = "";
+    this.seratoColumns = [];
+    this.overviewCache = null;
+    this.overviewKey = "";
+    delete this.overviewHit.dataset.waveformOverview;
+    this.host.hidden = false;
+    this.setPhase("unavailable");
   }
 
   /**

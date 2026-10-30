@@ -1214,6 +1214,24 @@
       this.applyComputed(parsed);
     }
     /**
+     * Show the format note and hide the canvases.
+     *
+     * The screenshot harness uses this for a file that cannot be decoded.
+     * Playback is not touched.
+     */
+    showUnavailable() {
+      this.token += 1;
+      this.parsed = null;
+      this.tiles = null;
+      this.overviewSource = "";
+      this.seratoColumns = [];
+      this.overviewCache = null;
+      this.overviewKey = "";
+      delete this.overviewHit.dataset.waveformOverview;
+      this.host.hidden = false;
+      this.setPhase("unavailable");
+    }
+    /**
      * Follow play, pause, and seek.
      *
      * While audio is playing, frames are scheduled from the audio clock.
