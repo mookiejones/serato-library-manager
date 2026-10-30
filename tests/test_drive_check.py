@@ -14,6 +14,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -925,57 +926,18 @@ class DriveCheckTests(unittest.TestCase):
                 body = json.loads(response.read().decode("utf-8"))
             self.assertEqual([item["kind"] for item in body["findings"]], ["smart_crate"])
             self.assertEqual(body["crates"][0]["name"], "Warmup")
-            self.assertEqual(
-                set(body),
-                {
-                    "drive",
-                    "name",
-                    "filesystem",
-                    "ready",
-                    "missing_drive",
-                    "summary",
-                    "counts",
-                    "crates",
-                    "findings",
-                    "errors",
-                },
-            )
-            self.assertEqual(
-                set(body["counts"]),
-                {
-                    "tracks",
-                    "off_drive",
-                    "missing",
-                    "smart_crates",
-                    "unsafe_names",
-                    "path_length",
-                    "file_size",
-                },
-            )
-            self.assertEqual(
-                set(body["findings"][0]),
-                {"kind", "crate", "track", "path", "found", "fix"},
-            )
-            self.assertEqual(
-                set(body["crates"][0]),
-                {
-                    "name",
-                    "smart",
-                    "tracks",
-                    "off_drive",
-                    "missing",
-                    "unsafe_names",
-                    "path_length",
-                    "file_size",
-                },
-            )
+            documented = _documented_report()
+            self.assertEqual(set(body), set(documented))
+            self.assertEqual(set(body["counts"]), set(documented["counts"]))
+            self.assertEqual(set(body["findings"][0]), set(documented["findings"][0]))
+            self.assertEqual(set(body["crates"][0]), set(documented["crates"][0]))
             unread = urlencode({"drive": str(drive)}, quote_via=quote)
             with patch.object(drive_check, "_read_bytes", side_effect=OSError("unreadable")):
                 with urllib.request.urlopen(f"http://{host}:{port}/api/drive-check?{unread}", timeout=10) as response:
                     failed = json.loads(response.read().decode("utf-8"))
             self.assertTrue(failed["errors"])
             for error in failed["errors"]:
-                self.assertEqual(set(error), {"crate", "message"})
+                self.assertEqual(set(error), _documented_error_keys())
             self.assertFalse(failed["ready"])
             missing = urlencode({"drive": str(Path(self._tmp.name) / "absent")}, quote_via=quote)
             with urllib.request.urlopen(f"http://{host}:{port}/api/drive-check?{missing}", timeout=10) as response:
@@ -1032,6 +994,49 @@ class DriveCheckTests(unittest.TestCase):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+def _architecture_section() -> str:
+    """Return the Portable drive check text from docs/architecture.md.
+
+    Returns:
+        The text from the ``drive_check.py`` paragraph to the next heading.
+    """
+    text = (ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    start = text.index("`drive_check.py` reads one portable drive")
+    end = text.index("\n## ", start)
+    return text[start:end]
+
+
+def _documented_report() -> dict[str, object]:
+    """Return the example drive-check report in docs/architecture.md.
+
+    Returns:
+        The parsed JSON example, so a key the code adds or drops fails the
+        contract test until the docs change too.
+    """
+    section = _architecture_section()
+    start = section.index("```json\n") + len("```json\n")
+    end = section.index("```", start)
+    report = json.loads(section[start:end])
+    if not report["crates"] or not report["findings"]:
+        raise AssertionError("The documented example needs a crate row and a finding.")
+    return report
+
+
+def _documented_error_keys() -> set[str]:
+    """Return the error-row keys named in docs/architecture.md.
+
+    Returns:
+        The backticked names in the sentence "An error row has ...".
+    """
+    section = _architecture_section()
+    start = section.index("An error row has ")
+    sentence = section[start : section.index(".", start)]
+    keys = set(re.findall(r"`([a-z_]+)`", sentence))
+    if not keys:
+        raise AssertionError("docs/architecture.md does not name the error-row keys.")
+    return keys
 
 
 def _stat_size(result: os.stat_result, size: int) -> os.stat_result:
