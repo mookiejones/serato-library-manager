@@ -203,6 +203,8 @@ export interface FileEntry {
   in_library?: boolean;
   missing?: boolean;
   detail?: string;
+  /** Present on a name search. Higher is a closer match. */
+  score?: number;
 }
 
 export interface FileRoot {
@@ -246,6 +248,8 @@ export interface FilesPayload {
   path?: string;
   parent?: string | null;
   entries?: FileEntry[];
+  search?: boolean;
+  query?: string;
   roots?: FileRoot[];
   root?: FileRoot | null;
   breadcrumb?: FileCrumb[];

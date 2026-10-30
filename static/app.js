@@ -102,7 +102,7 @@
     const available = () => container.clientWidth - handle.offsetWidth;
     const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
     const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
-    function paint2() {
+    function paint3() {
       if (current == null) container.style.removeProperty(property);
       else container.style.setProperty(property, `${fitted(current)}px`);
       const room = available();
@@ -112,7 +112,7 @@
     }
     function move(width) {
       current = fitted(width);
-      paint2();
+      paint3();
     }
     handle.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -154,18 +154,49 @@
     });
     handle.addEventListener("dblclick", () => {
       current = null;
-      paint2();
+      paint3();
       onCommit(null);
     });
-    paint2();
+    paint3();
     return {
       set(width) {
         current = width == null ? null : Math.round(width);
-        paint2();
+        paint3();
       },
       width: () => current,
-      refit: paint2
+      refit: paint3
     };
+  }
+
+  // src/copy.ts
+  var copy = {
+    shortcutsTitle: "Keyboard shortcuts",
+    shortcutsIntro: "These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.",
+    shortcutsClose: "Close",
+    openShortcuts: "Shortcuts",
+    playNote: "Space and the left and right arrows play or move through a track once playback is available. Until then, they do nothing.",
+    quickOpenTitle: "Find a track or file",
+    quickOpenLabel: "Name",
+    quickOpenPlaceholder: "Track or file name",
+    quickOpenEmpty: "Type a track or file name.",
+    quickOpenSearching: "Searching files…",
+    quickOpenFileError: "Files on disk could not be searched. Track matches are still listed.",
+    quickOpenRetry: "Try again",
+    quickOpenNone: "No tracks or files match “{query}”.",
+    quickOpenTruncated: "Some files were not searched. Type more of the name.",
+    quickOpenClose: "Close",
+    quickOpenTrack: "Track",
+    quickOpenFile: "File",
+    filesSearchLabel: "Search files",
+    filesSearchPlaceholder: "Search files",
+    filesSearching: "Searching files…",
+    filesNoMatches: "No files match “{query}”.",
+    filesTruncated: "Some matching files are not listed. Type more of the name.",
+    filesSearchResults: "Search results",
+    snapshotsNoSearch: "Snapshots has no search. Press Ctrl+K to find a track or a file."
+  };
+  function fill(template, params) {
+    return template.replace(/\{(\w+)\}/g, (_match, name) => params[name] ?? "");
   }
 
   // src/state.ts
@@ -237,6 +268,8 @@
     filesBreadcrumb: [],
     filesElsewhere: false,
     filesActive: 0,
+    filesQuery: "",
+    filesSearching: false,
     snapshots: [],
     snapshotLoading: false,
     snapshotError: "",
@@ -591,6 +624,16 @@
       rows.append(button);
     }
   }
+  function moveTrackList(delta) {
+    moveSelection(delta);
+  }
+  function openTrackList() {
+    const view = state.view || [];
+    const current = view.find((track) => track.id === state.selectedId) ?? view[0];
+    if (!current) return;
+    if (current.entry) bridge.selectEntry(current.id);
+    else void bridge.selectTrack(current.id);
+  }
   function moveSelection(delta) {
     const view = state.view || [];
     const index = view.findIndex((track) => track.id === state.selectedId);
@@ -829,8 +872,8 @@
   }
   function renderCrates() {
     const scroll = el("crate-list").scrollTop;
-    const active = document.activeElement;
-    const restore = el("crate-list").contains(active) ? active.closest(".crate-row")?.querySelector(".crate")?.dataset.id ?? null : null;
+    const active2 = document.activeElement;
+    const restore = el("crate-list").contains(active2) ? active2.closest(".crate-row")?.querySelector(".crate")?.dataset.id ?? null : null;
     const terms = queryTerms();
     const matched = terms.length ? new Set(state.tracks.filter((track) => matchesQuery(track, terms)).map((track) => track.id)) : null;
     const crates = visibleCrates();
@@ -1407,20 +1450,20 @@
     const heading = document.createElement("h3");
     heading.textContent = "Other copies";
     section.append(heading);
-    for (const copy of copies) {
+    for (const copy2 of copies) {
       const row = document.createElement("div");
       row.className = "copy-row";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "text-button";
-      button.textContent = copy.file || `Track ${copy.id}`;
-      button.addEventListener("click", () => selectTrack(copy.id));
+      button.textContent = copy2.file || `Track ${copy2.id}`;
+      button.addEventListener("click", () => selectTrack(copy2.id));
       const rate = document.createElement("span");
-      rate.textContent = copy.bitrate == null ? "" : String(copy.bitrate);
+      rate.textContent = copy2.bitrate == null ? "" : String(copy2.bitrate);
       const plays = document.createElement("span");
-      plays.textContent = copy.play_count == null ? "" : String(copy.play_count);
+      plays.textContent = copy2.play_count == null ? "" : String(copy2.play_count);
       const crates = document.createElement("span");
-      crates.textContent = copy.missing ? "missing" : copy.crates || "";
+      crates.textContent = copy2.missing ? "missing" : copy2.crates || "";
       row.append(button, rate, plays, crates);
       section.append(row);
     }
@@ -1558,7 +1601,7 @@
     form.className = "related-form";
     form.hidden = true;
     block.append(label, results, form);
-    const paint2 = () => {
+    const paint3 = () => {
       results.replaceChildren();
       form.hidden = true;
       form.replaceChildren();
@@ -1570,15 +1613,15 @@
         results.append(hint);
         return;
       }
-      const hits = state.tracks.filter((item) => item.id !== track.id && matchesQuery(item, terms)).slice(0, 8);
-      if (!hits.length) {
+      const hits2 = state.tracks.filter((item) => item.id !== track.id && matchesQuery(item, terms)).slice(0, 8);
+      if (!hits2.length) {
         const empty = document.createElement("li");
         empty.className = "related-meta";
         empty.textContent = "No tracks match.";
         results.append(empty);
         return;
       }
-      for (const hit of hits) {
+      for (const hit of hits2) {
         const item = document.createElement("li");
         const choose = document.createElement("button");
         choose.type = "button";
@@ -1589,8 +1632,8 @@
         results.append(item);
       }
     };
-    input.addEventListener("input", paint2);
-    paint2();
+    input.addEventListener("input", paint3);
+    paint3();
     return block;
   }
   function relatedLinkForm(track, section, form, hit, query) {
@@ -2033,14 +2076,14 @@
     const library = await readJSONOr(response, {});
     if (!response.ok) throw new Error(library.error || `Could not read the library (${response.status})`);
     const selected = state.selectedId;
-    const active = state.activeCrate;
+    const active2 = state.activeCrate;
     state.tracks = library.tracks;
     state.byId = new Map(library.tracks.map((track) => [track.id, track]));
     state.crates = library.crates;
     state.rootId = library.root_id;
     state.crateTracks = new Map(library.crates.map((crate) => [crate.id, new Set(crate.tracks)]));
     state.expanded = new Set(library.crates.filter((crate) => crate.expanded).map((crate) => crate.id));
-    state.activeCrate = active === "all" || library.crates.some((crate) => crate.id === active) ? active : "all";
+    state.activeCrate = active2 === "all" || library.crates.some((crate) => crate.id === active2) ? active2 : "all";
     state.selectedId = selected;
     if (state.duplicateSpace !== state.space) {
       state.duplicateIds = null;
@@ -2101,8 +2144,15 @@
     renderFiles();
   }
   var filesRequest = 0;
+  var FILES_SEARCH_MS = 200;
+  var filesSearchTimer = 0;
   var FILE_OVERSCAN = 8;
   async function loadFolder(path, options = {}) {
+    window.clearTimeout(filesSearchTimer);
+    state.filesQuery = "";
+    state.filesSearching = false;
+    const searchField = document.getElementById("files-search");
+    if (searchField instanceof HTMLInputElement) searchField.value = "";
     const elsewhere = options.elsewhere === true;
     const refresh = options.refresh === true;
     const atRoots = path === "" && !elsewhere;
@@ -2162,6 +2212,38 @@
     if (payload.serato) applyStatus(payload.serato);
     renderFiles();
   }
+  async function searchFiles(query) {
+    const token = ++filesRequest;
+    const scope = state.filesAtRoots ? "" : state.filesPath;
+    const elsewhere = state.filesElsewhere && !state.filesAtRoots;
+    state.filesLoading = true;
+    state.filesError = "";
+    state.filesSearching = true;
+    state.filesQuery = query;
+    renderFiles();
+    const params = new URLSearchParams();
+    params.set("q", query);
+    if (scope) params.set("path", scope);
+    if (elsewhere) params.set("elsewhere", "1");
+    const response = await fetch(`/api/files?${params.toString()}`);
+    const payload = await readJSONOr(response, {});
+    if (token !== filesRequest) return;
+    if (!response.ok) throw new Error(payload.error || "Files could not be searched.");
+    const entries = Array.isArray(payload.entries) ? payload.entries.filter(isListedFile) : [];
+    state.filesEntries = entries;
+    state.filesTruncated = Boolean(payload.truncated);
+    state.filesLoading = false;
+    state.filesSearching = true;
+    state.filesActive = 0;
+    state.filesSelected = /* @__PURE__ */ new Set();
+    el("files-list").scrollTop = 0;
+    renderFiles();
+  }
+  function isListedFile(value) {
+    if (!value || typeof value !== "object") return false;
+    const row = value;
+    return typeof row.name === "string" && typeof row.path === "string" && typeof row.kind === "string";
+  }
   function renderFiles() {
     if (state.mode !== "files") return;
     const pick = el("files-pick");
@@ -2178,7 +2260,7 @@
     if (state.filesLoading) notes.push(state.filesAtRoots ? "Reading music folders." : "Reading this folder.");
     if (state.filesError) notes.push(state.filesError);
     if (state.filesMessage) notes.push(state.filesMessage);
-    if (state.filesTruncated) notes.push("Some files are not listed.");
+    if (state.filesTruncated) notes.push(state.filesSearching ? copy.filesTruncated : "Some files are not listed.");
     el("files-status").textContent = notes.join(" ");
     const scroll = el("files-list").scrollTop;
     paintFileWindow();
@@ -2236,9 +2318,11 @@
     return [{ name: "Music folders", path: "" }];
   }
   function filesRowHeight() {
+    if (state.filesSearching) return FILE_ROW;
     return state.filesAtRoots ? ROOT_ROW : FILE_ROW;
   }
   function browserRows() {
+    if (state.filesSearching) return state.filesEntries;
     if (state.filesAtRoots) {
       return state.filesRoots.map((root) => {
         const entry = {
@@ -2260,9 +2344,13 @@
     const list = el("files-list");
     const rows2 = browserRows();
     list.setAttribute("aria-busy", String(state.filesLoading));
-    list.setAttribute("aria-label", state.filesAtRoots ? "Music folders" : "Folder contents");
+    list.setAttribute(
+      "aria-label",
+      state.filesSearching ? copy.filesSearchResults : state.filesAtRoots ? "Music folders" : "Folder contents"
+    );
     if (state.filesLoading && !rows2.length) {
-      list.replaceChildren(fileNote(state.filesAtRoots ? "Reading music folders." : "Reading this folder."));
+      const reading = state.filesSearching ? copy.filesSearching : state.filesAtRoots ? "Reading music folders." : "Reading this folder.";
+      list.replaceChildren(fileNote(reading));
       list.tabIndex = 0;
       return;
     }
@@ -2277,7 +2365,8 @@
       return;
     }
     if (!rows2.length) {
-      list.replaceChildren(fileNote("This folder is empty."));
+      const empty = state.filesSearching ? fill(copy.filesNoMatches, { query: state.filesQuery }) : "This folder is empty.";
+      list.replaceChildren(fileNote(empty));
       list.tabIndex = 0;
       return;
     }
@@ -2329,15 +2418,15 @@
     box.className = "files-empty-state";
     const heading = document.createElement("h2");
     heading.textContent = "No music folders yet";
-    const copy = document.createElement("p");
-    copy.textContent = "Setup finds the folders Serato uses for your music.";
+    const copy2 = document.createElement("p");
+    copy2.textContent = "Setup finds the folders Serato uses for your music.";
     const button = document.createElement("button");
     button.type = "button";
     button.id = "files-run-setup";
     button.className = "files-primary";
     button.textContent = "Run setup";
     button.addEventListener("click", () => bridge.openSetup());
-    box.append(heading, copy, button);
+    box.append(heading, copy2, button);
     return box;
   }
   function focusFilesIndex(index) {
@@ -2396,7 +2485,7 @@
   function fileRow(entry, index) {
     const row = document.createElement("div");
     row.className = "files-row";
-    if (entry.detail) row.classList.add("is-root");
+    if (entry.detail && (entry.kind === "folder" || entry.kind === "drive")) row.classList.add("is-root");
     if (entry.missing) row.classList.add("is-missing");
     if (index === state.filesActive) row.classList.add("is-active");
     row.setAttribute("role", "listitem");
@@ -2409,21 +2498,27 @@
       button.id = `files-item-${index}`;
       button.tabIndex = index === state.filesActive ? 0 : -1;
       if (entry.kind === "drive" || entry.kind === "folder") button.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
-      if (entry.detail) {
-        const copy = document.createElement("span");
-        copy.className = "files-root-copy";
+      if (entry.detail && (entry.kind === "folder" || entry.kind === "drive")) {
+        const copy2 = document.createElement("span");
+        copy2.className = "files-root-copy";
         const label2 = document.createElement("span");
         label2.className = "files-root-label";
         label2.textContent = entry.name;
         const detail = document.createElement("span");
         detail.className = "files-root-detail";
         detail.textContent = entry.detail;
-        copy.append(label2, detail);
-        button.append(copy);
+        copy2.append(label2, detail);
+        button.append(copy2);
       } else {
         const name2 = document.createElement("span");
         name2.textContent = entry.name;
         button.append(name2);
+        if (entry.detail) {
+          const detail = document.createElement("span");
+          detail.className = "files-match-detail";
+          detail.textContent = entry.detail;
+          button.append(detail);
+        }
       }
       button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
       if (entry.missing) {
@@ -2474,9 +2569,17 @@
       renderFiles();
     });
     const name = document.createElement("span");
+    name.className = "files-name";
     name.textContent = entry.name;
-    name.title = entry.name;
+    name.title = entry.path || entry.name;
     label.append(box, name);
+    if (entry.detail) {
+      const detail = document.createElement("span");
+      detail.className = "files-match-detail";
+      detail.textContent = entry.detail;
+      detail.title = entry.detail;
+      label.append(detail);
+    }
     if (entry.in_library) {
       const badge = document.createElement("span");
       badge.className = "files-badge";
@@ -2515,6 +2618,19 @@
     const record = value;
     return typeof record.name === "string" && typeof record.path === "string";
   }
+  function moveFileList(delta) {
+    if (!browserRows().length) return;
+    focusFilesIndex(state.filesActive + delta);
+  }
+  function openFileList() {
+    if (!browserRows().length) return;
+    activateFilesIndex(state.filesActive);
+  }
+  function focusFileByPath(path) {
+    const index = browserRows().findIndex((entry) => entry.path === path);
+    if (index < 0) return;
+    focusFilesIndex(index);
+  }
   function selectedFiles() {
     return state.filesEntries.filter((entry) => entry.kind === "file" && state.filesSelected.has(entry.path));
   }
@@ -2523,6 +2639,27 @@
       if (state.mode === "files") paintFileWindow();
     });
     el("files-list").addEventListener("keydown", onFilesKey);
+    el("files-search").addEventListener("input", () => {
+      window.clearTimeout(filesSearchTimer);
+      const value = el("files-search").value;
+      state.filesQuery = value;
+      if (!value.trim()) {
+        if (state.filesAtRoots && !state.filesPath) {
+          state.filesSearching = false;
+          state.filesEntries = [];
+          state.filesError = "";
+          state.filesTruncated = false;
+          state.filesLoading = false;
+          renderFiles();
+          return;
+        }
+        loadFolder(state.filesPath, { elsewhere: state.filesElsewhere && Boolean(state.filesPath) }).catch((error) => failFiles(error));
+        return;
+      }
+      filesSearchTimer = window.setTimeout(() => {
+        searchFiles(value.trim()).catch((error) => failFiles(error));
+      }, FILES_SEARCH_MS);
+    });
     el("search").addEventListener("input", () => {
       state.query = el("search").value;
       el("list").scrollTop = 0;
@@ -2969,12 +3106,12 @@
     el("consent-dialog").showModal();
     el("consent-decline").focus();
   }
-  function openWizard(force, returnFocus) {
+  function openWizard(force, returnFocus3) {
     const wizard = globalThis.SeratoWizard;
     if (!wizard || typeof wizard.open !== "function") return false;
     const options = {
       force,
-      returnFocus,
+      returnFocus: returnFocus3,
       onSettings(payload) {
         applyPrivacy(payload);
       },
@@ -3364,6 +3501,724 @@
   }
   bridge.openSetup = openSetup;
 
+  // src/fuzzy.ts
+  var BOUNDARY = /[ ._/\-\\]/;
+  function fuzzyScore(needle, haystack) {
+    const query = needle.toLocaleLowerCase();
+    const text = haystack.toLocaleLowerCase();
+    if (!query) return null;
+    let score = 0;
+    let previous = -2;
+    let from = 0;
+    for (const letter of query) {
+      const found = text.indexOf(letter, from);
+      if (found < 0) return null;
+      score += 8;
+      if (found === previous + 1) score += 16;
+      if (found === 0 || BOUNDARY.test(text.charAt(found - 1))) score += 12;
+      previous = found;
+      from = found + 1;
+    }
+    if (text.includes(query)) score += 40;
+    if (text.startsWith(query)) score += 30;
+    score -= Math.floor(Math.max(0, text.length - query.length) / 4);
+    return score;
+  }
+  function scoreQuery(query, name, parentName = "") {
+    const terms = query.trim().split(/\s+/).filter(Boolean);
+    if (!terms.length) return null;
+    let total = 0;
+    for (const term of terms) {
+      const nameScore = fuzzyScore(term, name);
+      if (nameScore != null) {
+        total += nameScore + 20;
+        continue;
+      }
+      if (!parentName) return null;
+      const parentScore = fuzzyScore(term, parentName);
+      if (parentScore == null) return null;
+      total += parentScore;
+    }
+    return total;
+  }
+
+  // src/quick-open.ts
+  var QUICK_OPEN_MS = 200;
+  var LIMIT = 8;
+  var returnFocus = null;
+  var timer = 0;
+  var requestToken = 0;
+  var hits = [];
+  var active = 0;
+  var phase = "idle";
+  var truncated = false;
+  var pendingQuery = "";
+  function parentDirectory(path) {
+    const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+    if (slash < 0) return path;
+    const parent = path.slice(0, slash);
+    if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
+    if (parent === "") return path.slice(0, slash + 1);
+    return parent;
+  }
+  function quickOpenIsOpen() {
+    return el("quick-open").open;
+  }
+  function openQuickOpen() {
+    const dialog = el("quick-open");
+    if (dialog.open) return;
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    pendingQuery = "";
+    hits = [];
+    active = 0;
+    phase = "idle";
+    truncated = false;
+    window.clearTimeout(timer);
+    el("quick-open-query").value = "";
+    el("quick-open-title").textContent = copy.quickOpenTitle;
+    el("quick-open-label").textContent = copy.quickOpenLabel;
+    el("quick-open-query").placeholder = copy.quickOpenPlaceholder;
+    el("quick-open-close").textContent = copy.quickOpenClose;
+    el("quick-open-retry").textContent = copy.quickOpenRetry;
+    paint();
+    dialog.showModal();
+    el("quick-open-query").focus();
+  }
+  function closeQuickOpen() {
+    const dialog = el("quick-open");
+    if (dialog.open) dialog.close();
+  }
+  function wireQuickOpen() {
+    const dialog = el("quick-open");
+    dialog.addEventListener("keydown", onDialogKey);
+    dialog.addEventListener("close", () => {
+      window.clearTimeout(timer);
+      const node = returnFocus;
+      returnFocus = null;
+      if (node && node.isConnected) node.focus();
+    });
+    el("quick-open-query").addEventListener("input", () => schedule());
+    el("quick-open-close").addEventListener("click", () => closeQuickOpen());
+    el("quick-open-retry").addEventListener("click", () => {
+      const query = el("quick-open-query").value.trim();
+      if (query) void loadFiles(query, trackHits(query));
+    });
+  }
+  function onDialogKey(event) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+    if (!hits.length && event.key !== "Enter") return;
+    event.preventDefault();
+    if (event.key === "ArrowDown") active = Math.min(hits.length - 1, active + 1);
+    else if (event.key === "ArrowUp") active = Math.max(0, active - 1);
+    else {
+      const chosen = hits[active];
+      if (chosen) void activate(chosen);
+    }
+    if (event.key !== "Enter") paint();
+  }
+  function schedule() {
+    window.clearTimeout(timer);
+    const query = el("quick-open-query").value;
+    pendingQuery = query;
+    const tracks = trackHits(query);
+    hits = tracks;
+    active = 0;
+    truncated = false;
+    if (!query.trim()) {
+      phase = "idle";
+      requestToken += 1;
+      paint();
+      return;
+    }
+    phase = "loading";
+    paint();
+    timer = window.setTimeout(() => {
+      void loadFiles(query.trim(), tracks);
+    }, QUICK_OPEN_MS);
+  }
+  async function loadFiles(query, tracks) {
+    const token = ++requestToken;
+    phase = "loading";
+    try {
+      const response = await fetch(`/api/files?q=${encodeURIComponent(query)}`);
+      const payload = await readJSONOr(response, {});
+      if (token !== requestToken) return;
+      if (!response.ok) throw new Error(payload.error || copy.quickOpenFileError);
+      const files = fileHits(payload);
+      hits = mergeHits(tracks, files);
+      truncated = Boolean(payload.truncated);
+      phase = "ready";
+      if (active >= hits.length) active = Math.max(0, hits.length - 1);
+      paint();
+    } catch {
+      if (token !== requestToken) return;
+      hits = tracks;
+      phase = "error";
+      paint();
+    }
+  }
+  function trackHits(query) {
+    const text = query.trim();
+    if (!text) return [];
+    const found = [];
+    for (const track of state.tracks) {
+      const hit = scoreTrack(track, text);
+      if (hit) found.push(hit);
+    }
+    found.sort(byScore);
+    return found.slice(0, LIMIT);
+  }
+  function scoreTrack(track, query) {
+    const title = track.name || "Untitled";
+    const artist = track.artist ?? "";
+    const album = track.album ?? "";
+    const file = track.file ?? "";
+    const score = scoreQuery(query, `${title} ${artist} ${album} ${file}`);
+    if (score == null) return null;
+    const detail = [artist, album].filter((part) => part !== "").join(" · ");
+    return { kind: "track", key: `track:${track.id}`, title, detail, score, trackId: track.id };
+  }
+  function fileHits(payload) {
+    const rows2 = Array.isArray(payload.entries) ? payload.entries : [];
+    const found = [];
+    for (const entry of rows2) {
+      if (!isFileEntry(entry)) continue;
+      const score = typeof entry.score === "number" ? entry.score : 0;
+      found.push({
+        kind: "file",
+        key: `file:${entry.path}`,
+        title: entry.name,
+        detail: entry.detail || entry.path,
+        score,
+        path: entry.path
+      });
+    }
+    found.sort(byScore);
+    return found.slice(0, LIMIT);
+  }
+  function isFileEntry(value) {
+    if (!value || typeof value !== "object") return false;
+    const row = value;
+    return typeof row.name === "string" && typeof row.path === "string" && typeof row.kind === "string";
+  }
+  function mergeHits(tracks, files) {
+    return [...tracks, ...files].sort(byScore).slice(0, LIMIT * 2);
+  }
+  function byScore(left, right) {
+    return right.score - left.score || left.title.localeCompare(right.title);
+  }
+  async function activate(hit) {
+    closeQuickOpen();
+    if (hit.kind === "track") {
+      if (state.mode === "files" || state.mode === "snapshots" || state.mode === "history") setMode("crates");
+      selectCrate("all");
+      await selectTrack(hit.trackId);
+      const index = state.view.findIndex((row) => row.id === hit.trackId);
+      if (index >= 0) el("list").scrollTop = index * ROW;
+      return;
+    }
+    setMode("files");
+    await loadFolder(parentDirectory(hit.path));
+    focusFileByPath(hit.path);
+  }
+  function paint() {
+    const status = el("quick-open-status");
+    const list = el("quick-open-list");
+    const retry = el("quick-open-retry");
+    const query = pendingQuery.trim();
+    retry.hidden = phase !== "error";
+    list.replaceChildren();
+    if (!query) status.textContent = copy.quickOpenEmpty;
+    else if (phase === "loading") status.textContent = copy.quickOpenSearching;
+    else if (phase === "error") status.textContent = copy.quickOpenFileError;
+    else if (!hits.length) status.textContent = fill(copy.quickOpenNone, { query });
+    else status.textContent = truncated ? copy.quickOpenTruncated : `${hits.length.toLocaleString()} matches`;
+    hits.forEach((hit, index) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "quick-open-option";
+      button.id = `quick-open-option-${index}`;
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(index === active));
+      button.tabIndex = -1;
+      if (index === active) button.classList.add("is-active");
+      const kind = document.createElement("span");
+      kind.className = "quick-open-kind";
+      kind.textContent = hit.kind === "track" ? copy.quickOpenTrack : copy.quickOpenFile;
+      const title = document.createElement("span");
+      title.className = "quick-open-name";
+      title.textContent = hit.title;
+      title.title = hit.title;
+      const detail = document.createElement("span");
+      detail.className = "quick-open-detail";
+      detail.textContent = hit.detail;
+      detail.title = hit.detail;
+      button.append(kind, title, detail);
+      button.addEventListener("click", () => {
+        active = index;
+        void activate(hit);
+      });
+      item.append(button);
+      list.append(item);
+    });
+    const field = el("quick-open-query");
+    const current = hits[active];
+    if (current) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
+    else field.removeAttribute("aria-activedescendant");
+    const chosen = list.querySelector(".is-active");
+    if (chosen && typeof chosen.scrollIntoView === "function") chosen.scrollIntoView({ block: "nearest" });
+  }
+
+  // src/shortcuts.ts
+  var SEEK_SECONDS = 5;
+  var SHORTCUT_DEFS = [
+    {
+      id: "focus-search",
+      label: "Focus search",
+      group: "Find",
+      keys: [{ key: "f", mod: true }, { key: "/" }],
+      whileTyping: false
+    },
+    {
+      id: "quick-open",
+      label: "Find a track or file",
+      group: "Find",
+      keys: [{ key: "k", mod: true }],
+      whileTyping: false
+    },
+    {
+      id: "dismiss",
+      label: "Close or clear search",
+      group: "Find",
+      keys: [{ key: "Escape" }],
+      whileTyping: true
+    },
+    {
+      id: "cheat-sheet",
+      label: "Show shortcuts",
+      group: "Find",
+      keys: [{ key: "?" }],
+      whileTyping: false
+    },
+    {
+      id: "list-previous",
+      label: "Previous row",
+      group: "Lists",
+      keys: [{ key: "ArrowUp" }],
+      whileTyping: false
+    },
+    {
+      id: "list-next",
+      label: "Next row",
+      group: "Lists",
+      keys: [{ key: "ArrowDown" }],
+      whileTyping: false
+    },
+    {
+      id: "list-open",
+      label: "Open the row",
+      group: "Lists",
+      keys: [{ key: "Enter" }],
+      whileTyping: false
+    },
+    {
+      id: "play-pause",
+      label: "Play or pause",
+      group: "Play",
+      keys: [{ key: " " }],
+      whileTyping: false
+    },
+    {
+      id: "seek-back",
+      label: "Back 5 seconds",
+      group: "Play",
+      keys: [{ key: "ArrowLeft" }],
+      whileTyping: false
+    },
+    {
+      id: "seek-forward",
+      label: "Forward 5 seconds",
+      group: "Play",
+      keys: [{ key: "ArrowRight" }],
+      whileTyping: false
+    },
+    {
+      id: "view-library",
+      label: "Library",
+      group: "Views",
+      keys: [{ key: "1", mod: true }],
+      whileTyping: false
+    },
+    {
+      id: "view-crates",
+      label: "Crates",
+      group: "Views",
+      keys: [{ key: "2", mod: true }],
+      whileTyping: false
+    },
+    {
+      id: "view-files",
+      label: "Files",
+      group: "Views",
+      keys: [{ key: "3", mod: true }],
+      whileTyping: false
+    },
+    {
+      id: "view-history",
+      label: "History",
+      group: "Views",
+      keys: [{ key: "4", mod: true }],
+      whileTyping: false
+    },
+    {
+      id: "view-snapshots",
+      label: "Snapshots",
+      group: "Views",
+      keys: [{ key: "5", mod: true }],
+      whileTyping: false
+    }
+  ];
+  var SHORTCUTS = SHORTCUT_DEFS;
+  var player = null;
+  var returnFocus2 = null;
+  var snapshotCursor = 0;
+  function chordMatches(chord, event) {
+    if (event.altKey) return false;
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod !== Boolean(chord.mod)) return false;
+    if (chord.key === "?") return event.key === "?" && !mod;
+    if (event.shiftKey !== Boolean(chord.shift)) return false;
+    if (chord.key === " ") return event.key === " ";
+    return event.key === chord.key || event.key.toLowerCase() === chord.key.toLowerCase();
+  }
+  function matchShortcut(event) {
+    for (const shortcut of SHORTCUTS) {
+      if (shortcut.keys.some((chord) => chordMatches(chord, event))) return shortcut;
+    }
+    return null;
+  }
+  function chordLabel(chord) {
+    const names = {
+      Escape: "Esc",
+      " ": "Space",
+      ArrowLeft: "Left arrow",
+      ArrowRight: "Right arrow",
+      ArrowUp: "Up arrow",
+      ArrowDown: "Down arrow",
+      Enter: "Enter"
+    };
+    const named = names[chord.key];
+    if (named) return named;
+    const key = chord.key.length === 1 ? chord.key.toUpperCase() : chord.key;
+    return chord.mod ? `Ctrl/Cmd+${key}` : key;
+  }
+  function isTypingTarget(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.isContentEditable) return true;
+    const field = target.closest("input, textarea, select");
+    if (!(field instanceof HTMLElement)) return false;
+    if (field instanceof HTMLInputElement) {
+      const inert = /* @__PURE__ */ new Set(["button", "checkbox", "radio", "file", "range", "color", "submit", "reset"]);
+      if (inert.has(field.type)) return false;
+    }
+    return true;
+  }
+  function openCheatSheet() {
+    const dialog = el("shortcuts-dialog");
+    if (dialog.open) return;
+    rememberFocus();
+    renderCheatSheet();
+    dialog.showModal();
+    el("shortcuts-title").tabIndex = -1;
+    el("shortcuts-title").focus();
+  }
+  function wireShortcuts() {
+    document.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    el("open-shortcuts").addEventListener("click", () => openCheatSheet());
+    el("shortcuts-close").addEventListener("click", () => el("shortcuts-dialog").close());
+    el("shortcuts-dialog").addEventListener("close", () => restoreFocus());
+    wireQuickOpen();
+  }
+  function onKey(event) {
+    if (event.isComposing || event.defaultPrevented) return;
+    const shortcut = matchShortcut(event);
+    if (!shortcut) return;
+    if (isTypingTarget(event.target) && !shortcut.whileTyping) return;
+    if (shortcut.id !== "dismiss" && topDialog()) return;
+    if (skipsListKey(shortcut.id, event.target)) return;
+    if (event.repeat && !repeats(shortcut.id)) return;
+    runShortcut(shortcut.id, event);
+  }
+  function repeats(id) {
+    return id === "list-previous" || id === "list-next" || id === "seek-back" || id === "seek-forward";
+  }
+  function skipsListKey(id, target) {
+    if (!(target instanceof HTMLElement)) return false;
+    if (id === "play-pause" && target.closest("button, a, summary, input, select, textarea, [role='button']")) return true;
+    if (id === "list-open" && target.closest("button, a, summary, textarea, select")) return true;
+    return false;
+  }
+  function topDialog() {
+    const open = [...document.querySelectorAll("dialog")].filter(
+      (node) => node instanceof HTMLDialogElement && node.open
+    );
+    return open.at(-1) ?? null;
+  }
+  var HANDLERS = {
+    "focus-search": (event) => {
+      event.preventDefault();
+      focusCurrentSearch();
+    },
+    "quick-open": (event) => {
+      event.preventDefault();
+      openQuickOpen();
+    },
+    dismiss: (event) => {
+      dismiss(event);
+    },
+    "cheat-sheet": (event) => {
+      event.preventDefault();
+      openCheatSheet();
+    },
+    "list-previous": (event) => {
+      event.preventDefault();
+      moveActiveList(-1);
+    },
+    "list-next": (event) => {
+      event.preventDefault();
+      moveActiveList(1);
+    },
+    "list-open": (event) => {
+      event.preventDefault();
+      openActiveList();
+    },
+    "play-pause": (event) => {
+      if (!player) return;
+      event.preventDefault();
+      player.togglePlayPause();
+    },
+    "seek-back": (event) => {
+      if (!player) return;
+      event.preventDefault();
+      player.seekBy(-SEEK_SECONDS);
+    },
+    "seek-forward": (event) => {
+      if (!player) return;
+      event.preventDefault();
+      player.seekBy(SEEK_SECONDS);
+    },
+    "view-library": (event) => {
+      event.preventDefault();
+      showLibrary();
+    },
+    "view-crates": (event) => {
+      event.preventDefault();
+      showCrates();
+    },
+    "view-files": (event) => {
+      event.preventDefault();
+      setMode("files");
+      el("files-list").focus();
+    },
+    "view-history": (event) => {
+      event.preventDefault();
+      setMode("history");
+      el("list").focus();
+    },
+    "view-snapshots": (event) => {
+      event.preventDefault();
+      setMode("snapshots");
+      snapshotCursor = 0;
+      el("snapshots-list").focus();
+    }
+  };
+  function runShortcut(id, event) {
+    const handler = HANDLERS[id];
+    handler(event);
+  }
+  function focusCurrentSearch() {
+    if (state.mode === "files") {
+      const field2 = el("files-search");
+      field2.focus();
+      field2.select();
+      return;
+    }
+    if (state.mode === "snapshots") {
+      el("snapshots-status").textContent = copy.snapshotsNoSearch;
+      return;
+    }
+    const field = el("search");
+    field.focus();
+    field.select();
+  }
+  function showLibrary() {
+    setMode("crates");
+    selectCrate("all");
+    el("list").focus();
+  }
+  function showCrates() {
+    setMode("crates");
+    const first = el("crate-list").querySelector(".crate");
+    if (first) focusCrateItem(first);
+    else el("crate-list").focus();
+  }
+  function moveActiveList(delta) {
+    if (quickOpenIsOpen()) return;
+    if (state.mode === "files") {
+      moveFileList(delta);
+      return;
+    }
+    if (state.mode === "snapshots") {
+      moveSnapshots(delta);
+      return;
+    }
+    moveTrackList(delta);
+  }
+  function openActiveList() {
+    if (quickOpenIsOpen()) return;
+    if (state.mode === "files") {
+      openFileList();
+      return;
+    }
+    if (state.mode === "snapshots") {
+      openSnapshot();
+      return;
+    }
+    openTrackList();
+  }
+  function moveSnapshots(delta) {
+    const cards = snapshotCards();
+    if (!cards.length) return;
+    snapshotCursor = Math.max(0, Math.min(cards.length - 1, snapshotCursor + delta));
+    const card = cards[snapshotCursor];
+    card?.querySelector("button")?.focus();
+  }
+  function openSnapshot() {
+    const cards = snapshotCards();
+    const card = cards[snapshotCursor] ?? cards[0];
+    card?.querySelector("button")?.click();
+  }
+  function snapshotCards() {
+    return [...el("snapshots-list").querySelectorAll(".snapshot-card")];
+  }
+  function dismiss(event) {
+    const dialog = topDialog();
+    if (dialog) {
+      if (dialog.id === "quick-open") {
+        event.preventDefault();
+        closeQuickOpen();
+        return;
+      }
+      if (dialog.id === "shortcuts-dialog") {
+        event.preventDefault();
+        dialog.close();
+        return;
+      }
+      return;
+    }
+    const active2 = document.activeElement;
+    if (active2 instanceof HTMLInputElement && isSearchField(active2)) {
+      event.preventDefault();
+      if (active2.value) replaceInput(active2, "");
+      else active2.blur();
+      return;
+    }
+    if (isTypingTarget(active2)) {
+      if (active2 instanceof HTMLElement) active2.blur();
+      return;
+    }
+    if (clearViewSearch()) event.preventDefault();
+  }
+  function isSearchField(field) {
+    return field.id === "search" || field.id === "crate-search" || field.id === "files-search" || field.id === "quick-open-query";
+  }
+  function clearViewSearch() {
+    if (state.mode === "files" && el("files-search").value) {
+      replaceInput(el("files-search"), "");
+      return true;
+    }
+    if (state.mode === "crates" && el("crate-search").value && !el("search").value) {
+      replaceInput(el("crate-search"), "");
+      return true;
+    }
+    if (el("search").value) {
+      replaceInput(el("search"), "");
+      return true;
+    }
+    if (el("crate-search").value) {
+      replaceInput(el("crate-search"), "");
+      return true;
+    }
+    return false;
+  }
+  function replaceInput(field, value) {
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function renderCheatSheet() {
+    el("shortcuts-title").textContent = copy.shortcutsTitle;
+    el("shortcuts-intro").textContent = copy.shortcutsIntro;
+    el("shortcuts-close").textContent = copy.shortcutsClose;
+    const body = el("shortcuts-body");
+    body.replaceChildren();
+    const groups = [];
+    for (const shortcut of SHORTCUTS) {
+      if (!groups.includes(shortcut.group)) groups.push(shortcut.group);
+    }
+    for (const group of groups) {
+      const heading = document.createElement("h3");
+      heading.textContent = group;
+      body.append(heading);
+      if (group === "Play") {
+        const note = document.createElement("p");
+        note.className = "dialog-note";
+        note.textContent = copy.playNote;
+        body.append(note);
+      }
+      const table = document.createElement("table");
+      table.className = "shortcut-table";
+      const head = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      const actionHead = document.createElement("th");
+      actionHead.scope = "col";
+      actionHead.textContent = "Action";
+      const keyHead = document.createElement("th");
+      keyHead.scope = "col";
+      keyHead.textContent = "Key";
+      headRow.append(actionHead, keyHead);
+      head.append(headRow);
+      const rows2 = document.createElement("tbody");
+      for (const shortcut of SHORTCUTS) {
+        if (shortcut.group !== group) continue;
+        const row = document.createElement("tr");
+        const action = document.createElement("th");
+        action.scope = "row";
+        action.textContent = shortcut.label;
+        const keys = document.createElement("td");
+        shortcut.keys.forEach((chord, index) => {
+          if (index > 0) keys.append(document.createTextNode(" or "));
+          const kbd = document.createElement("kbd");
+          kbd.textContent = chordLabel(chord);
+          keys.append(kbd);
+        });
+        row.append(action, keys);
+        rows2.append(row);
+      }
+      table.append(head, rows2);
+      body.append(table);
+    }
+  }
+  function rememberFocus() {
+    returnFocus2 = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  function restoreFocus() {
+    const node = returnFocus2;
+    returnFocus2 = null;
+    if (node && node.isConnected) node.focus();
+  }
+
   // src/version.ts
   var VERSION_UNAVAILABLE = "Version unavailable";
   var COPY_FAILED = "Couldn't copy the version.";
@@ -3386,7 +4241,7 @@
     if (!/^[0-9a-f]{7,40}$/.test(trimmed)) return null;
     return trimmed.slice(0, 7);
   }
-  function paint(label) {
+  function paint2(label) {
     const footer = el("app-version");
     const about = el("about-version");
     el("version-copy-status").textContent = "";
@@ -3410,9 +4265,9 @@
   }
   async function loadVersion() {
     try {
-      paint(versionLabel(await getVersion()));
+      paint2(versionLabel(await getVersion()));
     } catch {
-      paint(null);
+      paint2(null);
     }
   }
   async function copyVersion() {
@@ -3462,6 +4317,7 @@
   mountTrackList();
   wireLibrary();
   wireVirtualScroll();
+  wireShortcuts();
   wireDialogs();
   wireSnapshots();
   wireLayout();

@@ -1657,6 +1657,7 @@ class Handler(BaseHTTPRequestHandler):
                         query_text(query, "path", "") or "",
                         elsewhere=elsewhere,
                         refresh=refresh,
+                        query=query_text(query, "q", "") or "",
                     )
                 )
                 return

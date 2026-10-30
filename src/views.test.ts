@@ -61,6 +61,8 @@ function resetState(): void {
   state.filesBreadcrumb = [];
   state.filesElsewhere = false;
   state.filesActive = 0;
+  state.filesQuery = "";
+  state.filesSearching = false;
   state.view = [];
 }
 

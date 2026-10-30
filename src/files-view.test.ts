@@ -12,7 +12,7 @@ import { wireDialogs } from "./dialogs";
 import { libraryRootsFixture } from "./library-roots.fixture";
 import { FILE_ROW, state } from "./state";
 import { installPage } from "./test-page";
-import { renderFiles, wireLibrary } from "./views";
+import { FILES_SEARCH_MS, renderFiles, wireLibrary } from "./views";
 
 const fetchMock = vi.fn();
 
@@ -36,6 +36,8 @@ function resetFiles(): void {
   state.filesBreadcrumb = [];
   state.filesElsewhere = false;
   state.filesActive = 0;
+  state.filesQuery = "";
+  state.filesSearching = false;
 }
 
 function indexes(): string[] {
@@ -257,5 +259,36 @@ describe("files view", () => {
     expect(url).toContain("path=/music/crate/folder-05000");
     await vi.waitFor(() => expect(document.querySelector("#files-path")?.textContent).toContain("folder-05000"));
     expect(document.querySelector("#files-list")?.textContent).toContain("inside.mp3");
+  });
+
+  it("searches the open folder through q=", async () => {
+    vi.useFakeTimers();
+    try {
+      state.filesAtRoots = false;
+      state.filesPath = "/music/crate";
+      state.mode = "files";
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          search: true,
+          query: "house",
+          entries: [{ name: "House.mp3", kind: "file", path: "/music/crate/House.mp3", detail: "/music/crate", score: 5 }],
+          truncated: false,
+        }),
+      });
+      const field = document.querySelector<HTMLInputElement>("#files-search");
+      expect(field).toBeTruthy();
+      field!.value = "house";
+      field!.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(fetchMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(FILES_SEARCH_MS);
+      const url = String(fetchMock.mock.calls[0]?.[0]);
+      expect(url).toContain("q=house");
+      expect(url).toContain(encodeURIComponent("/music/crate"));
+      expect(document.querySelector("#files-list")?.textContent).toContain("House.mp3");
+      expect(document.querySelector(".files-match-detail")?.textContent).toBe("/music/crate");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

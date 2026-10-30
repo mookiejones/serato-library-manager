@@ -22,6 +22,7 @@ import {
   setSnapshotDialogStatus,
   takeSnapshot,
 } from "./restore";
+import { wireShortcuts } from "./shortcuts";
 import { state } from "./state";
 import { loadVersion, wireVersion } from "./version";
 import { loadLibrary, showFailure, wireLibrary } from "./views";
@@ -62,6 +63,7 @@ function wireSnapshots(): void {
 mountTrackList();
 wireLibrary();
 wireVirtualScroll();
+wireShortcuts();
 wireDialogs();
 wireSnapshots();
 wireLayout();
