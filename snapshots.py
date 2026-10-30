@@ -378,8 +378,10 @@ def parse_serato_bytes(data: bytes) -> list[str]:
     """Return track paths from a database V2 file or a crate file.
 
     Both files are a run of four-byte tags, a big-endian length, and that
-    many bytes. ``otrk`` holds a ``ptrk`` path encoded as UTF-16-BE. Serato
-    5.0 still writes this ``database V2`` layout.
+    many bytes. In a crate, ``otrk`` holds a ``ptrk`` path. In
+    ``database V2``, ``otrk`` holds a ``pfil`` path. Both are UTF-16-BE.
+    The first non-empty path in an ``otrk`` is used, so a track is listed
+    once. Serato 5.0 still writes this ``database V2`` layout.
 
     Args:
         data: File bytes.
@@ -395,16 +397,37 @@ def parse_serato_bytes(data: bytes) -> list[str]:
             if text:
                 tracks.append(text)
         elif tag == "otrk":
-            for inner, payload in _chunks(body):
-                if inner == "ptrk":
-                    text = _utf16be(payload)
-                    if text:
-                        tracks.append(text)
+            text = _otrk_path(body)
+            if text:
+                tracks.append(text)
     return tracks
 
 
-_DATABASE_V2_TEXT = {
-    "pfil": "path",
+_TRACK_PATH_TAGS = ("ptrk", "pfil")
+"""Path fields inside an ``otrk``: ``ptrk`` in a crate, ``pfil`` in ``database V2``."""
+
+
+def _otrk_path(body: bytes, tags: tuple[str, ...] = _TRACK_PATH_TAGS) -> str:
+    """Return the first non-empty path in one ``otrk``.
+
+    Args:
+        body: The ``otrk`` payload.
+        tags: Path fields to accept. ``database V2`` rows pass only
+            ``pfil`` so a crate is never read as a database.
+
+    Returns:
+        The first non-empty text among ``tags``, or an empty string. One
+        track gives at most one path.
+    """
+    for inner, payload in _chunks(body):
+        if inner in tags:
+            text = _utf16be(payload)
+            if text:
+                return text
+    return ""
+
+
+_DATABASE_V2_FIELDS = {
     "tsng": "title",
     "tart": "artist",
     "talb": "album",
@@ -417,9 +440,10 @@ def parse_database_v2(data: bytes) -> list[dict[str, object]]:
     """Return track rows from a ``database V2`` file.
 
     ``database V2`` stores each track as an ``otrk`` whose ``pfil`` field
-    is the path relative to the drive root, encoded as UTF-16-BE. Title,
-    artist, album, BPM, and type are ``tsng``, ``tart``, ``talb``,
-    ``tbpm``, and ``ttyp``. ``bmis`` is Serato's missing flag.
+    is the path relative to the drive root, encoded as UTF-16-BE. The path
+    comes from :func:`_otrk_path`, the same reader :func:`parse_serato_bytes`
+    uses. Title, artist, album, BPM, and type are ``tsng``, ``tart``,
+    ``talb``, ``tbpm``, and ``ttyp``. ``bmis`` is Serato's missing flag.
 
     Args:
         data: File bytes. Nothing is written.
@@ -436,13 +460,14 @@ def parse_database_v2(data: bytes) -> list[dict[str, object]]:
             continue
         row: dict[str, object] = {}
         for inner, payload in _chunks(body):
-            key = _DATABASE_V2_TEXT.get(inner)
+            key = _DATABASE_V2_FIELDS.get(inner)
             if key is not None:
                 row[key] = _utf16be(payload)
             elif inner == "bmis":
                 row["serato_missing"] = payload[:1] == b"\x01"
-        path = row.get("path")
-        if isinstance(path, str) and path:
+        path = _otrk_path(body, ("pfil",))
+        if path:
+            row["path"] = path
             rows.append(row)
     return rows
 
