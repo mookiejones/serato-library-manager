@@ -15,6 +15,7 @@ from pathlib import Path
 import app_config
 import app_log
 import files
+import legacy_library
 import library
 import snapshots
 
@@ -38,6 +39,7 @@ WRONG_FOLDER_NEXT = (
     "or pick the folder Serato uses."
 )
 _BROWSE_CAP = 500
+_chosen_legacy: Path | None = None
 
 
 def format_track_count(count: int) -> str:
@@ -88,6 +90,9 @@ def describe_library() -> dict[str, object]:
     """
     master = Path(library.MASTER)
     if not master.is_file():
+        legacy = legacy_folder()
+        if legacy is not None:
+            return describe_legacy(legacy)
         return {
             "found": False,
             "volume": None,
@@ -151,6 +156,9 @@ def accept_folder(folder: str) -> dict[str, object]:
     if live is not None and (chosen == live.parent or _same_file(chosen / "master.sqlite", live)):
         return describe_library()
     if live is None and _adopt_unopened_library(directory):
+        return describe_library()
+    if live is None and legacy_library.is_legacy_folder(directory):
+        _set_chosen_legacy(directory)
         return describe_library()
     running = snapshots.serato_dj_running()
     if master.is_file():
@@ -528,3 +536,66 @@ def _windows_label(root: str) -> str:
     if not ok:
         return ""
     return buffer.value.strip()
+
+
+def legacy_folder() -> Path | None:
+    """Return the older library this process reads, if any.
+
+    Returns:
+        The ``_Serato_`` folder chosen in setup, else the usual one, when
+        ``master.sqlite`` is missing and that folder has ``database V2``.
+        None while a newer library file is open.
+    """
+    master = Path(library.MASTER)
+    candidates: list[Path] = []
+    if _chosen_legacy is not None:
+        candidates.append(_chosen_legacy)
+    candidates.append(legacy_library.home_serato_folder())
+    return legacy_library.find_legacy_library(master, candidates)
+
+
+def describe_legacy(folder: Path) -> dict[str, object]:
+    """Describe an older library in plain words for the wizard.
+
+    Args:
+        folder: ``_Serato_`` folder with ``database V2``.
+
+    Returns:
+        The same keys as :func:`describe_library`, with ``found`` False
+        (the newer library is still not there), ``legacy`` and
+        ``read_only`` True, and a summary that says an older library was
+        found instead of "not found". Nothing is written.
+    """
+    volume = volume_label(folder)
+    count: int | None
+    try:
+        count = len(legacy_library.read_library(folder)["tracks"])  # type: ignore[arg-type]
+    except legacy_library.LegacyLibraryError:
+        count = None
+    if count is None:
+        summary = legacy_library.LEGACY_SUMMARY_NO_COUNT.format(volume=volume)
+    else:
+        summary = legacy_library.LEGACY_SUMMARY.format(volume=volume, count=format_track_count(count))
+    return {
+        "found": False,
+        "legacy": True,
+        "read_only": True,
+        "volume": volume,
+        "track_count": count,
+        "summary": summary,
+        "next": legacy_library.LEGACY_NEXT,
+        "places": [],
+        "serato_running": snapshots.serato_dj_running(),
+        "status_message": legacy_library.WRITE_BLOCKED,
+        "status_writable": False,
+    }
+
+
+def _set_chosen_legacy(folder: Path | None) -> None:
+    """Remember, for this process only, an older library chosen in setup.
+
+    Args:
+        folder: Folder the person chose, or None to forget it.
+    """
+    global _chosen_legacy
+    _chosen_legacy = folder
