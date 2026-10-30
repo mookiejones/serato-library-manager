@@ -36,6 +36,7 @@ import setup_flow
 import snapshots
 import telemetry
 import version_info
+import waveform
 
 
 def app_root() -> Path:
@@ -882,13 +883,20 @@ def display_beatgrid(markers: object) -> list[dict[str, object]]:
 
     Returns:
         Marker dicts whose ``position`` is a three-decimal seconds string.
+        ``position_seconds`` is the stored float, so beat times can be
+        computed from that value, ``beats``, and the last marker's ``bpm``.
         A non-finite ``bpm`` is ``None``. The export reads the audio file
         itself and does not use this copy.
     """
     shown: list[dict[str, object]] = []
     for marker in as_dicts(markers):
         copy = dict(marker)
-        copy["position"] = format_beat_position(marker.get("position"))
+        raw_position = marker.get("position")
+        copy["position"] = format_beat_position(raw_position)
+        if isinstance(raw_position, (int, float)) and not isinstance(raw_position, bool):
+            number = float(raw_position)
+            if math.isfinite(number):
+                copy["position_seconds"] = number
         if "bpm" in copy:
             copy["bpm"] = display_bpm(marker.get("bpm"))
         shown.append(copy)
@@ -1287,7 +1295,8 @@ def load_track(asset_id: int, space: str | None = None) -> dict[str, object] | N
     Returns:
         The detail payload, or None when the track is not in the space.
         Beatgrid positions in that payload are three-decimal strings for
-        the panel. The export does not read them.
+        the panel. ``position_seconds`` keeps the stored float so beat
+        times can be computed. The export does not read them.
 
     Raises:
         LibraryError: If the space name is not allowed.
@@ -1626,6 +1635,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/audio":
                 self._serve_audio(parsed.query, query, head=False)
+                return
+            if parsed.path in {"/api/waveform", "/api/waveform/overview"}:
+                self._serve_waveform(parsed.path, parsed.query, query)
                 return
             if parsed.path == "/api/track":
                 raw = query_text(query, "id", "") or ""
@@ -2413,6 +2425,69 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "private")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
+
+    def _serve_waveform(self, url_path: str, raw_query: str, query: dict[str, list[str]]) -> None:
+        """Return a waveform, or the file's Serato Overview, for one library id.
+
+        Args:
+            url_path: ``/api/waveform`` or ``/api/waveform/overview``.
+            raw_query: Query text still percent-encoded. The track id is
+                taken from this string and must be decimal digits. A
+                ``path`` parameter is refused, including beside an id.
+            query: Parsed query. ``space`` limits the id. ``meta=1`` on
+                the waveform route returns JSON counts instead of the body.
+
+        The id check is ``audio_stream.parse_track_id`` and
+        ``audio_stream.resolve_audio``. A file that cannot be decoded
+        returns ``{"available": false, "error": "waveform unavailable"}``.
+        The overview route does not decode audio. Neither route writes
+        the audio file or the Serato folder.
+        """
+        space_text = query_text(query, "space")
+        space: str | None = None
+        if space_text:
+            try:
+                space = require_space(space_text)
+            except library.LibraryError as exc:
+                self.send_json({"error": exc.message}, status=exc.status)
+                return
+        try:
+            asset_id = audio_stream.parse_track_id(raw_query)
+            target = audio_stream.resolve_audio(asset_id=asset_id, space=space)
+        except audio_stream.AudioRefusal as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+            return
+        except library.LibraryError as exc:
+            if "Serato library not found" in exc.message:
+                self.send_json(
+                    {"error": "No Serato library was found on this computer."},
+                    status=404,
+                )
+                return
+            self.send_json({"error": exc.message}, status=exc.status)
+            return
+        if url_path == "/api/waveform/overview":
+            self.send_json(waveform.overview_document(target.path))
+            return
+        try:
+            body, cached = waveform.load(target.path)
+        except waveform.WaveformUnavailable as exc:
+            self.send_json({"available": False, "error": exc.message})
+            return
+        if _flag(query, "meta"):
+            self.send_json(waveform.describe(body, cached=cached))
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "private")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Waveform-Format", "SWF1")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except ConnectionError:
+            return
 
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.

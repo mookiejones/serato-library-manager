@@ -79,7 +79,7 @@ Rel(tags, audio, "Reads the tag header")
 
 ## Modules
 
-`server.py`, `library.py`, `files.py`, `snapshots.py`, `snapshot_frames.py`, `serato_web/completeness.py`, `related.py`, `rekordbox.py`, `tags.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `setup_flow.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. The page source under `src/` documents each function. `static/index.html`, `static/tokens.css`, and `static/app.css` open with a header comment that states the file's role.
+`server.py`, `library.py`, `files.py`, `snapshots.py`, `snapshot_frames.py`, `serato_web/completeness.py`, `related.py`, `rekordbox.py`, `tags.py`, `audio_stream.py`, `waveform.py`, `desktop.py`, `telemetry.py`, `app_config.py`, `setup_flow.py`, `app_log.py`, `build_config.py`, `static_assets.py`, and `scripts/release_bundle.py` document each function with a Google-style docstring. The tests do the same. The page source under `src/` documents each function. `static/index.html`, `static/tokens.css`, and `static/app.css` open with a header comment that states the file's role.
 
 ### `server.py`
 
@@ -175,7 +175,7 @@ An unknown Serato version blocks writes and restores. A version that is not a do
 
 `read_serato_tags` reads. It does not rewrite the file. ID3 is taken from the first 2,000,000 bytes and, for a longer file, the last 512,000 bytes. `serato_tags_from_regions` parses those windows. The frames are `Serato Markers2` and `Serato BeatGrid`. An export that already has the file open calls `serato_tags_from_regions` with the same windows.
 
-FLAC metadata is not limited to that window. While the file is open, every metadata block is visited from its 4-byte header. A picture or padding block is skipped with seek, so album art larger than 2 MB does not hide the markers and is not loaded. The Vorbis comment block is read in full, with no byte cap. The fields are `SERATO_MARKERS_V2` and `SERATO_BEATGRID`, matched without case sensitivity. An `.m4a`, `.mp4`, `.aac`, or `.alac` file, or a file whose first atom is `ftyp`, is walked by top-level atom size. An MP3 is not. The `mdat` audio is not loaded. Each `moov` body is read up to 16 MB. A larger `moov` is truncated and a warning is logged. Freeform `----` atoms whose mean is `com.serato.dj` are decoded, and the frame name inside the payload selects `Serato Markers2` or `Serato BeatGrid`. Serato names those atoms `markersv2` and `beatgrid`. Those FLAC and MP4 values are base64, without padding, of `application/octet-stream`, a null, a second null, the frame name, a null, and the same payload the GEOB frame stores. A newline may appear every 72 characters. Other `SERATO_*` blocks, including overview, are ignored.
+FLAC metadata is not limited to that window. While the file is open, every metadata block is visited from its 4-byte header. A picture or padding block is skipped with seek, so album art larger than 2 MB does not hide the markers and is not loaded. The Vorbis comment block is read in full, with no byte cap. The fields are `SERATO_MARKERS_V2` and `SERATO_BEATGRID`, matched without case sensitivity. An `.m4a`, `.mp4`, `.aac`, or `.alac` file, or a file whose first atom is `ftyp`, is walked by top-level atom size. An MP3 is not. The `mdat` audio is not loaded. Each `moov` body is read up to 16 MB. A larger `moov` is truncated and a warning is logged. Freeform `----` atoms whose mean is `com.serato.dj` are decoded, and the frame name inside the payload selects `Serato Markers2` or `Serato BeatGrid`. Serato names those atoms `markersv2` and `beatgrid`. Those FLAC and MP4 values are base64, without padding, of `application/octet-stream`, a null, a second null, the frame name, a null, and the same payload the GEOB frame stores. A newline may appear every 72 characters. Marker parsing ignores other `SERATO_*` blocks, including overview, so `found` stays false when an overview is the only Serato block. `read_serato_overview` reads that block and does not rewrite the file. ID3 is a GEOB named `Serato Overview`. FLAC is `SERATO_OVERVIEW`. MP4 is the `overview` freeform atom. The payload starts with `01 05` and then 16-byte columns. A short tail is dropped. At most 8192 columns are returned. Ogg Vorbis stores `serato_overview` as hex of two big-endian words, 1 and 5, then the same columns. An Ogg file is read only when it starts with `OggS` or the suffix is `.ogg` or `.oga`. Audio pages after the comment packet are not read.
 
 `plan_serato_geob` and `copy_serato_geob` copy those Serato frames onto another file only when that is safe. A plain ID3v2.3 tag can take the frames. An `.mp3` with no tag can take a new ID3v2.3 tag in front of the existing bytes. Other frames are kept as raw bytes. The audio after the tag is streamed unchanged. A destination that already has Serato frames is left alone. A source with none is skipped. Unsynchronisation, an extended header, a compressed or encrypted Serato frame, a tag larger than 16 MB, and FLAC, RIFF, AIFF, Ogg, or MP4 containers are refused. The destination is not modified in those cases. The copy writes a temporary file beside the destination and replaces it only after the audio bytes still match.
 
@@ -189,7 +189,38 @@ FLAC metadata is not limited to that window. While the file is open, every metad
 
 Markers2 is base64 after a `01 01` header. Newlines and a missing `=` pad are accepted. Each parsed entry is `CUE`, `LOOP`, or `FLIP`. A cue has index, start in milliseconds, color, and name. A loop adds end time and a locked flag. A flip has index, enabled, and name. A `COLOR` or `BPMLOCK` entry in the same payload is skipped. Duplicate merge uses this read to decide whether to warn. It does not write a GEOB frame, a Vorbis comment, or an MP4 atom.
 
-BeatGrid version byte `1` yields markers. Each marker has a position in seconds. That position is the stored float. It is not rounded to three decimal places. The last marker stores BPM, rounded to two decimal places. Earlier markers store a beat count. A version this parser does not know, more than 4096 markers, or a payload shorter than the declared marker count sets `beatgrid_warning` and returns no markers.
+BeatGrid version byte `1` yields markers. Each marker has a position in seconds. That position is the stored float. It is not rounded to three decimal places. The last marker stores BPM, rounded to two decimal places. Earlier markers store a beat count. A version this parser does not know, more than 4096 markers, or a payload shorter than the declared marker count sets `beatgrid_warning` and returns no markers. `GET /api/track` copies `position` as a three-decimal string for the panel and adds `position_seconds` as that stored float. Beat times between two markers are `(next.position_seconds - position_seconds) / beats`. After the last marker the spacing is `60 / bpm`.
+
+### `waveform.py`
+
+`load` returns an `SWF1` body for one real audio file. The route is `GET /api/waveform`. The id check is `audio_stream.parse_track_id` and `audio_stream.resolve_audio`: decimal digits in the raw query, no `path` parameter, `realpath`, a regular file, an audio suffix, and either inside a realpath'd music root or exactly the library file. A file symlink that leaves the stored directory is refused. Samples are read in chunks, mixed to mono, and split with FIR filters at 250 Hz and 4 kHz. Detail is 150 points per second. Each point is six uint8 values: low peak, low RMS, mid peak, mid RMS, high peak, high RMS. 255 is full scale. The overview is 1000 points when the detail is longer, and the same length as the detail when it is shorter. A tail shorter than one detail point is dropped.
+
+miniaudio (MIT) decodes `.wav`, `.aiff`, `.aif`, `.flac`, `.mp3`, and `.ogg`. A WAV or AIFF it cannot open falls back to the stdlib `wave` module or a pure-Python 16-bit AIFF reader. `.m4a`, `.aac`, and `.alac` are not decoded by those libraries. They are read with `ffmpeg` only when `shutil.which("ffmpeg")` finds it. ffmpeg is not bundled, and `serato-library.spec` is not changed to add it. soundfile and libsndfile are not used. A file that still cannot be decoded returns HTTP 200 `{"available": false, "error": "waveform unavailable"}`. `GET /api/audio` is unchanged.
+
+The cache directory is `<config>/waveforms`, the same app data directory as `settings.json` (`SERATO_LIBRARY_CONFIG_DIR` when that is an absolute path). It is not `Library/Backups/snapshots`. A cache path that resolves inside the Serato library folder is not created. The file name is the SHA-256 of the real path, size, mtime in nanoseconds, and `ANALYZER_VERSION`, separated by NUL. A change to any of those misses. Failures are not cached. The audio file is opened read-only.
+
+`GET /api/waveform?meta=1` returns JSON counts and `cached` instead of the body. `GET /api/waveform/overview` returns the Serato Overview columns without decoding. The binary layout, little-endian, is:
+
+| Offset | Type | Field |
+| --- | --- | --- |
+| 0 | 4 bytes | `SWF1` |
+| 4 | uint16 | Header size, 64 |
+| 6 | uint16 | Format version, 1 |
+| 8 | uint16 | Flags. Bit 0 detail, bit 1 overview, bit 2 Serato Overview |
+| 10 | uint16 | Analyzer version |
+| 12 | uint32 | Analysis sample rate, 44100 |
+| 16 | uint32 | Detail points per second times 1000. 150000 means 150 |
+| 20 | uint32 | Duration in milliseconds |
+| 24 | uint32 | Detail point count `N` |
+| 28 | uint32 | Overview point count `M` |
+| 32 | uint32 | Serato Overview column count `S` |
+| 36 | uint16 | Bands per column, 16, or 0 when `S` is 0 |
+| 38 | uint16 | Reserved, zero |
+| 40 | uint32 | Low/mid split in Hz times 1000, 250000 |
+| 44 | uint32 | Mid/high split in Hz times 1000, 4000000 |
+| 48 | 16 bytes | Reserved, zero |
+
+Then `N * 6` detail bytes, `M * 6` overview bytes, and `S * 16` Serato Overview bytes in stored column order. The response header `X-Waveform-Format` is `SWF1`. Content-Type is `application/octet-stream`.
 
 ### `rekordbox.py`
 
@@ -339,8 +370,10 @@ The server accepts JSON objects up to 2,000,000 bytes. A larger body returns 413
 | POST | `/api/focus` | header `X-Serato-Library-Focus` | Brings the desktop window forward when the token matches. 404 when no token is set. 403 when it does not match. The token is not in the page |
 | GET | `/api/status` | none | Lock status |
 | GET | `/api/library` | `space` | Tracks, crates, rules, counts. A missing library returns 404, "No Serato library was found on this computer.", and no path |
-| GET | `/api/track` | `id`, `space` | One track, or 404 |
+| GET | `/api/track` | `id`, `space` | One track, or 404. Includes `cues`, `loops` (`color`, `locked`, start, end), and `beatgrid`. `position` is a three-decimal seconds string. `position_seconds` is the stored float. Earlier markers include `beats`. The last marker includes `bpm`. Beat spacing is `(next.position_seconds - position_seconds) / beats`, then `60 / bpm` after the last marker. The file is not rewritten |
 | GET, HEAD | `/api/audio` | `id`, optional `space` | Streams one library file. `id` is the only selector and must be decimal digits in the raw query. A `path` parameter is refused even when an id is also present. A `..` segment, a percent-encoded id, and a double-encoded id are refused and are not opened. The stored path is resolved with `realpath`. It must be a regular file, not a directory, with an audio suffix (`mp3`, `m4a`, `aac`, `alac`, `flac`, `wav`, `aiff`, `aif`, `ogg`). The real path must sit inside a realpath'd music root, or be exactly the resolved library file. A file symlink is refused when its real path leaves the directory the stored path names, including when that outside folder was listed as a music root. A music folder that is itself a symlink still plays, including when it points at another disk. `space`, when present, limits the id to that space. A `Range` header returns 206 with `Content-Range`. A range that cannot be satisfied returns 416. HEAD sends the same headers and no body. Bytes are read in chunks. Nothing in the Serato folder or the audio file is written. Content-Type is `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/flac`, `audio/wav`, `audio/aiff`, or `audio/ogg` |
+| GET | `/api/waveform` | `id`, optional `space`, optional `meta` | `SWF1` body, or `{"available": false, "error": "waveform unavailable"}` when the file cannot be decoded. `id` uses the same raw-query check as `/api/audio`. A `path` parameter is refused. `meta=1` returns JSON counts and `cached` instead of the body. The cache is under the app data directory. Nothing in the Serato folder or the audio file is written |
+| GET | `/api/waveform/overview` | `id`, optional `space` | Serato Overview columns, read-only, without decoding. `{"available": false, "columns": 0, "bands": 16, "data": []}` when the tag is missing. The id check matches `/api/waveform` |
 | GET | `/api/history` | none | `{ "sessions": [...] }` |
 | GET | `/api/history` | `session` | One session and its entries |
 | GET | `/api/duplicates` | `space` | Groups, plus `count` |

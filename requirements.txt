@@ -3,3 +3,5 @@ pythonnet==3.2.1; sys_platform == "win32"
 clr-loader==0.3.1; sys_platform == "win32"
 sentry-sdk==2.73.0
 posthog==7.75.11
+miniaudio==1.71
+numpy==2.5.4
