@@ -10,6 +10,8 @@ Cue points from the file sit on the seek bar in their colors. Click a cue to jum
 
 **Play** and **Pause** are one button. Its name changes with the state.
 
+**Space** plays or pauses. When nothing is playing, it starts the selected track. It does nothing while you are typing in a field. **Left** moves 5 seconds back. **Right** moves 5 seconds forward. Those are the only playback keys in the shortcut table. With the seek bar focused, **Shift** with **Left** or **Right** moves 30 seconds.
+
 Playback does not change the audio file and does not add a history row. If the track is not in the library, or the file is missing, the bar says **Not in the library or file missing**. If the window cannot play the file, the bar says **This file cannot be played in this window.**
 
 Music behind a shortcut folder still plays, including when that folder points at another disk. A shortcut that points at a file outside the folder named in the library does not.

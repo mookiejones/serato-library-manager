@@ -174,7 +174,7 @@
     shortcutsIntro: "These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.",
     shortcutsClose: "Close",
     openShortcuts: "Shortcuts",
-    playNote: "Space and the left and right arrows play or move through a track once playback is available. Until then, they do nothing.",
+    playNote: "Space plays or pauses. Left moves 5 seconds back. Right moves 5 seconds forward.",
     quickOpenTitle: "Find a track or file",
     quickOpenLabel: "Name",
     quickOpenPlaceholder: "Track or file name",
@@ -684,6 +684,10 @@
     if (!Number.isFinite(deltaSeconds)) return;
     seek(currentTime + deltaSeconds);
   }
+  var playerControls = {
+    togglePlayPause,
+    seekBy
+  };
   function getPlayerState() {
     return { trackId, title, artist, playing, currentTime, duration, volume, error };
   }
@@ -3190,11 +3194,11 @@
           renderFiles();
           return;
         }
-        loadFolder(state.filesPath, { elsewhere: state.filesElsewhere && Boolean(state.filesPath) }).catch((error) => failFiles(error));
+        loadFolder(state.filesPath, { elsewhere: state.filesElsewhere && Boolean(state.filesPath) }).catch((error2) => failFiles(error2));
         return;
       }
       filesSearchTimer = window.setTimeout(() => {
-        searchFiles(value.trim()).catch((error) => failFiles(error));
+        searchFiles(value.trim()).catch((error2) => failFiles(error2));
       }, FILES_SEARCH_MS);
     });
     el("search").addEventListener("input", () => {
@@ -4045,15 +4049,15 @@
     const text = haystack.toLocaleLowerCase();
     if (!query) return null;
     let score = 0;
-    let previous = -2;
+    let previous2 = -2;
     let from = 0;
     for (const letter of query) {
       const found = text.indexOf(letter, from);
       if (found < 0) return null;
       score += 8;
-      if (found === previous + 1) score += 16;
+      if (found === previous2 + 1) score += 16;
       if (found === 0 || BOUNDARY.test(text.charAt(found - 1))) score += 12;
-      previous = found;
+      previous2 = found;
       from = found + 1;
     }
     if (text.includes(query)) score += 40;
@@ -4206,14 +4210,14 @@
     return found.slice(0, LIMIT);
   }
   function scoreTrack(track, query) {
-    const title = track.name || "Untitled";
-    const artist = track.artist ?? "";
+    const title2 = track.name || "Untitled";
+    const artist2 = track.artist ?? "";
     const album = track.album ?? "";
     const file = track.file ?? "";
-    const score = scoreQuery(query, `${title} ${artist} ${album} ${file}`);
+    const score = scoreQuery(query, `${title2} ${artist2} ${album} ${file}`);
     if (score == null) return null;
-    const detail = [artist, album].filter((part) => part !== "").join(" · ");
-    return { kind: "track", key: `track:${track.id}`, title, detail, score, trackId: track.id };
+    const detail = [artist2, album].filter((part) => part !== "").join(" · ");
+    return { kind: "track", key: `track:${track.id}`, title: title2, detail, score, trackId: track.id };
   }
   function fileHits(payload) {
     const rows2 = Array.isArray(payload.entries) ? payload.entries : [];
@@ -4283,15 +4287,15 @@
       const kind = document.createElement("span");
       kind.className = "quick-open-kind";
       kind.textContent = hit.kind === "track" ? copy.quickOpenTrack : copy.quickOpenFile;
-      const title = document.createElement("span");
-      title.className = "quick-open-name";
-      title.textContent = hit.title;
-      title.title = hit.title;
+      const title2 = document.createElement("span");
+      title2.className = "quick-open-name";
+      title2.textContent = hit.title;
+      title2.title = hit.title;
       const detail = document.createElement("span");
       detail.className = "quick-open-detail";
       detail.textContent = hit.detail;
       detail.title = hit.detail;
-      button.append(kind, title, detail);
+      button.append(kind, title2, detail);
       button.addEventListener("click", () => {
         active = index;
         void activate(hit);
@@ -4420,6 +4424,9 @@
   var player = null;
   var returnFocus2 = null;
   var snapshotCursor = 0;
+  function registerPlayerControls(controls) {
+    player = controls;
+  }
   function chordMatches(chord, event) {
     if (event.altKey) return false;
     const mod = event.ctrlKey || event.metaKey;
@@ -4853,6 +4860,7 @@
   }
   mountTrackList();
   mountPlayer();
+  registerPlayerControls(playerControls);
   wireLibrary();
   wireVirtualScroll();
   wireShortcuts();

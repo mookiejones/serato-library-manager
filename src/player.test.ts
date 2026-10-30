@@ -29,6 +29,7 @@ import {
   type PlayableMedia,
 } from "./player";
 import { playerStrings } from "./player-strings";
+import { registerPlayerControls, wireShortcuts } from "./shortcuts";
 import { state } from "./state";
 import { installPage } from "./test-page";
 import { mountTrackList, paintRows, wireVirtualScroll } from "./virtual-scroll";
@@ -250,6 +251,36 @@ describe("next and previous", () => {
     expect(playerControls.seekBy).toBe(seekBy);
     expect(SEEK_STEP_SECONDS).toBe(5);
     expect(SEEK_STEP_LARGE_SECONDS).toBe(30);
+  });
+});
+
+describe("shortcut table", () => {
+  it("toggles play and pause once from Space and seeks 5 seconds from the arrows", () => {
+    registerPlayerControls(playerControls);
+    wireShortcuts();
+    state.byId.set(4, track(4, "Night"));
+    state.selectedId = 4;
+    state.view = [track(4, "Night")];
+    const space = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    document.body.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(true);
+    expect(isPlaying()).toBe(true);
+    expect(fake.src).toContain("id=4");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }));
+    expect(isPlaying()).toBe(false);
+
+    fake.duration = 100;
+    play(4);
+    fake.dispatchEvent(new Event("durationchange"));
+    seek(10);
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    expect(fake.currentTime).toBe(15);
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+    expect(fake.currentTime).toBe(10);
+
+    const range = document.querySelector<HTMLInputElement>(".player-range");
+    range!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    expect(fake.currentTime).toBe(15);
   });
 });
 

@@ -19,13 +19,13 @@
  * - `getPlayerState(): PlayerSnapshot`
  * - `subscribe(listener: (state: PlayerSnapshot) => void): () => void`
  *
- * `playerControls` is the object PR #137 passes to `registerPlayerControls`:
- * `togglePlayPause` and `seekBy`. That pull request is still open, so this
- * screen does not listen for Space. The shortcut table is the only Space
- * binding. `togglePlayPause` plays the selected library track when nothing
- * is loaded. Left and Right on the seek bar move `SEEK_STEP_SECONDS` (5).
- * Shift moves `SEEK_STEP_LARGE_SECONDS` (30) and marks the event handled so
- * a document listener does not seek a second time.
+ * `playerControls` is what `app.ts` passes to `registerPlayerControls` right
+ * after `mountPlayer()`. The shortcut table is the only Space listener.
+ * `togglePlayPause` plays the selected library track when nothing is loaded.
+ * The table's Left and Right call `seekBy` with 5 seconds. On the seek bar,
+ * Left and Right move `SEEK_STEP_SECONDS` (5) and Shift moves
+ * `SEEK_STEP_LARGE_SECONDS` (30). That handler marks the event handled so
+ * the table does not seek a second time.
  */
 
 import type { Marker, Track } from "./api-types";
