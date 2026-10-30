@@ -371,7 +371,11 @@ class SetupWordingTests(unittest.TestCase):
         with mock.patch.object(legacy_library, "home_serato_folder", return_value=self.tree.drive / "none"):
             info = setup_flow.accept_folder(str(self.tree.drive))
             self.assertIs(info["legacy"], True)
-            self.assertEqual(setup_flow.legacy_folder(), self.tree.serato)
+            chosen = setup_flow.legacy_folder()
+            assert chosen is not None
+            # Windows may hand back an 8.3 short name (RUNNER~1) for the temp dir.
+            self.assertTrue(os.path.samefile(chosen, self.tree.serato))
+            self.assertEqual(chosen.name, "_Serato_")
         self.assertFalse(self.master.exists())
 
 
