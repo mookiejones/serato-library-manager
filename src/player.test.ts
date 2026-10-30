@@ -347,6 +347,38 @@ describe("cue markers", () => {
     expect(isPlaying()).toBe(true);
   });
 
+  it("keeps playing when the waveform format is unavailable", async () => {
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "HEAD") return Promise.resolve(new Response(null, { status: 200 }));
+      if (url.includes("/api/waveform/overview")) {
+        return Promise.resolve(new Response(JSON.stringify({ available: false, columns: 0, bands: 16, data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      if (url.includes("/api/waveform")) {
+        return Promise.resolve(new Response(JSON.stringify({ available: false, error: "waveform unavailable" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ cues: [], loops: [], beatgrid: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    state.byId.set(4, track(4, "Night"));
+    play(4);
+    expect(isPlaying()).toBe(true);
+    expect(fake.paused).toBe(false);
+    await vi.waitUntil(() => document.querySelector(".waveform-note")?.textContent === playerStrings.waveformUnavailable);
+    expect(isPlaying()).toBe(true);
+    expect(fake.src).toContain("/api/audio?");
+    expect(fake.src).not.toContain("path=");
+    expect(document.querySelector(".player-status")?.textContent).toBe("");
+  });
+
   it("draws no markers when the track has no cues", async () => {
     const body = Promise.resolve(new Response(JSON.stringify({ cues: [] }), { status: 200 }));
     vi.stubGlobal("fetch", () => body);

@@ -20,4 +20,10 @@ export const playerStrings = {
   cue: "Cue",
   cannotPlay: "This file cannot be played in this window.",
   notInLibrary: "Not in the library or file missing",
+  zoomIn: "Zoom in",
+  zoomOut: "Zoom out",
+  overview: "Track overview",
+  overviewSeek: "Click or drag to seek",
+  waveformReading: "Reading the waveform…",
+  waveformUnavailable: "Waveform unavailable for this format",
 } as const;

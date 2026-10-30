@@ -13,6 +13,8 @@ on:
       - "requirements.txt"
       - "requirements-build.txt"
       - "requirements-macos.txt"
+      - "static/app.js"
+      - "static/app.css"
       - "desktop.py"
       - "version_info.py"
       - "_version.py"
