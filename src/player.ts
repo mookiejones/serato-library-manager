@@ -2,26 +2,33 @@
  * Playback for one library track.
  *
  * One `<audio>` element plays `GET /api/audio`. The bar shows the title,
- * the artist, play/pause, a seek bar, elapsed and total time, and volume.
- * Strings live in `player-strings.ts`.
+ * the artist, previous, play/pause, next, a seek bar with cue markers,
+ * elapsed and total time, and volume. Strings live in `player-strings.ts`.
+ * Cue points come from `GET /api/track` and are not written back.
  *
- * Hotkeys for issue #134 import this module and call:
+ * Hotkeys import this module and call:
  *
  * - `play(trackId: number): void`
  * - `pause(): void`
  * - `togglePlayPause(): void`
+ * - `next(): void`
+ * - `previous(): void`
  * - `seek(seconds: number): void`
  * - `seekBy(deltaSeconds: number): void`
  * - `isPlaying(): boolean`
  * - `getPlayerState(): PlayerSnapshot`
  * - `subscribe(listener: (state: PlayerSnapshot) => void): () => void`
  *
- * `bindSpaceToggle()` is the only key binding here. It listens for Space,
- * ignores typing targets, and calls `togglePlayPause`. Issue #134 replaces
- * that function. `togglePlayPause` does nothing when no track is loaded;
- * the Space binding plays the selected library track in that case.
+ * `playerControls` is the object PR #137 passes to `registerPlayerControls`:
+ * `togglePlayPause` and `seekBy`. That pull request is still open, so this
+ * screen does not listen for Space. The shortcut table is the only Space
+ * binding. `togglePlayPause` plays the selected library track when nothing
+ * is loaded. Left and Right on the seek bar move `SEEK_STEP_SECONDS` (5).
+ * Shift moves `SEEK_STEP_LARGE_SECONDS` (30) and marks the event handled so
+ * a document listener does not seek a second time.
  */
 
+import type { Marker, Track } from "./api-types";
 import { playerStrings } from "./player-strings";
 import { state } from "./state";
 
@@ -37,6 +44,35 @@ export interface PlayerSnapshot {
 }
 
 export type PlayerListener = (state: PlayerSnapshot) => void;
+
+/**
+ * Hooks the shortcut table registers.
+ *
+ * Space and the global seek keys stay in that table. This module does not
+ * add a document listener for them.
+ */
+export interface PlayerControls {
+  togglePlayPause(): void;
+  seekBy(deltaSeconds: number): void;
+}
+
+/** Seconds for one press of Left or Right on the seek bar. */
+export const SEEK_STEP_SECONDS = 5;
+
+/** Seconds for Shift with Left or Right on the seek bar. */
+export const SEEK_STEP_LARGE_SECONDS = 30;
+
+/**
+ * One cue drawn on the seek bar.
+ *
+ * `seconds` is the position from the file. `color` is a `#` hex string, or
+ * empty when the file did not give a usable color. `label` is the cue name.
+ */
+export interface CueMarker {
+  seconds: number;
+  color: string;
+  label: string;
+}
 
 /**
  * The small surface the player needs from an audio element.
@@ -57,6 +93,7 @@ export interface PlayableMedia {
 
 const listeners = new Set<PlayerListener>();
 const wired = new WeakSet<object>();
+const CUE_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 let media: PlayableMedia | null = null;
 let trackId: number | null = null;
@@ -68,13 +105,20 @@ let duration = 0;
 let volume = 1;
 let error = "";
 let seeking = false;
+let ignoreMediaPause = false;
+let cueToken = 0;
+let cues: CueMarker[] = [];
+let paintedCueKey = "";
 let barUnsubscribe: (() => void) | null = null;
 
 let titleNode: HTMLElement | null = null;
 let artistNode: HTMLElement | null = null;
 let statusNode: HTMLElement | null = null;
 let toggleNode: HTMLButtonElement | null = null;
+let previousNode: HTMLButtonElement | null = null;
+let nextNode: HTMLButtonElement | null = null;
 let seekNode: HTMLInputElement | null = null;
+let cueLayer: HTMLElement | null = null;
 let elapsedNode: HTMLElement | null = null;
 let totalNode: HTMLElement | null = null;
 
@@ -100,50 +144,47 @@ export function formatPlayerTime(seconds: number): string {
 }
 
 /**
- * Return whether Space should be left for the focused control.
+ * Turn Serato cue rows into seek-bar markers.
  *
- * An input, a textarea, a select, and a contenteditable element all take
- * the key. A contenteditable="false" ancestor does not.
+ * A row without a finite start time is dropped. The name falls back to
+ * `Cue` plus the stored index. A color that is not a `#` hex value is
+ * left blank so the bar uses its default. Nothing is written.
  *
- * @param target Event target.
- * @returns True when the player must not handle Space.
+ * @param rows Cue rows from `GET /api/track`, or undefined when there are none.
+ * @returns Markers in the order they were given. Empty when there are no cues.
  */
-export function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  if (target.closest("input, textarea, select")) return true;
-  let current: Element | null = target;
-  while (current) {
-    if (current instanceof HTMLElement) {
-      const editable = contentEditableState(current);
-      if (editable !== null) return editable;
-    }
-    current = current.parentElement;
+export function markersFromCues(rows: readonly Marker[] | undefined): CueMarker[] {
+  if (!rows || rows.length === 0) return [];
+  const found: CueMarker[] = [];
+  for (const cue of rows) {
+    const start = Number(cue.start_ms);
+    if (!Number.isFinite(start) || start < 0) continue;
+    const index = Number(cue.index);
+    const named = typeof cue.name === "string" ? cue.name.trim() : "";
+    const fallback = Number.isInteger(index) ? index + 1 : found.length + 1;
+    const color = typeof cue.color === "string" && CUE_COLOR.test(cue.color) ? cue.color : "";
+    found.push({
+      seconds: start / 1000,
+      color,
+      label: named || `${playerStrings.cue} ${fallback}`,
+    });
   }
-  return false;
+  return found;
 }
 
 /**
- * Return whether this element itself turns contenteditable on or off.
+ * Choose the status line for a failed audio response.
  *
- * ``null`` means inherit, so the caller keeps walking. The attribute and
- * the DOM property are both read: jsdom updates the property without
- * setting the attribute.
+ * 403 and 404 mean the id is not a library file that can be opened. Any
+ * other status, including a decode failure with no status, keeps the
+ * window message.
  *
- * @param element Candidate host.
- * @returns True, false, or null when the value is inherit.
+ * @param status HTTP status from `HEAD /api/audio`. Zero when the probe failed.
+ * @returns The sentence shown in the player bar.
  */
-function contentEditableState(element: HTMLElement): boolean | null {
-  const attr = element.getAttribute("contenteditable");
-  if (attr !== null) {
-    const value = attr.toLowerCase();
-    if (value === "false") return false;
-    if (value === "true" || value === "" || value === "plaintext-only") return true;
-  }
-  const raw = element.contentEditable;
-  const prop = typeof raw === "string" ? raw.toLowerCase() : "";
-  if (prop === "true" || prop === "plaintext-only") return true;
-  if (prop === "false") return false;
-  return null;
+export function playbackErrorText(status: number): string {
+  if (status === 403 || status === 404) return playerStrings.notInLibrary;
+  return playerStrings.cannotPlay;
 }
 
 /**
@@ -151,34 +192,38 @@ function contentEditableState(element: HTMLElement): boolean | null {
  *
  * The element loads `/api/audio?id=&space=`. The same track, already
  * loaded and paused, resumes. A different track starts at the beginning.
- * Nothing is written to the library.
+ * Cue markers are read from `GET /api/track`. Nothing is written to the library.
  *
  * @param trackId Asset id from the track list.
  */
 export function play(nextId: number): void {
   if (!Number.isInteger(nextId) || nextId < 0) return;
   const element = ensureMedia();
-  if (trackId !== nextId || element.src === "") {
-    const row = state.byId.get(nextId);
-    title = row?.name || row?.title || playerStrings.untitled;
-    artist = row?.artist ?? "";
-    trackId = nextId;
-    currentTime = 0;
-    duration = 0;
-    element.src = trackUrl(nextId);
-    element.currentTime = 0;
-  }
-  error = "";
-  playing = true;
-  emit();
-  const pending = element.play();
-  if (pending && typeof pending.then === "function") {
-    pending.catch(() => {
-      if (trackId !== nextId) return;
-      playing = false;
-      error = playerStrings.cannotPlay;
-      emit();
-    });
+  ignoreMediaPause = true;
+  try {
+    if (trackId !== nextId || element.src === "") {
+      const row = state.byId.get(nextId);
+      title = row?.name || row?.title || playerStrings.untitled;
+      artist = row?.artist ?? "";
+      trackId = nextId;
+      currentTime = 0;
+      duration = 0;
+      element.src = trackUrl(nextId);
+      element.currentTime = 0;
+      loadCues(nextId);
+    }
+    error = "";
+    playing = true;
+    emit();
+    const pending = element.play();
+    if (pending && typeof pending.then === "function") {
+      pending.catch(() => {
+        if (trackId !== nextId) return;
+        noteFailure(nextId);
+      });
+    }
+  } finally {
+    ignoreMediaPause = false;
   }
 }
 
@@ -197,13 +242,39 @@ export function pause(): void {
 /**
  * Pause when audio is playing, and play when it is paused.
  *
- * Does nothing when no track has been loaded. Space uses this after it
- * has decided a track is already loaded.
+ * When nothing is loaded, this plays the selected library track. A history
+ * row and an empty selection do nothing. The shortcut table calls this for Space.
  */
 export function togglePlayPause(): void {
-  if (trackId === null) return;
+  if (trackId === null) {
+    const selected = selectedPlayableId();
+    if (selected !== null) play(selected);
+    return;
+  }
   if (playing) pause();
   else play(trackId);
+}
+
+/**
+ * Play the next row in the current visible list.
+ *
+ * Order is `state.view`, which is the filtered and sorted list. History
+ * rows are skipped. When nothing is loaded, the selection is the starting
+ * row, and a press with no selection starts at the first playable row.
+ * The last row does not wrap.
+ */
+export function next(): void {
+  moveBy(1);
+}
+
+/**
+ * Play the previous row in the current visible list.
+ *
+ * The same order as `next`. The first row does not wrap. When nothing is
+ * loaded and nothing is selected, this starts at the last playable row.
+ */
+export function previous(): void {
+  moveBy(-1);
 }
 
 /**
@@ -240,9 +311,20 @@ export function seekBy(deltaSeconds: number): void {
 }
 
 /**
+ * The player hooks the shortcut table registers once.
+ *
+ * Pass this object to `registerPlayerControls`. Do not also listen for Space.
+ */
+export const playerControls: PlayerControls = {
+  togglePlayPause,
+  seekBy,
+};
+
+/**
  * Return whether the current track is playing.
  *
- * False when nothing is loaded and after pause or the end of the file.
+ * False when nothing is loaded and after pause or the end of the file
+ * when no later row starts.
  *
  * @returns True while playback is running.
  */
@@ -276,35 +358,6 @@ export function subscribe(listener: PlayerListener): () => void {
   return () => {
     listeners.delete(listener);
   };
-}
-
-/**
- * Listen for Space and toggle play/pause.
- *
- * This is the only playback hotkey. Issue #134 replaces this function.
- * Space is ignored while focus is in an input, a textarea, a select, or
- * a contenteditable element, while it is held down, and while Ctrl, Alt,
- * or Meta is pressed. A button, link, or open dialog keeps the key so
- * that control can activate. When no track is loaded, Space plays the
- * selected library track instead of toggling silence.
- *
- * @returns Removes the listener.
- */
-export function bindSpaceToggle(): () => void {
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key !== " " || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
-    if (event.defaultPrevented || isTypingTarget(event.target) || isActivationTarget(event.target)) return;
-    if (isOpenDialog(event.target)) return;
-    event.preventDefault();
-    if (trackId === null) {
-      const selected = selectedPlayableId();
-      if (selected !== null) play(selected);
-      return;
-    }
-    togglePlayPause();
-  };
-  document.addEventListener("keydown", onKey);
-  return () => document.removeEventListener("keydown", onKey);
 }
 
 /**
@@ -347,6 +400,7 @@ export function mountPlayer(host?: HTMLElement | null): void {
 }
 
 function resetPlayback(): void {
+  cueToken += 1;
   trackId = null;
   title = "";
   artist = "";
@@ -355,6 +409,8 @@ function resetPlayback(): void {
   duration = 0;
   error = "";
   seeking = false;
+  cues = [];
+  paintedCueKey = "";
 }
 
 function ensureMedia(): PlayableMedia {
@@ -377,13 +433,16 @@ function wire(element: PlayableMedia): void {
     emit();
   });
   element.addEventListener("pause", () => {
+    if (ignoreMediaPause) return;
     playing = false;
     emit();
   });
   element.addEventListener("ended", () => {
-    playing = false;
-    currentTime = element.currentTime;
-    emit();
+    currentTime = Number.isFinite(element.currentTime) ? element.currentTime : currentTime;
+    if (!moveBy(1)) {
+      playing = false;
+      emit();
+    }
   });
   element.addEventListener("timeupdate", () => {
     currentTime = element.currentTime;
@@ -395,14 +454,13 @@ function wire(element: PlayableMedia): void {
     emit();
   });
   element.addEventListener("error", () => {
-    playing = false;
-    error = playerStrings.cannotPlay;
-    emit();
+    if (trackId === null) return;
+    noteFailure(trackId);
   });
 }
 
 function trackUrl(nextId: number): string {
-  // Id only. The route refuses a filesystem path, a ".." segment, and a percent-encoded id.
+  // Id only. A path parameter is refused by the route.
   const params = new URLSearchParams({ id: String(nextId), space: state.space });
   return `/api/audio?${params.toString()}`;
 }
@@ -416,15 +474,75 @@ function selectedPlayableId(): number | null {
   return row.id;
 }
 
-function isActivationTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return target.closest("button, a, summary, [role='button']") !== null;
+function playableRows(): Track[] {
+  return state.view.filter((row) => !row.entry && Number.isInteger(row.id) && row.id >= 0);
 }
 
-function isOpenDialog(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  const dialog = target.closest("dialog");
-  return dialog instanceof HTMLDialogElement && dialog.open;
+function anchorIndex(rows: readonly Track[]): number {
+  if (trackId !== null) {
+    const playingIndex = rows.findIndex((row) => row.id === trackId);
+    if (playingIndex >= 0) return playingIndex;
+  }
+  if (state.selectedId === null) return -1;
+  return rows.findIndex((row) => row.id === state.selectedId);
+}
+
+function moveBy(delta: 1 | -1): boolean {
+  const rows = playableRows();
+  if (rows.length === 0) return false;
+  const index = anchorIndex(rows);
+  const target = index < 0 ? rows[delta > 0 ? 0 : rows.length - 1] : rows[index + delta];
+  if (!target) return false;
+  play(target.id);
+  return true;
+}
+
+function loadCues(id: number): void {
+  const token = ++cueToken;
+  cues = [];
+  void readCues(id).then(
+    (found) => {
+      if (token !== cueToken || trackId !== id) return;
+      cues = found;
+      emit();
+    },
+    () => {
+      if (token !== cueToken || trackId !== id) return;
+      cues = [];
+      emit();
+    },
+  );
+}
+
+async function readCues(id: number): Promise<CueMarker[]> {
+  if (typeof fetch !== "function") return [];
+  const params = new URLSearchParams({ id: String(id), space: state.space });
+  const response = await fetch(`/api/track?${params.toString()}`);
+  if (!response.ok) return [];
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || !("cues" in payload)) return [];
+  const rows = (payload as { cues?: Marker[] }).cues;
+  return markersFromCues(rows);
+}
+
+function noteFailure(forId: number): void {
+  playing = false;
+  void classifyStatus(forId).then((message) => {
+    if (trackId !== forId) return;
+    playing = false;
+    error = message;
+    emit();
+  });
+}
+
+async function classifyStatus(forId: number): Promise<string> {
+  try {
+    if (typeof fetch !== "function") return playerStrings.cannotPlay;
+    const response = await fetch(trackUrl(forId), { method: "HEAD" });
+    return playbackErrorText(response.status);
+  } catch {
+    return playerStrings.cannotPlay;
+  }
 }
 
 function emit(): void {
@@ -444,10 +562,26 @@ function buildBar(): HTMLElement {
   statusNode.setAttribute("role", "status");
   meta.append(titleNode, artistNode, statusNode);
 
+  previousNode = document.createElement("button");
+  previousNode.type = "button";
+  previousNode.className = "player-toggle";
+  previousNode.textContent = playerStrings.previous;
+  previousNode.addEventListener("click", () => previous());
+
   toggleNode = document.createElement("button");
   toggleNode.type = "button";
-  toggleNode.className = "player-toggle";
+  toggleNode.className = "player-toggle player-play";
   toggleNode.addEventListener("click", () => togglePlayPause());
+
+  nextNode = document.createElement("button");
+  nextNode.type = "button";
+  nextNode.className = "player-toggle";
+  nextNode.textContent = playerStrings.next;
+  nextNode.addEventListener("click", () => next());
+
+  const transport = document.createElement("div");
+  transport.className = "player-transport";
+  transport.append(previousNode, toggleNode, nextNode);
 
   const seekWrap = document.createElement("div");
   seekWrap.className = "player-seek";
@@ -458,6 +592,9 @@ function buildBar(): HTMLElement {
   elapsedLabel.textContent = playerStrings.elapsed;
   elapsedNode = document.createElement("span");
   elapsedWrap.append(elapsedLabel, elapsedNode);
+
+  const track = document.createElement("div");
+  track.className = "player-seek-track";
   seekNode = document.createElement("input");
   seekNode.type = "range";
   seekNode.className = "player-range";
@@ -478,6 +615,11 @@ function buildBar(): HTMLElement {
     if (!seekNode) return;
     seek(Number(seekNode.value));
   });
+  seekNode.addEventListener("keydown", onSeekKey);
+  cueLayer = document.createElement("div");
+  cueLayer.className = "player-cues";
+  track.append(seekNode, cueLayer);
+
   const totalWrap = document.createElement("span");
   totalWrap.className = "player-time";
   const totalLabel = document.createElement("span");
@@ -485,7 +627,7 @@ function buildBar(): HTMLElement {
   totalLabel.textContent = playerStrings.duration;
   totalNode = document.createElement("span");
   totalWrap.append(totalLabel, totalNode);
-  seekWrap.append(elapsedWrap, seekNode, totalWrap);
+  seekWrap.append(elapsedWrap, track, totalWrap);
 
   const volumeLabel = document.createElement("label");
   volumeLabel.className = "player-volume";
@@ -508,25 +650,82 @@ function buildBar(): HTMLElement {
 
   const bar = document.createElement("div");
   bar.className = "player-controls";
-  bar.append(meta, toggleNode, seekWrap, volumeLabel);
+  bar.append(meta, transport, seekWrap, volumeLabel);
   return bar;
 }
 
+function onSeekKey(event: KeyboardEvent): void {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+  const forward = event.key === "ArrowRight" || event.key === "ArrowUp";
+  const back = event.key === "ArrowLeft" || event.key === "ArrowDown";
+  if (!forward && !back) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const step = event.shiftKey ? SEEK_STEP_LARGE_SECONDS : SEEK_STEP_SECONDS;
+  seekBy((forward ? 1 : -1) * step);
+}
+
 function paintBar(): void {
-  if (!titleNode || !artistNode || !statusNode || !toggleNode || !seekNode || !elapsedNode || !totalNode) return;
+  if (!titleNode || !artistNode || !statusNode || !toggleNode || !previousNode || !nextNode) return;
+  if (!seekNode || !elapsedNode || !totalNode) return;
   const loaded = trackId !== null;
-  titleNode.textContent = loaded ? (title || playerStrings.untitled) : playerStrings.nothingPlaying;
+  const shownTitle = loaded ? (title || playerStrings.untitled) : playerStrings.nothingPlaying;
+  titleNode.textContent = shownTitle;
+  titleNode.title = shownTitle;
   artistNode.textContent = artist;
   artistNode.hidden = artist === "";
+  artistNode.title = artist;
   statusNode.textContent = error;
   statusNode.hidden = error === "";
-  toggleNode.textContent = playing ? playerStrings.pause : playerStrings.play;
-  toggleNode.disabled = !loaded;
+  statusNode.title = error;
+  const action = playing ? playerStrings.pause : playerStrings.play;
+  const named = loaded ? (title || playerStrings.untitled) : "";
+  toggleNode.textContent = action;
+  toggleNode.disabled = !loaded && selectedPlayableId() === null;
   toggleNode.setAttribute("aria-pressed", String(playing));
+  toggleNode.setAttribute("aria-label", named ? `${action} ${named}` : action);
+  previousNode.disabled = !canMove(-1);
+  nextNode.disabled = !canMove(1);
+  previousNode.setAttribute("aria-label", playerStrings.previous);
+  nextNode.setAttribute("aria-label", playerStrings.next);
   const limit = Number.isFinite(duration) && duration > 0 ? duration : 0;
   seekNode.max = String(limit);
   seekNode.disabled = !loaded || limit === 0;
   if (!seeking) seekNode.value = String(Math.min(currentTime, limit || currentTime));
   elapsedNode.textContent = formatPlayerTime(currentTime);
   totalNode.textContent = formatPlayerTime(duration);
+  paintCues(limit);
+}
+
+function canMove(delta: 1 | -1): boolean {
+  const rows = playableRows();
+  if (rows.length === 0) return false;
+  const index = anchorIndex(rows);
+  if (index < 0) return true;
+  return Boolean(rows[index + delta]);
+}
+
+function paintCues(limit: number): void {
+  if (!cueLayer) return;
+  const key = `${limit}|${cues.map((cue) => `${cue.seconds}:${cue.label}:${cue.color}`).join(";")}`;
+  if (key === paintedCueKey) return;
+  paintedCueKey = key;
+  cueLayer.replaceChildren();
+  if (!(limit > 0) || cues.length === 0) return;
+  for (const cue of cues) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "player-cue";
+    const ratio = Math.min(1, Math.max(0, cue.seconds / limit));
+    const percent = Math.round(ratio * 1000) / 10;
+    button.style.left = `${percent}%`;
+    if (cue.color) button.style.setProperty("--cue", cue.color);
+    const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.addEventListener("click", () => {
+      seek(cue.seconds);
+    });
+    cueLayer.append(button);
+  }
 }

@@ -6,6 +6,7 @@
  * the spacer once, before the first paint.
  */
 
+import type { Track } from "./api-types";
 import { bridge } from "./bridge";
 import { el } from "./dom";
 import { clockLabel, colorHex, lengthLabel } from "./format";
@@ -207,6 +208,25 @@ function moveSelection(delta: number) {
 }
 
 /**
+ * Return the track row that holds the event target.
+ *
+ * Enter on a focused row plays that row. Enter while the list itself is
+ * focused plays the selection instead. A history row is left for the caller
+ * to skip. Does not fetch.
+ *
+ * @param target Event target.
+ * @returns The visible row, or undefined when the target is not a row.
+ */
+function focusedTrack(target: EventTarget | null): Track | undefined {
+  if (!(target instanceof Element)) return undefined;
+  const row = target.closest(".row");
+  if (!row) return undefined;
+  const id = Number(row.getAttribute("data-id"));
+  if (!Number.isInteger(id)) return undefined;
+  return state.view.find((item) => item.id === id);
+}
+
+/**
  * Attach scroll and arrow-key listeners on the track list.
  *
  * Called once from app.ts after mountTrackList. Scrolling paints the
@@ -224,10 +244,11 @@ export function wireVirtualScroll(): void {
       event.preventDefault();
       moveSelection(-1);
     } else if (event.key === "Enter") {
-      const selected = state.view.find((item) => item.id === state.selectedId);
-      if (!selected || selected.entry) return;
+      const chosen = focusedTrack(event.target) ?? state.view.find((item) => item.id === state.selectedId);
+      if (!chosen || chosen.entry) return;
       event.preventDefault();
-      play(selected.id);
+      void bridge.selectTrack(chosen.id);
+      play(chosen.id);
     }
   });
   let paintedId: number | null = null;

@@ -26,7 +26,7 @@ import { wireShortcuts } from "./shortcuts";
 import { state } from "./state";
 import { loadVersion, wireVersion } from "./version";
 import { loadLibrary, showFailure, wireLibrary } from "./views";
-import { bindSpaceToggle, mountPlayer } from "./player";
+import { mountPlayer } from "./player";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
 /**
@@ -63,7 +63,6 @@ function wireSnapshots(): void {
 
 mountTrackList();
 mountPlayer();
-bindSpaceToggle();
 wireLibrary();
 wireVirtualScroll();
 wireShortcuts();

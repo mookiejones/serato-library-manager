@@ -422,7 +422,7 @@ class AudioRouteTests(unittest.TestCase):
 
         The raw query is checked before percent-decoding, so ``%31`` is
         not treated as track 1. A ``..`` segment is not an id either.
-        A filesystem ``path`` parameter is ignored.
+        A ``path`` parameter is refused even when a real id is beside it.
 
         Returns:
             None. The test fails if any of those queries returns audio bytes.
@@ -435,18 +435,14 @@ class AudioRouteTests(unittest.TestCase):
             "id=%31",
             "id=%2531",
             f"path=/etc/passwd&id={asset_id}",
+            f"id={asset_id}&path=/etc/passwd",
         )
-        # The last query is a valid id plus an ignored path. Check it
-        # separately so a path cannot replace the library file.
-        for query in queries[:-1]:
+        for query in queries:
             with self.subTest(query=query):
                 status, _headers, body = self.exchange("GET", "/api/audio?" + query)
                 self.assertEqual(status, 400)
                 self.assertNotEqual(body, BODY)
                 self.assertNotIn(SECRET, body)
-        status, _headers, body = self.exchange("GET", "/api/audio?" + queries[-1])
-        self.assertEqual(status, 200)
-        self.assertEqual(body, BODY)
 
     def test_directory_and_non_audio_file_are_refused(self) -> None:
         """Refuse a directory and a file that is not an audio suffix.
@@ -470,19 +466,29 @@ class AudioRouteTests(unittest.TestCase):
                 self.assertNotEqual(body, BODY)
 
     def test_path_query_without_an_id_is_refused(self) -> None:
-        """Refuse a request that sends a filesystem path and no track id.
+        """Refuse a filesystem path, with or without a library id.
+
+        The route has no path selector. A valid id beside ``path`` is
+        refused as well, so the path is not opened and the id is not played.
 
         Returns:
-            None. The test fails if the path is opened.
+            None. The test fails if the path or the library file is streamed.
         """
+        asset_id, _path = self.add_track("music/song.mp3", BODY)
         secret = self.library.root / "secret.mp3"
         secret.write_bytes(SECRET)
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?path=" + urllib.parse.quote(str(secret)),
+        quoted = urllib.parse.quote(str(secret))
+        queries = (
+            f"path={quoted}",
+            f"path={quoted}&id={asset_id}",
+            f"id={asset_id}&path={quoted}",
         )
-        self.assertEqual(status, 400)
-        self.assertNotIn(SECRET, body)
+        for query in queries:
+            with self.subTest(query=query.split("&", 1)[0]):
+                status, _headers, body = self.exchange("GET", "/api/audio?" + query)
+                self.assertEqual(status, 400)
+                self.assertNotIn(SECRET, body)
+                self.assertNotEqual(body, BODY)
 
     def test_streaming_leaves_the_library_tree_unchanged(self) -> None:
         """Leave the temporary Serato folder byte-for-byte after a play.

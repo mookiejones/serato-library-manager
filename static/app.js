@@ -123,9 +123,9 @@
       handle.setPointerCapture?.(event.pointerId);
       handle.dataset.dragging = "true";
       document.body.classList.add("is-resizing");
-      const onMove = (next) => {
+      const onMove = (next2) => {
         moved = true;
-        move(startWidth + next.clientX - startX);
+        move(startWidth + next2.clientX - startX);
       };
       const onEnd = () => {
         handle.removeEventListener("pointermove", onMove);
@@ -141,15 +141,15 @@
     });
     handle.addEventListener("keydown", (event) => {
       const jump = event.shiftKey ? step * 4 : step;
-      let next;
-      if (event.key === "ArrowLeft") next = shown() - jump;
-      else if (event.key === "ArrowRight") next = shown() + jump;
-      else if (event.key === "Home") next = minFirst;
-      else if (event.key === "End") next = available() - minSecond;
+      let next2;
+      if (event.key === "ArrowLeft") next2 = shown() - jump;
+      else if (event.key === "ArrowRight") next2 = shown() + jump;
+      else if (event.key === "Home") next2 = minFirst;
+      else if (event.key === "End") next2 = available() - minSecond;
       else return;
       event.preventDefault();
       const before = current;
-      move(next);
+      move(next2);
       if (current !== before) onCommit(current);
     });
     handle.addEventListener("dblclick", () => {
@@ -547,12 +547,19 @@
     duration: "Duration",
     nothingPlaying: "Nothing playing",
     untitled: "Untitled",
-    cannotPlay: "This file cannot be played in this window."
+    previous: "Previous",
+    next: "Next",
+    cue: "Cue",
+    cannotPlay: "This file cannot be played in this window.",
+    notInLibrary: "Not in the library or file missing"
   };
 
   // src/player.ts
+  var SEEK_STEP_SECONDS = 5;
+  var SEEK_STEP_LARGE_SECONDS = 30;
   var listeners = /* @__PURE__ */ new Set();
   var wired = /* @__PURE__ */ new WeakSet();
+  var CUE_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
   var media = null;
   var trackId = null;
   var title = "";
@@ -563,12 +570,19 @@
   var volume = 1;
   var error = "";
   var seeking = false;
+  var ignoreMediaPause = false;
+  var cueToken = 0;
+  var cues = [];
+  var paintedCueKey = "";
   var barUnsubscribe = null;
   var titleNode = null;
   var artistNode = null;
   var statusNode = null;
   var toggleNode = null;
+  var previousNode = null;
+  var nextNode = null;
   var seekNode = null;
+  var cueLayer = null;
   var elapsedNode = null;
   var totalNode = null;
   function formatPlayerTime(seconds) {
@@ -583,56 +597,56 @@
     }
     return `${minutes}:${String(secs).padStart(2, "0")}`;
   }
-  function isTypingTarget(target) {
-    if (!(target instanceof Element)) return false;
-    if (target.closest("input, textarea, select")) return true;
-    let current = target;
-    while (current) {
-      if (current instanceof HTMLElement) {
-        const editable = contentEditableState(current);
-        if (editable !== null) return editable;
-      }
-      current = current.parentElement;
+  function markersFromCues(rows2) {
+    if (!rows2 || rows2.length === 0) return [];
+    const found = [];
+    for (const cue of rows2) {
+      const start = Number(cue.start_ms);
+      if (!Number.isFinite(start) || start < 0) continue;
+      const index = Number(cue.index);
+      const named = typeof cue.name === "string" ? cue.name.trim() : "";
+      const fallback = Number.isInteger(index) ? index + 1 : found.length + 1;
+      const color = typeof cue.color === "string" && CUE_COLOR.test(cue.color) ? cue.color : "";
+      found.push({
+        seconds: start / 1e3,
+        color,
+        label: named || `${playerStrings.cue} ${fallback}`
+      });
     }
-    return false;
+    return found;
   }
-  function contentEditableState(element) {
-    const attr = element.getAttribute("contenteditable");
-    if (attr !== null) {
-      const value = attr.toLowerCase();
-      if (value === "false") return false;
-      if (value === "true" || value === "" || value === "plaintext-only") return true;
-    }
-    const raw = element.contentEditable;
-    const prop = typeof raw === "string" ? raw.toLowerCase() : "";
-    if (prop === "true" || prop === "plaintext-only") return true;
-    if (prop === "false") return false;
-    return null;
+  function playbackErrorText(status) {
+    if (status === 403 || status === 404) return playerStrings.notInLibrary;
+    return playerStrings.cannotPlay;
   }
   function play(nextId) {
     if (!Number.isInteger(nextId) || nextId < 0) return;
     const element = ensureMedia();
-    if (trackId !== nextId || element.src === "") {
-      const row = state.byId.get(nextId);
-      title = row?.name || row?.title || playerStrings.untitled;
-      artist = row?.artist ?? "";
-      trackId = nextId;
-      currentTime = 0;
-      duration = 0;
-      element.src = trackUrl(nextId);
-      element.currentTime = 0;
-    }
-    error = "";
-    playing = true;
-    emit();
-    const pending = element.play();
-    if (pending && typeof pending.then === "function") {
-      pending.catch(() => {
-        if (trackId !== nextId) return;
-        playing = false;
-        error = playerStrings.cannotPlay;
-        emit();
-      });
+    ignoreMediaPause = true;
+    try {
+      if (trackId !== nextId || element.src === "") {
+        const row = state.byId.get(nextId);
+        title = row?.name || row?.title || playerStrings.untitled;
+        artist = row?.artist ?? "";
+        trackId = nextId;
+        currentTime = 0;
+        duration = 0;
+        element.src = trackUrl(nextId);
+        element.currentTime = 0;
+        loadCues(nextId);
+      }
+      error = "";
+      playing = true;
+      emit();
+      const pending = element.play();
+      if (pending && typeof pending.then === "function") {
+        pending.catch(() => {
+          if (trackId !== nextId) return;
+          noteFailure(nextId);
+        });
+      }
+    } finally {
+      ignoreMediaPause = false;
     }
   }
   function pause() {
@@ -642,19 +656,33 @@
     emit();
   }
   function togglePlayPause() {
-    if (trackId === null) return;
+    if (trackId === null) {
+      const selected = selectedPlayableId();
+      if (selected !== null) play(selected);
+      return;
+    }
     if (playing) pause();
     else play(trackId);
+  }
+  function next() {
+    moveBy(1);
+  }
+  function previous() {
+    moveBy(-1);
   }
   function seek(seconds) {
     if (!Number.isFinite(seconds) || trackId === null) return;
     const element = ensureMedia();
-    let next = seconds < 0 ? 0 : seconds;
+    let next2 = seconds < 0 ? 0 : seconds;
     const limit = element.duration;
-    if (Number.isFinite(limit) && limit > 0 && next > limit) next = limit;
-    element.currentTime = next;
-    currentTime = next;
+    if (Number.isFinite(limit) && limit > 0 && next2 > limit) next2 = limit;
+    element.currentTime = next2;
+    currentTime = next2;
     emit();
+  }
+  function seekBy(deltaSeconds) {
+    if (!Number.isFinite(deltaSeconds)) return;
+    seek(currentTime + deltaSeconds);
   }
   function getPlayerState() {
     return { trackId, title, artist, playing, currentTime, duration, volume, error };
@@ -664,22 +692,6 @@
     return () => {
       listeners.delete(listener);
     };
-  }
-  function bindSpaceToggle() {
-    const onKey = (event) => {
-      if (event.key !== " " || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
-      if (event.defaultPrevented || isTypingTarget(event.target) || isActivationTarget(event.target)) return;
-      if (isOpenDialog(event.target)) return;
-      event.preventDefault();
-      if (trackId === null) {
-        const selected = selectedPlayableId();
-        if (selected !== null) play(selected);
-        return;
-      }
-      togglePlayPause();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
   }
   function mountPlayer(host) {
     barUnsubscribe?.();
@@ -698,6 +710,7 @@
     paintBar();
   }
   function resetPlayback() {
+    cueToken += 1;
     trackId = null;
     title = "";
     artist = "";
@@ -706,6 +719,8 @@
     duration = 0;
     error = "";
     seeking = false;
+    cues = [];
+    paintedCueKey = "";
   }
   function ensureMedia() {
     if (media) return media;
@@ -726,13 +741,16 @@
       emit();
     });
     element.addEventListener("pause", () => {
+      if (ignoreMediaPause) return;
       playing = false;
       emit();
     });
     element.addEventListener("ended", () => {
-      playing = false;
-      currentTime = element.currentTime;
-      emit();
+      currentTime = Number.isFinite(element.currentTime) ? element.currentTime : currentTime;
+      if (!moveBy(1)) {
+        playing = false;
+        emit();
+      }
     });
     element.addEventListener("timeupdate", () => {
       currentTime = element.currentTime;
@@ -744,9 +762,8 @@
       emit();
     });
     element.addEventListener("error", () => {
-      playing = false;
-      error = playerStrings.cannotPlay;
-      emit();
+      if (trackId === null) return;
+      noteFailure(trackId);
     });
   }
   function trackUrl(nextId) {
@@ -761,14 +778,69 @@
     if (!row || row.entry) return null;
     return row.id;
   }
-  function isActivationTarget(target) {
-    if (!(target instanceof Element)) return false;
-    return target.closest("button, a, summary, [role='button']") !== null;
+  function playableRows() {
+    return state.view.filter((row) => !row.entry && Number.isInteger(row.id) && row.id >= 0);
   }
-  function isOpenDialog(target) {
-    if (!(target instanceof Element)) return false;
-    const dialog = target.closest("dialog");
-    return dialog instanceof HTMLDialogElement && dialog.open;
+  function anchorIndex(rows2) {
+    if (trackId !== null) {
+      const playingIndex = rows2.findIndex((row) => row.id === trackId);
+      if (playingIndex >= 0) return playingIndex;
+    }
+    if (state.selectedId === null) return -1;
+    return rows2.findIndex((row) => row.id === state.selectedId);
+  }
+  function moveBy(delta) {
+    const rows2 = playableRows();
+    if (rows2.length === 0) return false;
+    const index = anchorIndex(rows2);
+    const target = index < 0 ? rows2[delta > 0 ? 0 : rows2.length - 1] : rows2[index + delta];
+    if (!target) return false;
+    play(target.id);
+    return true;
+  }
+  function loadCues(id) {
+    const token = ++cueToken;
+    cues = [];
+    void readCues(id).then(
+      (found) => {
+        if (token !== cueToken || trackId !== id) return;
+        cues = found;
+        emit();
+      },
+      () => {
+        if (token !== cueToken || trackId !== id) return;
+        cues = [];
+        emit();
+      }
+    );
+  }
+  async function readCues(id) {
+    if (typeof fetch !== "function") return [];
+    const params = new URLSearchParams({ id: String(id), space: state.space });
+    const response = await fetch(`/api/track?${params.toString()}`);
+    if (!response.ok) return [];
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object" || !("cues" in payload)) return [];
+    const rows2 = payload.cues;
+    return markersFromCues(rows2);
+  }
+  function noteFailure(forId) {
+    playing = false;
+    void classifyStatus(forId).then((message) => {
+      if (trackId !== forId) return;
+      playing = false;
+      error = message;
+      emit();
+    });
+  }
+  async function classifyStatus(forId) {
+    try {
+      if (typeof fetch !== "function") return playerStrings.cannotPlay;
+      const response = await fetch(trackUrl(forId), { method: "HEAD" });
+      return playbackErrorText(response.status);
+    } catch {
+      return playerStrings.cannotPlay;
+    }
   }
   function emit() {
     const snapshot = getPlayerState();
@@ -785,10 +857,23 @@
     statusNode.className = "player-status";
     statusNode.setAttribute("role", "status");
     meta.append(titleNode, artistNode, statusNode);
+    previousNode = document.createElement("button");
+    previousNode.type = "button";
+    previousNode.className = "player-toggle";
+    previousNode.textContent = playerStrings.previous;
+    previousNode.addEventListener("click", () => previous());
     toggleNode = document.createElement("button");
     toggleNode.type = "button";
-    toggleNode.className = "player-toggle";
+    toggleNode.className = "player-toggle player-play";
     toggleNode.addEventListener("click", () => togglePlayPause());
+    nextNode = document.createElement("button");
+    nextNode.type = "button";
+    nextNode.className = "player-toggle";
+    nextNode.textContent = playerStrings.next;
+    nextNode.addEventListener("click", () => next());
+    const transport = document.createElement("div");
+    transport.className = "player-transport";
+    transport.append(previousNode, toggleNode, nextNode);
     const seekWrap = document.createElement("div");
     seekWrap.className = "player-seek";
     const elapsedWrap = document.createElement("span");
@@ -798,6 +883,8 @@
     elapsedLabel.textContent = playerStrings.elapsed;
     elapsedNode = document.createElement("span");
     elapsedWrap.append(elapsedLabel, elapsedNode);
+    const track = document.createElement("div");
+    track.className = "player-seek-track";
     seekNode = document.createElement("input");
     seekNode.type = "range";
     seekNode.className = "player-range";
@@ -818,6 +905,10 @@
       if (!seekNode) return;
       seek(Number(seekNode.value));
     });
+    seekNode.addEventListener("keydown", onSeekKey);
+    cueLayer = document.createElement("div");
+    cueLayer.className = "player-cues";
+    track.append(seekNode, cueLayer);
     const totalWrap = document.createElement("span");
     totalWrap.className = "player-time";
     const totalLabel = document.createElement("span");
@@ -825,7 +916,7 @@
     totalLabel.textContent = playerStrings.duration;
     totalNode = document.createElement("span");
     totalWrap.append(totalLabel, totalNode);
-    seekWrap.append(elapsedWrap, seekNode, totalWrap);
+    seekWrap.append(elapsedWrap, track, totalWrap);
     const volumeLabel = document.createElement("label");
     volumeLabel.className = "player-volume";
     const volumeText = document.createElement("span");
@@ -837,35 +928,89 @@
     volumeInput.step = "0.01";
     volumeInput.value = String(volume);
     volumeInput.addEventListener("input", () => {
-      const next = Number(volumeInput.value);
-      if (!Number.isFinite(next)) return;
-      volume = Math.min(1, Math.max(0, next));
+      const next2 = Number(volumeInput.value);
+      if (!Number.isFinite(next2)) return;
+      volume = Math.min(1, Math.max(0, next2));
       ensureMedia().volume = volume;
       emit();
     });
     volumeLabel.append(volumeText, volumeInput);
     const bar = document.createElement("div");
     bar.className = "player-controls";
-    bar.append(meta, toggleNode, seekWrap, volumeLabel);
+    bar.append(meta, transport, seekWrap, volumeLabel);
     return bar;
   }
+  function onSeekKey(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+    const forward = event.key === "ArrowRight" || event.key === "ArrowUp";
+    const back = event.key === "ArrowLeft" || event.key === "ArrowDown";
+    if (!forward && !back) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = event.shiftKey ? SEEK_STEP_LARGE_SECONDS : SEEK_STEP_SECONDS;
+    seekBy((forward ? 1 : -1) * step);
+  }
   function paintBar() {
-    if (!titleNode || !artistNode || !statusNode || !toggleNode || !seekNode || !elapsedNode || !totalNode) return;
+    if (!titleNode || !artistNode || !statusNode || !toggleNode || !previousNode || !nextNode) return;
+    if (!seekNode || !elapsedNode || !totalNode) return;
     const loaded = trackId !== null;
-    titleNode.textContent = loaded ? title || playerStrings.untitled : playerStrings.nothingPlaying;
+    const shownTitle = loaded ? title || playerStrings.untitled : playerStrings.nothingPlaying;
+    titleNode.textContent = shownTitle;
+    titleNode.title = shownTitle;
     artistNode.textContent = artist;
     artistNode.hidden = artist === "";
+    artistNode.title = artist;
     statusNode.textContent = error;
     statusNode.hidden = error === "";
-    toggleNode.textContent = playing ? playerStrings.pause : playerStrings.play;
-    toggleNode.disabled = !loaded;
+    statusNode.title = error;
+    const action = playing ? playerStrings.pause : playerStrings.play;
+    const named = loaded ? title || playerStrings.untitled : "";
+    toggleNode.textContent = action;
+    toggleNode.disabled = !loaded && selectedPlayableId() === null;
     toggleNode.setAttribute("aria-pressed", String(playing));
+    toggleNode.setAttribute("aria-label", named ? `${action} ${named}` : action);
+    previousNode.disabled = !canMove(-1);
+    nextNode.disabled = !canMove(1);
+    previousNode.setAttribute("aria-label", playerStrings.previous);
+    nextNode.setAttribute("aria-label", playerStrings.next);
     const limit = Number.isFinite(duration) && duration > 0 ? duration : 0;
     seekNode.max = String(limit);
     seekNode.disabled = !loaded || limit === 0;
     if (!seeking) seekNode.value = String(Math.min(currentTime, limit || currentTime));
     elapsedNode.textContent = formatPlayerTime(currentTime);
     totalNode.textContent = formatPlayerTime(duration);
+    paintCues(limit);
+  }
+  function canMove(delta) {
+    const rows2 = playableRows();
+    if (rows2.length === 0) return false;
+    const index = anchorIndex(rows2);
+    if (index < 0) return true;
+    return Boolean(rows2[index + delta]);
+  }
+  function paintCues(limit) {
+    if (!cueLayer) return;
+    const key = `${limit}|${cues.map((cue) => `${cue.seconds}:${cue.label}:${cue.color}`).join(";")}`;
+    if (key === paintedCueKey) return;
+    paintedCueKey = key;
+    cueLayer.replaceChildren();
+    if (!(limit > 0) || cues.length === 0) return;
+    for (const cue of cues) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "player-cue";
+      const ratio = Math.min(1, Math.max(0, cue.seconds / limit));
+      const percent = Math.round(ratio * 1e3) / 10;
+      button.style.left = `${percent}%`;
+      if (cue.color) button.style.setProperty("--cue", cue.color);
+      const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.addEventListener("click", () => {
+        seek(cue.seconds);
+      });
+      cueLayer.append(button);
+    }
   }
 
   // src/virtual-scroll.ts
@@ -997,15 +1142,23 @@
   function moveSelection(delta) {
     const view = state.view || [];
     const index = view.findIndex((track) => track.id === state.selectedId);
-    const next = view[Math.max(0, Math.min(view.length - 1, index + delta))];
-    if (!next) return;
-    if (next.entry) bridge.selectEntry(next.id);
-    else bridge.selectTrack(next.id);
-    const rowTop = view.indexOf(next) * ROW;
+    const next2 = view[Math.max(0, Math.min(view.length - 1, index + delta))];
+    if (!next2) return;
+    if (next2.entry) bridge.selectEntry(next2.id);
+    else bridge.selectTrack(next2.id);
+    const rowTop = view.indexOf(next2) * ROW;
     if (rowTop < el("list").scrollTop) el("list").scrollTop = rowTop;
     if (rowTop + ROW > el("list").scrollTop + el("list").clientHeight) {
       el("list").scrollTop = rowTop + ROW - el("list").clientHeight;
     }
+  }
+  function focusedTrack(target) {
+    if (!(target instanceof Element)) return void 0;
+    const row = target.closest(".row");
+    if (!row) return void 0;
+    const id = Number(row.getAttribute("data-id"));
+    if (!Number.isInteger(id)) return void 0;
+    return state.view.find((item) => item.id === id);
   }
   function wireVirtualScroll() {
     el("list").addEventListener("scroll", () => paintRows());
@@ -1017,18 +1170,19 @@
         event.preventDefault();
         moveSelection(-1);
       } else if (event.key === "Enter") {
-        const selected = state.view.find((item) => item.id === state.selectedId);
-        if (!selected || selected.entry) return;
+        const chosen = focusedTrack(event.target) ?? state.view.find((item) => item.id === state.selectedId);
+        if (!chosen || chosen.entry) return;
         event.preventDefault();
-        play(selected.id);
+        void bridge.selectTrack(chosen.id);
+        play(chosen.id);
       }
     });
     let paintedId = null;
     let paintedPlaying = false;
-    subscribe((next) => {
-      if (next.trackId === paintedId && next.playing === paintedPlaying) return;
-      paintedId = next.trackId;
-      paintedPlaying = next.playing;
+    subscribe((next2) => {
+      if (next2.trackId === paintedId && next2.playing === paintedPlaying) return;
+      paintedId = next2.trackId;
+      paintedPlaying = next2.playing;
       paintRows();
     });
   }
@@ -4699,7 +4853,6 @@
   }
   mountTrackList();
   mountPlayer();
-  bindSpaceToggle();
   wireLibrary();
   wireVirtualScroll();
   wireShortcuts();

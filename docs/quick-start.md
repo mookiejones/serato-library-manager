@@ -120,7 +120,7 @@ You land in **Crates**. The space menu reads **Library**, **Video**, **Apple Mus
 
 Use **Search tracks**, then click a tune. Cue points show on the right. They are read from the audio file. Press `/` to jump to that search. Press Ctrl+K (Command+K on a Mac) to find a track or a file on disk. **Shortcuts**, at the bottom of the sidebar, lists the other keys.
 
-Double-click a row, or click **Play**, to hear it. The bar under the list shows the title, the artist, pause, a seek bar, and volume. Space pauses and resumes unless you are typing. Playback does not write to the audio file and does not add a history row.
+Double-click a row, press **Enter**, or click **Play**, to hear it. The bar under the list shows the title, the artist, previous and next, pause, a seek bar with the file's cue points, and volume. Playback does not write to the audio file and does not add a history row.
 
 The other views are **History**, **Missing**, **Duplicates**, **Stems**, **Files**, and **Snapshots**.
 

@@ -15,5 +15,9 @@ export const playerStrings = {
   duration: "Duration",
   nothingPlaying: "Nothing playing",
   untitled: "Untitled",
+  previous: "Previous",
+  next: "Next",
+  cue: "Cue",
   cannotPlay: "This file cannot be played in this window.",
+  notInLibrary: "Not in the library or file missing",
 } as const;

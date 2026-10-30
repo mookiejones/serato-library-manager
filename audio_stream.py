@@ -1,9 +1,9 @@
 """Stream one library audio file with HTTP Range requests.
 
 The request may name a track only by its library id. The id is read from
-the raw query string and must be decimal digits, so a path, a ``..``
-segment, or a percent-encoded id is refused before the database is
-opened. The stored path is resolved with ``os.path.realpath``. It must be
+the raw query string and must be decimal digits, so a ``path`` parameter,
+a ``..`` segment, or a percent-encoded id is refused before the database
+is opened. A ``path`` parameter is refused even when an id is also present. The stored path is resolved with ``os.path.realpath``. It must be
 a regular audio file. Playback is allowed when that real path sits inside
 a music root (each root is realpath'd too) or when it is exactly the
 file the library row names. A file symlink is refused when its real path
@@ -186,15 +186,19 @@ def parse_track_id(raw_query: str) -> int:
     Raises:
         AudioRefusal: The id is missing, percent-encoded, double-encoded,
             or not a decimal integer. A ``..`` segment is in that last group.
+            A ``path`` parameter is refused with or without an id.
     """
     if "\x00" in raw_query:
         raise AudioRefusal("That request is not valid.", 400)
     value: str | None = None
     for part in raw_query.split("&"):
         name, separator, item = part.partition("=")
-        if name == "id" and separator:
+        if not separator:
+            continue
+        if name == "path":
+            raise AudioRefusal("That request is not valid.", 400)
+        if name == "id" and value is None:
             value = item
-            break
     if value is None or value == "":
         raise AudioRefusal("That request is not valid.", 400)
     if "%" in value or "+" in value or _TRACK_ID.fullmatch(value) is None:

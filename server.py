@@ -2311,7 +2311,7 @@ class Handler(BaseHTTPRequestHandler):
         Args:
             raw_query: Query text still percent-encoded. The track id is
                 taken from this string and must be decimal digits. A
-                filesystem path in the query is ignored.
+                ``path`` parameter is refused, including beside an id.
             query: Parsed query. ``space`` limits the id to that space.
             head: When true, send headers and no body. The file is not opened.
 
