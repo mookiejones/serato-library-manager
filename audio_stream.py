@@ -1,21 +1,22 @@
 """Stream one library audio file with HTTP Range requests.
 
-The file that is opened is taken from the Serato library index. A request
-path is only a lookup key: it is normalized with ``os.path.realpath`` and
-must name a regular file already stored on an asset row. A path that is
-not in that index, a path that climbs with ``..``, and a symlink are
-refused before any audio bytes are read. The file is opened read-only and
-is never locked. Nothing under the Serato library folder is written.
+The request may name a track only by its library id. The id is read from
+the raw query string and must be decimal digits, so a path, a ``..``
+segment, or a percent-encoded id is refused before the database is
+opened. The stored path is resolved with ``os.path.realpath``. It must be
+a regular audio file. Playback is allowed when that real path sits inside
+a music root (each root is realpath'd too) or when it is exactly the file
+the library row names and a symlink did not carry it outside those roots.
+A symlinked folder that stays inside a root still plays. The file is
+opened read-only, in chunks, and nothing under the Serato folder is written.
 """
 
 from __future__ import annotations
 
-import errno
 import os
 import re
 import sqlite3
 import stat
-import threading
 from collections.abc import Iterator
 from contextlib import closing
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ _CONTENT_TYPES = {
     ".mp3": "audio/mpeg",
     ".m4a": "audio/mp4",
     ".aac": "audio/aac",
+    ".alac": "audio/mp4",
     ".flac": "audio/flac",
     ".wav": "audio/wav",
     ".aiff": "audio/aiff",
@@ -38,13 +40,10 @@ _CONTENT_TYPES = {
     ".ogg": "audio/ogg",
     ".oga": "audio/ogg",
 }
+_AUDIO_SUFFIXES = frozenset(_CONTENT_TYPES)
+_TRACK_ID = re.compile(r"[0-9]{1,18}")
 
 _RANGE = re.compile(r"^bytes=(\d*)-(\d*)$", re.IGNORECASE)
-_SPLIT = re.compile(r"[\\/]")
-
-_index_lock = threading.Lock()
-_cached_index: dict[str, Path] | None = None
-_cached_token: tuple[int, int] | None = None
 
 
 class AudioRefusal(Exception):
@@ -162,48 +161,81 @@ def parse_range(header: str | None, size: int) -> ByteRange:
 
 
 def invalidate_index() -> None:
-    """Drop the cached map of library audio paths.
+    """Drop the cached music roots used to decide where a track may play.
 
-    The next play rebuilds it from ``master.sqlite``. Called when the
-    server drops its library cache, including at the end of a test.
+    The next play reads the roots again. Called when the server drops its
+    library cache, including at the end of a test.
     """
-    global _cached_index, _cached_token
-    with _index_lock:
-        _cached_index = None
-        _cached_token = None
+    import music_roots
+
+    music_roots.invalidate()
 
 
-def resolve_audio(
-    *,
-    asset_id: int | None,
-    raw_path: str | None,
-    space: str | None,
-) -> AudioTarget:
-    """Resolve a library id or a path to one real audio file.
+def parse_track_id(raw_query: str) -> int:
+    """Return the asset id from a raw query string.
 
     Args:
-        asset_id: Asset id from the page. None when the request names a path.
-        raw_path: Request path. Used only when ``asset_id`` is None. It is
-            not opened. A relative path, a ``..`` segment, or a symlink is
-            refused.
-        space: Space that must contain the asset. None allows any space.
-            Ignored for a path request: the path must still be in the index.
+        raw_query: The query text from the request URL, still percent-encoded.
+            ``parse_qs`` is not used, so ``%31`` is not turned into ``1``.
 
     Returns:
-        The indexed file, its size, and its Content-Type.
+        The asset id.
 
     Raises:
-        AudioRefusal: The request is malformed, the track is not in the
-            library, or the path is outside the index.
+        AudioRefusal: The id is missing, percent-encoded, double-encoded,
+            or not a decimal integer. A ``..`` segment is in that last group.
+    """
+    if "\x00" in raw_query:
+        raise AudioRefusal("That request is not valid.", 400)
+    value: str | None = None
+    for part in raw_query.split("&"):
+        name, separator, item = part.partition("=")
+        if name == "id" and separator:
+            value = item
+            break
+    if value is None or value == "":
+        raise AudioRefusal("That request is not valid.", 400)
+    if "%" in value or "+" in value or _TRACK_ID.fullmatch(value) is None:
+        raise AudioRefusal("That request is not valid.", 400)
+    return int(value)
+
+
+def resolve_audio(*, asset_id: int, space: str | None) -> AudioTarget:
+    """Resolve one library id to a real audio file.
+
+    Args:
+        asset_id: Asset id that :func:`parse_track_id` already checked.
+        space: Space that must contain the asset. None allows any space.
+
+    Returns:
+        The file to stream, its size, and its Content-Type.
+
+    Raises:
+        AudioRefusal: The id is not in the library, the stored path is not
+            a regular audio file, or the resolved path is outside the
+            music roots because a symlink carried it there.
         LibraryError: The database file is not there.
     """
-    if asset_id is None and (raw_path is None or raw_path == ""):
-        raise AudioRefusal("That request is not valid.", 400)
-    if asset_id is not None:
-        return _resolve_id(asset_id, space)
-    if raw_path is None:
-        raise AudioRefusal("That request is not valid.", 400)
-    return _resolve_path(raw_path)
+    row = _asset_row(asset_id, space)
+    if row is None:
+        raise AudioRefusal("That track is not in the library.", 404)
+    located = _locate(row["portable_id"])
+    if located is None:
+        raise AudioRefusal("That track is not in the library.", 404)
+    nominal, real = located
+    if not _is_regular_file(real):
+        raise AudioRefusal("That file is not in the library.", 403)
+    if real.suffix.lower() not in _AUDIO_SUFFIXES:
+        raise AudioRefusal("That file is not in the library.", 403)
+    if not library_allows(real, nominal):
+        raise AudioRefusal("That file is not in the library.", 403)
+    try:
+        info = real.lstat()
+    except OSError as exc:
+        raise AudioRefusal("That track is not in the library.", 404) from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise AudioRefusal("That file is not in the library.", 403)
+    return AudioTarget(path=real, size=info.st_size, media_type=content_type_for(real))
 
 
 def iter_bytes(path: Path, start: int, end: int, chunk_size: int = CHUNK) -> Iterator[bytes]:
@@ -223,8 +255,7 @@ def iter_bytes(path: Path, start: int, end: int, chunk_size: int = CHUNK) -> Ite
         The next chunk. The concatenation is the requested slice.
 
     Raises:
-        OSError: The file cannot be opened for reading, including when it
-            is a symlink at the moment of the open.
+        OSError: The file cannot be opened for reading.
     """
     length = 0 if end < start else end - start + 1
     handle = _open_read(path)
@@ -242,127 +273,32 @@ def iter_bytes(path: Path, start: int, end: int, chunk_size: int = CHUNK) -> Ite
         handle.close()
 
 
-def indexed_path(real: Path) -> Path | None:
-    """Return the indexed file for a real path, or None when it is outside.
-
-    The value is the path stored from the asset row. It is not the request
-    string, even when the two names are the same file. Removing this
-    membership test is what lets a path outside the library through.
+def library_allows(real: Path, nominal: Path) -> bool:
+    """Return whether a resolved library file may be opened.
 
     Args:
-        real: Normalized real path of the file the caller wants to open.
+        real: ``os.path.realpath`` of the stored path. This is the file
+            that would be read.
+        nominal: Absolute stored path before that resolution. A symlink
+            leaf stays a symlink here.
 
     Returns:
-        The library path to open, or None when ``real`` is not indexed.
+        True when ``real`` is inside a realpath'd music root, or when it
+        is exactly the file the library row names and a symlink did not
+        land outside those roots. False is what refuses a shortcut to a
+        file outside the roots. Returning True for every call is what
+        lets that shortcut through.
     """
-    return _index().get(_key(real))
-
-
-def _resolve_id(asset_id: int, space: str | None) -> AudioTarget:
-    """Resolve one asset id through the library index.
-
-    Args:
-        asset_id: Asset id. A negative id is refused by the caller.
-        space: Space that must contain the asset, or None for any space.
-
-    Returns:
-        The indexed audio file.
-
-    Raises:
-        AudioRefusal: The id is not in the library, or the stored path is
-            missing or is a symlink.
-        LibraryError: The database file is not there.
-    """
-    row = _asset_row(asset_id, space)
-    if row is None:
-        raise AudioRefusal("That track is not in the library.", 404)
-    canonical = _canonical_library_file(row["portable_id"])
-    if canonical is None:
-        raise AudioRefusal("That track is not in the library.", 404)
-    return _target_for(canonical)
-
-
-def _resolve_path(raw: str) -> AudioTarget:
-    """Resolve a request path through the library index.
-
-    Args:
-        raw: Path from the query string.
-
-    Returns:
-        The indexed audio file.
-
-    Raises:
-        AudioRefusal: The path is malformed, climbs out with ``..``, is a
-            symlink, or is not in the library index.
-    """
-    _refuse_raw_path(raw)
+    roots = _music_root_reals()
+    if _inside_any(real, roots):
+        return True
     try:
-        candidate = Path(raw)
-        linked = candidate.is_symlink()
-    except (OSError, ValueError) as exc:
-        raise AudioRefusal("That track is not in the library.", 404) from exc
-    if linked:
-        raise AudioRefusal("That file is not in the library.", 403)
-    try:
-        real = Path(os.path.realpath(candidate))
-    except (OSError, ValueError) as exc:
-        raise AudioRefusal("That track is not in the library.", 404) from exc
-    return _target_for(real)
-
-
-def _refuse_raw_path(raw: str) -> None:
-    """Refuse a path that is not a single absolute name.
-
-    Args:
-        raw: Path from the query string.
-
-    Raises:
-        AudioRefusal: A null, an empty path, a path that is too long, a
-            relative path, or a ``..`` segment. The ``..`` refusal happens
-            before ``realpath``, so a climb that lands on a library file
-            is still refused.
-    """
-    if "\x00" in raw or len(raw) > 4096 or not raw.strip():
-        raise AudioRefusal("That request is not valid.", 400)
-    if _contains_traversal(raw) or not os.path.isabs(raw):
-        raise AudioRefusal("That file is not in the library.", 403)
-
-
-def _contains_traversal(raw: str) -> bool:
-    """Return whether a path has a ``..`` segment.
-
-    Args:
-        raw: Path text. Slashes and backslashes both separate segments.
-
-    Returns:
-        True when a segment is exactly ``..``.
-    """
-    return ".." in _SPLIT.split(raw)
-
-
-def _target_for(real: Path) -> AudioTarget:
-    """Build a stream target when ``real`` is in the library index.
-
-    Args:
-        real: Normalized real path.
-
-    Returns:
-        The indexed file and its size.
-
-    Raises:
-        AudioRefusal: ``real`` is not in the index, or it is no longer a
-            regular file.
-    """
-    indexed = indexed_path(real)
-    if indexed is None:
-        raise AudioRefusal("That file is not in the library.", 403)
-    try:
-        info = indexed.lstat()
-    except OSError as exc:
-        raise AudioRefusal("That track is not in the library.", 404) from exc
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise AudioRefusal("That file is not in the library.", 403)
-    return AudioTarget(path=indexed, size=info.st_size, media_type=content_type_for(indexed))
+        named = Path(os.path.realpath(nominal))
+    except OSError:
+        return False
+    if _key(real) != _key(named):
+        return False
+    return not _symlink_leaves_roots(nominal, real, roots)
 
 
 def _asset_row(asset_id: int, space: str | None) -> sqlite3.Row | None:
@@ -396,95 +332,183 @@ def _asset_row(asset_id: int, space: str | None) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def _index() -> dict[str, Path]:
-    """Return the real paths of playable library files, keyed for lookup.
-
-    The map is cached until ``master.sqlite`` changes size or mtime, or
-    until ``invalidate_index`` runs. Building it only reads the database
-    and stats audio files.
-
-    Returns:
-        A map from ``normcase`` real path to the path that may be opened.
-
-    Raises:
-        LibraryError: The database file is not there.
-    """
-    global _cached_index, _cached_token
-    token = _library_token()
-    with _index_lock:
-        if token is not None and token == _cached_token and _cached_index is not None:
-            return _cached_index
-    built = _build_index()
-    with _index_lock:
-        _cached_index = built
-        _cached_token = token
-        return built
-
-
-def _library_token() -> tuple[int, int] | None:
-    """Return the size and mtime of the open library file.
-
-    Returns:
-        ``(mtime_ns, size)``, or None when the file cannot be statted.
-    """
-    database = Path(library.MASTER)
-    try:
-        info = database.stat()
-    except OSError:
-        return None
-    return (info.st_mtime_ns, info.st_size)
-
-
-def _build_index() -> dict[str, Path]:
-    """Read asset paths and keep the regular files.
-
-    A symlink stored as a portable id is left out, so following it cannot
-    add a file outside the path Serato recorded.
-
-    Returns:
-        The index map. Empty when the database has no playable files.
-
-    Raises:
-        LibraryError: The database file is not there.
-    """
-    with closing(library.read_conn()) as conn:
-        rows = conn.execute("SELECT portable_id FROM asset").fetchall()
-    index: dict[str, Path] = {}
-    for row in rows:
-        canonical = _canonical_library_file(row["portable_id"])
-        if canonical is None:
-            continue
-        index[_key(canonical)] = canonical
-    return index
-
-
-def _canonical_library_file(portable_id: object) -> Path | None:
-    """Resolve one stored portable id to a real regular file.
+def _locate(portable_id: object) -> tuple[Path, Path] | None:
+    """Resolve a stored portable id to a nominal path and its real path.
 
     Args:
         portable_id: Value from the asset row.
 
     Returns:
-        The real path, or None when it is empty, missing, or a symlink.
+        The absolute stored path and ``os.path.realpath`` of that path.
+        None when the id is empty or no candidate exists. A symlink is
+        kept as the nominal path so a later check can see that it was followed.
     """
     if not isinstance(portable_id, str) or not portable_id or "\x00" in portable_id:
         return None
     raw = Path(portable_id)
     # Relative ids are tried under the home directory first, then at the
-    # filesystem root. An absolute id is used as stored. This matches
-    # library._resolved so a file the detail pane can see can be played.
+    # filesystem root. An absolute id is used as stored.
     candidates = [raw] if raw.is_absolute() else [Path.home() / portable_id, Path("/") / portable_id]
     for candidate in candidates:
         try:
-            if candidate.is_symlink() or not candidate.is_file():
+            if not candidate.exists():
                 continue
-            real = Path(os.path.realpath(candidate))
-            if real.is_symlink() or not real.is_file():
+            nominal = candidate if candidate.is_absolute() else candidate.absolute()
+            real = Path(os.path.realpath(nominal))
+            if not real.exists():
                 continue
-            return real
+            return nominal, real
         except (OSError, ValueError):
             continue
     return None
+
+
+def _is_regular_file(path: Path) -> bool:
+    """Return whether ``path`` is a regular file and not a directory.
+
+    Args:
+        path: Real path.
+
+    Returns:
+        True when ``lstat`` reports a regular file.
+    """
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and not stat.S_ISDIR(info.st_mode)
+
+
+def _music_root_reals() -> list[Path]:
+    """Return the real paths of the music roots that are on disk.
+
+    Returns:
+        One real directory per root. A missing root is skipped. A failure
+        to read the roots is an empty list, so the exact-file check still
+        decides.
+    """
+    import music_roots
+
+    try:
+        rows = music_roots.music_roots()
+    except (OSError, library.LibraryError, sqlite3.Error):
+        return []
+    found: list[Path] = []
+    for row in rows:
+        if row.get("missing"):
+            continue
+        path = row.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        try:
+            real = Path(os.path.realpath(path))
+            if real.is_dir():
+                found.append(real)
+        except OSError:
+            continue
+    return found
+
+
+def _inside_any(child: Path, roots: list[Path]) -> bool:
+    """Return whether ``child`` is one of ``roots`` or a file inside one.
+
+    Args:
+        child: Real path.
+        roots: Real directories.
+
+    Returns:
+        True when a root contains ``child``. A sibling whose name only
+        starts with the root name does not count.
+    """
+    for root in roots:
+        if _inside(child, root):
+            return True
+    return False
+
+
+def _inside(child: Path, root: Path) -> bool:
+    """Return whether ``child`` is ``root`` or a path inside it.
+
+    Args:
+        child: Real path.
+        root: Real directory.
+
+    Returns:
+        True when the normalized paths share ``root`` as their common path.
+    """
+    child_text = _key(child)
+    root_text = _key(root)
+    if child_text == root_text:
+        return True
+    try:
+        return os.path.commonpath([child_text, root_text]) == root_text
+    except ValueError:
+        return False
+
+
+def _symlink_leaves_roots(nominal: Path, real: Path, roots: list[Path]) -> bool:
+    """Return whether a symlink carried ``real`` outside the music roots.
+
+    Args:
+        nominal: Stored path. A symlink leaf is still a symlink.
+        real: Real path of that file.
+        roots: Real music roots. An empty list does not treat an operating
+            system shortcut such as ``/tmp`` as an escape.
+
+    Returns:
+        True when the leaf is a symlink, or a directory symlink on the
+        path lands outside every root. A shortcut that is only an ancestor
+        of a root, such as ``/tmp`` on macOS, is not an escape.
+    """
+    if _inside_any(real, roots):
+        return False
+    try:
+        if nominal.is_symlink():
+            return True
+        current = nominal.parent
+        while True:
+            if current.is_symlink():
+                target = Path(os.path.realpath(current))
+                if _inside(real, target) and not _ancestor_of_any_root(target, roots):
+                    return True
+            if current.parent == current:
+                break
+            current = current.parent
+    except OSError:
+        return True
+    return False
+
+
+def _ancestor_of_any_root(target: Path, roots: list[Path]) -> bool:
+    """Return whether ``target`` contains a music root.
+
+    Args:
+        target: Real path of a symlink.
+        roots: Real music roots.
+
+    Returns:
+        True when there are no roots, or when a root is ``target`` or a
+        directory inside it.
+    """
+    if not roots:
+        return True
+    return _inside_any_root_under(target, roots)
+
+
+def _inside_any_root_under(target: Path, roots: list[Path]) -> bool:
+    """Return whether any root is ``target`` or a folder inside it.
+
+    Args:
+        target: Real directory.
+        roots: Real music roots.
+
+    Returns:
+        True when one root stays inside ``target``.
+    """
+    for root in roots:
+        if _inside(root, target):
+            return True
+    return False
 
 
 def _key(path: Path) -> str:
@@ -510,10 +534,9 @@ def _open_read(path: Path) -> BinaryIO:
         closes it.
 
     Raises:
-        OSError: The path is a symlink, or it cannot be opened read-only.
+        OSError: The path cannot be opened read-only. ``O_NOFOLLOW`` refuses
+            a last component that was replaced with a symlink after the check.
     """
-    if os.path.islink(path):
-        raise OSError(errno.ELOOP, "That file is not in the library.")
     flags = os.O_RDONLY
     if os.name == "nt":
         flags |= os.O_BINARY

@@ -12,4 +12,4 @@ Seek by dragging the bar. The time on the left is where you are. The time on the
 
 MP3, M4A, AAC, FLAC, WAV, AIFF, and OGG are the types the server will send. If this window cannot play a file, the bar says **This file cannot be played in this window.**
 
-A track that is not in the library is not played. A shortcut to a file outside the library is not followed.
+A track that is not in the library is not played. Music that lives in a shortcut folder inside your music folders still plays. A shortcut that points at a file outside those folders does not.

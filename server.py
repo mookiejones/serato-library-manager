@@ -1625,7 +1625,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(as_dict(_library_call("status")))
                 return
             if parsed.path == "/api/audio":
-                self._serve_audio(query, head=False)
+                self._serve_audio(parsed.query, query, head=False)
                 return
             if parsed.path == "/api/track":
                 raw = query_text(query, "id", "") or ""
@@ -1751,7 +1751,7 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path != "/api/audio":
                 self.send_error(501, "Unsupported method")
                 return
-            self._serve_audio(parse_qs(parsed.query), head=True)
+            self._serve_audio(parsed.query, parse_qs(parsed.query), head=True)
         except Exception as exc:
             self._report_failure(exc)
 
@@ -2305,34 +2305,20 @@ class Handler(BaseHTTPRequestHandler):
         report = drive_check.check_drive(raw, crates or None)
         self.send_json(report.to_dict())
 
-    def _serve_audio(self, query: dict[str, list[str]], *, head: bool) -> None:
+    def _serve_audio(self, raw_query: str, query: dict[str, list[str]], *, head: bool) -> None:
         """Stream one library track, or send the headers for HEAD.
 
         Args:
-            query: Parsed query. ``id`` is an asset id. ``path`` is used
-                only when ``id`` is absent, and only as a lookup into the
-                library index. ``space`` limits an id to that space.
+            raw_query: Query text still percent-encoded. The track id is
+                taken from this string and must be decimal digits. A
+                filesystem path in the query is ignored.
+            query: Parsed query. ``space`` limits the id to that space.
             head: When true, send headers and no body. The file is not opened.
 
-        The bytes are read in chunks from the indexed path. The request
-        path is never passed to ``open``. A refusal is JSON and does not
-        include a filesystem path.
+        The bytes are read in chunks from the resolved library file. A
+        refusal is JSON and does not include a filesystem path.
         """
-        raw_id = query_text(query, "id", "") or ""
-        raw_path = query_text(query, "path")
         space_text = query_text(query, "space")
-        asset_id: int | None
-        if raw_id == "":
-            asset_id = None
-        else:
-            try:
-                asset_id = int(raw_id)
-            except ValueError:
-                self.send_json({"error": "That request is not valid."}, status=400)
-                return
-            if asset_id < 0:
-                self.send_json({"error": "That request is not valid."}, status=400)
-                return
         space: str | None = None
         if space_text:
             try:
@@ -2341,11 +2327,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": exc.message}, status=exc.status)
                 return
         try:
-            target = audio_stream.resolve_audio(
-                asset_id=asset_id,
-                raw_path=None if asset_id is not None else raw_path,
-                space=space,
-            )
+            asset_id = audio_stream.parse_track_id(raw_query)
+            target = audio_stream.resolve_audio(asset_id=asset_id, space=space)
         except audio_stream.AudioRefusal as exc:
             self.send_json({"error": exc.message}, status=exc.status)
             return

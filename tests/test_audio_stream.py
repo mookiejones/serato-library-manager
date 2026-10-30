@@ -86,6 +86,7 @@ class RangeParseTests(unittest.TestCase):
             ".aiff": "audio/aiff",
             ".aif": "audio/aiff",
             ".ogg": "audio/ogg",
+            ".alac": "audio/mp4",
         }
         for suffix, media in expected.items():
             with self.subTest(suffix=suffix):
@@ -181,6 +182,33 @@ class AudioRouteTests(unittest.TestCase):
             )
         audio_stream.invalidate_index()
         return asset_id, path
+
+    def insert_asset(self, path: Path) -> int:
+        """Insert an asset row for a path that already exists.
+
+        Args:
+            path: Stored portable id. It may be a symlink.
+
+        Returns:
+            The new asset id.
+        """
+        asset_id = self._next_id
+        self._next_id += 1
+        with open_database(self.library.db) as conn:
+            conn.execute(
+                """
+                INSERT INTO asset
+                    (id, name, artist, portable_id, file_name, is_missing, length_ms)
+                VALUES (?, 'Tune', 'DJ', ?, ?, 0, 1000)
+                """,
+                (asset_id, str(path), path.name),
+            )
+            conn.execute(
+                "INSERT INTO space_asset (id, asset_id, space_id) VALUES (?, ?, 1)",
+                (asset_id, asset_id),
+            )
+        audio_stream.invalidate_index()
+        return asset_id
 
     def tree(self) -> list[tuple[str, int, int, str]]:
         """Fingerprint the temporary library directory.
@@ -303,133 +331,133 @@ class AudioRouteTests(unittest.TestCase):
         self.assertEqual(headers["content-type"], "audio/mpeg")
         self.assertEqual(headers["accept-ranges"], "bytes")
 
-    def test_path_outside_the_library_is_refused(self) -> None:
-        """Refuse a real file that is not an asset.
+    def link_or_skip(self, link: Path, target: Path, *, directory: bool = False) -> None:
+        """Create a symlink, or skip when this computer will not.
 
-        The file exists, is not a symlink, and has no ``..`` segment.
-        ``indexed_path`` is the check that refuses it. Returning that
-        real path from ``indexed_path`` without the index lookup would
-        serve ``SECRET`` and fail this test.
-
-        Returns:
-            None. The test fails if the status is not 403 or the secret
-            bytes are in the body.
-        """
-        secret = self.library.root / "secret.mp3"
-        secret.write_bytes(SECRET)
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": str(secret)}),
-        )
-        self.assertEqual(status, 403)
-        self.assertNotIn(SECRET, body)
-        self.assertNotIn(str(secret).encode(), body)
-
-    def test_traversal_is_refused(self) -> None:
-        """Refuse a ``..`` path even when it normalizes onto a library file.
-
-        The normalized file is the asset that would otherwise stream.
-        A realpath membership check alone would allow it. The ``..``
-        refusal runs first.
+        Args:
+            link: Path of the new symlink.
+            target: Existing file or directory.
+            directory: True when ``target`` is a directory. Windows needs
+                that flag.
 
         Returns:
-            None. The test fails if the library bytes are returned.
+            None.
+
+        The skip reason is only that symlink creation is not permitted.
+        Ubuntu and macOS still run the test.
         """
-        _asset_id, song = self.add_track("music/song.mp3", BODY)
-        nested = song.parent / "nested"
-        nested.mkdir()
-        climbed = nested / ".." / song.name
-        self.assertIn("..", climbed.parts)
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": str(climbed)}),
-        )
-        self.assertEqual(status, 403)
-        self.assertNotEqual(body, BODY)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            link.symlink_to(target, target_is_directory=directory)
+        except OSError as exc:
+            self.skipTest(f"symlink creation is not permitted on this computer ({exc})")
 
-    def test_symlink_escape_is_refused(self) -> None:
-        """Refuse a symlink whose target is outside the library index.
+    def test_symlink_folder_inside_a_music_root_is_allowed(self) -> None:
+        """Play a track reached through a symlinked folder inside a music root.
 
-        The link itself is not an asset. Its target is a real file that
-        is also not an asset. The response does not contain that file.
+        The stored path goes through the link. The real file stays inside
+        the root, so the response is the file bytes.
+
+        Returns:
+            None. The test fails if the symlinked folder is refused.
+        """
+        records = self.library.root / "music" / "records"
+        records.mkdir(parents=True)
+        song = records / "song.mp3"
+        song.write_bytes(BODY)
+        link = self.library.root / "music" / "linked"
+        self.link_or_skip(link, records, directory=True)
+        asset_id = self.insert_asset(link / "song.mp3")
+        status, _headers, body = self.exchange("GET", f"/api/audio?id={asset_id}")
+        self.assertIn(status, (200, 206))
+        self.assertEqual(body, BODY)
+
+    def test_symlink_outside_music_roots_is_refused(self) -> None:
+        """Refuse a library row whose file symlink lands outside the roots.
+
+        ``library_allows`` is the check. Returning True for every path
+        would serve ``SECRET`` and fail this test.
 
         Returns:
             None. The test fails if the secret bytes are streamed.
         """
-        secret = self.library.root / "secret.mp3"
+        secret_dir = self.library.root / "outside"
+        secret_dir.mkdir()
+        secret = secret_dir / "secret.mp3"
         secret.write_bytes(SECRET)
         link = self.library.root / "music" / "escape.mp3"
-        link.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            link.symlink_to(secret)
-        except OSError:
-            self.skipTest("symlinks are not available")
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": str(link)}),
-        )
+        self.link_or_skip(link, secret)
+        asset_id = self.insert_asset(link)
+        status, _headers, body = self.exchange("GET", f"/api/audio?id={asset_id}")
         self.assertEqual(status, 403)
         self.assertNotIn(SECRET, body)
 
-    def test_symlink_to_a_library_file_is_refused(self) -> None:
-        """Refuse a symlink even when its target is the indexed file.
+    def test_traversal_and_encoded_ids_are_refused(self) -> None:
+        """Refuse a non-digit id, including encoded and double-encoded forms.
 
-        realpath of the link is the library file, so the index would
-        allow it. The symlink check refuses it first.
-
-        Returns:
-            None. The test fails if the link is followed.
-        """
-        _asset_id, song = self.add_track("music/song.mp3", BODY)
-        link = song.parent / "alias.mp3"
-        try:
-            link.symlink_to(song)
-        except OSError:
-            self.skipTest("symlinks are not available")
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": str(link)}),
-        )
-        self.assertEqual(status, 403)
-        self.assertNotEqual(body, BODY)
-
-    def test_sibling_directory_is_refused(self) -> None:
-        """Refuse a file whose folder name only starts with a library folder.
-
-        ``music-backup`` is not ``music``. A string prefix check would
-        confuse them. The index does not.
+        The raw query is checked before percent-decoding, so ``%31`` is
+        not treated as track 1. A ``..`` segment is not an id either.
+        A filesystem ``path`` parameter is ignored.
 
         Returns:
-            None. The test fails if the sibling bytes are streamed.
+            None. The test fails if any of those queries returns audio bytes.
         """
-        self.add_track("music/a.mp3", BODY)
-        sibling = self.library.root / "music-backup" / "a.mp3"
-        sibling.parent.mkdir()
-        sibling.write_bytes(SECRET)
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": str(sibling)}),
+        asset_id, _path = self.add_track("music/song.mp3", BODY)
+        queries = (
+            "id=../1",
+            "id=1/../../etc/passwd",
+            "id=%2e%2e%2f1",
+            "id=%31",
+            "id=%2531",
+            f"path=/etc/passwd&id={asset_id}",
         )
-        self.assertEqual(status, 403)
-        self.assertNotIn(SECRET, body)
-
-    def test_library_path_is_streamed(self) -> None:
-        """Stream a path that is the real path of an asset.
-
-        The same bytes come back as a request by id. A path query is
-        still only a lookup.
-
-        Returns:
-            None. The test fails if an indexed path is refused.
-        """
-        _asset_id, song = self.add_track("music/song.mp3", BODY)
-        status, headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": str(song)}),
-        )
+        # The last query is a valid id plus an ignored path. Check it
+        # separately so a path cannot replace the library file.
+        for query in queries[:-1]:
+            with self.subTest(query=query):
+                status, _headers, body = self.exchange("GET", "/api/audio?" + query)
+                self.assertEqual(status, 400)
+                self.assertNotEqual(body, BODY)
+                self.assertNotIn(SECRET, body)
+        status, _headers, body = self.exchange("GET", "/api/audio?" + queries[-1])
         self.assertEqual(status, 200)
         self.assertEqual(body, BODY)
-        self.assertEqual(headers["content-type"], "audio/mpeg")
+
+    def test_directory_and_non_audio_file_are_refused(self) -> None:
+        """Refuse a directory and a file that is not an audio suffix.
+
+        Both rows exist in the library. Neither is streamed.
+
+        Returns:
+            None. The test fails if either body is returned as audio.
+        """
+        folder = self.library.root / "music" / "song.mp3"
+        folder.mkdir(parents=True)
+        folder_id = self.insert_asset(folder)
+        notes = self.library.root / "music" / "notes.txt"
+        notes.write_bytes(b"notes")
+        notes_id = self.insert_asset(notes)
+        for asset_id, label in ((folder_id, "directory"), (notes_id, "text")):
+            with self.subTest(kind=label):
+                status, _headers, body = self.exchange("GET", f"/api/audio?id={asset_id}")
+                self.assertEqual(status, 403)
+                self.assertNotIn(b"notes", body)
+                self.assertNotEqual(body, BODY)
+
+    def test_path_query_without_an_id_is_refused(self) -> None:
+        """Refuse a request that sends a filesystem path and no track id.
+
+        Returns:
+            None. The test fails if the path is opened.
+        """
+        secret = self.library.root / "secret.mp3"
+        secret.write_bytes(SECRET)
+        status, _headers, body = self.exchange(
+            "GET",
+            "/api/audio?path=" + urllib.parse.quote(str(secret)),
+        )
+        self.assertEqual(status, 400)
+        self.assertNotIn(SECRET, body)
 
     def test_streaming_leaves_the_library_tree_unchanged(self) -> None:
         """Leave the temporary Serato folder byte-for-byte after a play.
@@ -470,6 +498,7 @@ class AudioRouteTests(unittest.TestCase):
             ".wav": "audio/wav",
             ".aiff": "audio/aiff",
             ".ogg": "audio/ogg",
+            ".alac": "audio/mp4",
         }
         for suffix, media in suffixes.items():
             with self.subTest(suffix=suffix):
@@ -478,23 +507,6 @@ class AudioRouteTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(body, b"")
                 self.assertEqual(headers["content-type"], media)
-
-    def test_relative_path_is_refused(self) -> None:
-        """Refuse a relative path instead of joining it onto a directory.
-
-        The name matches the file on disk. It is still not absolute, so
-        it is not a lookup key.
-
-        Returns:
-            None. The test fails if the relative name streams the file.
-        """
-        _asset_id, song = self.add_track("music/song.mp3", BODY)
-        status, _headers, body = self.exchange(
-            "GET",
-            "/api/audio?" + urllib.parse.urlencode({"path": song.name}),
-        )
-        self.assertEqual(status, 403)
-        self.assertNotEqual(body, BODY)
 
     def test_unknown_id_is_404(self) -> None:
         """Refuse an asset id that is not in the database.

@@ -402,6 +402,7 @@ function wire(element: PlayableMedia): void {
 }
 
 function trackUrl(nextId: number): string {
+  // Id only. The route refuses a filesystem path, a ".." segment, and a percent-encoded id.
   const params = new URLSearchParams({ id: String(nextId), space: state.space });
   return `/api/audio?${params.toString()}`;
 }

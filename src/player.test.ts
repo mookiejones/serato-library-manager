@@ -81,6 +81,7 @@ describe("player API", () => {
     expect(isPlaying()).toBe(true);
     expect(fake.src).toContain("/api/audio?");
     expect(fake.src).toContain("id=4");
+    expect(fake.src).not.toContain("path=");
     expect(fake.src).toContain("space=Serato+Library");
     expect(getPlayerState().title).toBe("Night");
     expect(getPlayerState().artist).toBe("Ada");
