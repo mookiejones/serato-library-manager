@@ -1178,7 +1178,8 @@ class FileManagerTests(unittest.TestCase):
         self.assertEqual(match["kind"], "file")
         self.assertTrue(match["audio"])
         self.assertTrue(match["in_library"])
-        self.assertEqual(match["detail"], str(self.song.parent))
+        # Windows may spell the same temp folder with an 8.3 short name.
+        self.assertTrue(Path(str(match["detail"])).samefile(self.song.parent))
         self.assertTrue(str(match["path"]).endswith("same-a.mp3"))
 
     def test_search_is_case_insensitive_and_stays_in_the_folder(self) -> None:
