@@ -891,6 +891,21 @@ def assert_miniaudio_bundled(root: Path) -> None:
     raise SystemExit("The bundle does not contain the miniaudio extension")
 
 
+def assert_notices_bundled(root: Path) -> None:
+    """Require ``THIRD_PARTY_NOTICES.md`` inside a PyInstaller tree.
+
+    Args:
+        root: App bundle or the collected ``dist`` folder.
+
+    Raises:
+        SystemExit: The notices file is not in the tree.
+    """
+    for path in root.rglob("THIRD_PARTY_NOTICES.md"):
+        if path.is_file() and not path.is_symlink():
+            return
+    raise SystemExit("The bundle does not contain THIRD_PARTY_NOTICES.md")
+
+
 def verify_tree(dist: Path) -> Bundle:
     """Check bundle size and that its page matches ``static/``.
 
@@ -909,6 +924,7 @@ def verify_tree(dist: Path) -> Bundle:
     assert_size(str(bundle.root), directory_bytes(bundle.root), MIN_BUNDLE_BYTES, MAX_BUNDLE_BYTES)
     assert_static_matches(bundle.root, source_static())
     assert_miniaudio_bundled(bundle.root)
+    assert_notices_bundled(bundle.root)
     return bundle
 
 

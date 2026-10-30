@@ -67,9 +67,9 @@ import struct
 import subprocess
 import threading
 import wave
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
-from typing import BinaryIO, Callable
+from typing import BinaryIO, Callable, TypedDict
 
 import miniaudio
 import numpy as np
@@ -209,7 +209,34 @@ def analyze_samples(samples: np.ndarray, sample_rate: int, overview: bytes | Non
     return _pack(rows, total, overview)
 
 
-def parse_waveform(body: bytes) -> dict[str, object]:
+class WaveformHeader(TypedDict):
+    """Integer fields in an ``SWF1`` header."""
+
+    header_bytes: int
+    version: int
+    flags: int
+    analyzer_version: int
+    sample_rate: int
+    detail_hz_milli: int
+    duration_ms: int
+    detail_count: int
+    overview_count: int
+    serato_columns: int
+    serato_bands: int
+    reserved: int
+    low_hz_milli: int
+    high_hz_milli: int
+
+
+class WaveformParts(WaveformHeader):
+    """Header fields plus the three uint8 sections."""
+
+    detail: bytes
+    overview: bytes
+    serato: bytes
+
+
+def parse_waveform(body: bytes) -> WaveformParts:
     """Split an ``SWF1`` body into its header fields and sections.
 
     Args:
@@ -235,7 +262,26 @@ def parse_waveform(body: bytes) -> dict[str, object]:
     overview = body[offset:offset + overview_n]
     offset += overview_n
     serato = body[offset:offset + serato_n]
-    return {**header, "detail": detail, "overview": overview, "serato": serato}
+    parts: WaveformParts = {
+        "header_bytes": header["header_bytes"],
+        "version": header["version"],
+        "flags": header["flags"],
+        "analyzer_version": header["analyzer_version"],
+        "sample_rate": header["sample_rate"],
+        "detail_hz_milli": header["detail_hz_milli"],
+        "duration_ms": header["duration_ms"],
+        "detail_count": header["detail_count"],
+        "overview_count": header["overview_count"],
+        "serato_columns": header["serato_columns"],
+        "serato_bands": header["serato_bands"],
+        "reserved": header["reserved"],
+        "low_hz_milli": header["low_hz_milli"],
+        "high_hz_milli": header["high_hz_milli"],
+        "detail": detail,
+        "overview": overview,
+        "serato": serato,
+    }
+    return parts
 
 
 def describe(body: bytes, *, cached: bool) -> dict[str, object]:
@@ -294,7 +340,7 @@ def overview_document(path: Path) -> dict[str, object]:
     }
 
 
-def iter_pcm(path: Path) -> Iterator[np.ndarray]:
+def iter_pcm(path: Path) -> Generator[np.ndarray, None, None]:
     """Yield mono float samples at 44100 Hz for one file.
 
     Args:
@@ -352,6 +398,37 @@ def _render(path: Path, overview: bytes | None) -> bytes:
     if total <= 0 or rows.shape[0] == 0:
         raise WaveformUnavailable()
     return _pack(rows, total, overview)
+
+
+def analyze_chunks(chunks: Iterator[np.ndarray], overview: bytes | None = None) -> bytes:
+    """Analyze mono chunks that are already at 44100 Hz.
+
+    Args:
+        chunks: Sample blocks. They are consumed one block at a time.
+        overview: Normalized Serato Overview payload, or None.
+
+    Returns:
+        The ``SWF1`` body.
+
+    Raises:
+        WaveformUnavailable: The chunks contained no samples.
+    """
+    rows, total = _collect(chunks)
+    if total <= 0 or rows.shape[0] == 0:
+        raise WaveformUnavailable()
+    return _pack(rows, total, overview)
+
+
+def partial_cache_name(dest: Path) -> Path:
+    """Return a unique temporary path beside a cache file.
+
+    Args:
+        dest: Final cache file.
+
+    Returns:
+        The path :func:`_write_cache` replaces into ``dest``.
+    """
+    return _partial_cache_path(dest)
 
 
 def _collect(chunks: Iterator[np.ndarray]) -> tuple[np.ndarray, int]:
@@ -437,7 +514,7 @@ def _pack(rows: np.ndarray, total_samples: int, overview: bytes | None) -> bytes
     return header + bytes(16) + detail + overview_bytes + serato
 
 
-def _header(body: bytes) -> dict[str, int]:
+def _header(body: bytes) -> WaveformHeader:
     """Read the fixed ``SWF1`` header.
 
     Args:
@@ -454,24 +531,23 @@ def _header(body: bytes) -> dict[str, int]:
     unpacked = _HEADER.unpack_from(body, 0)
     if int(unpacked[1]) != HEADER_BYTES:
         raise ValueError("unexpected waveform header size")
-    names = (
-        "magic",
-        "header_bytes",
-        "version",
-        "flags",
-        "analyzer_version",
-        "sample_rate",
-        "detail_hz_milli",
-        "duration_ms",
-        "detail_count",
-        "overview_count",
-        "serato_columns",
-        "serato_bands",
-        "reserved",
-        "low_hz_milli",
-        "high_hz_milli",
-    )
-    return {name: unpacked[index] for index, name in enumerate(names) if name != "magic"}
+    header: WaveformHeader = {
+        "header_bytes": int(unpacked[1]),
+        "version": int(unpacked[2]),
+        "flags": int(unpacked[3]),
+        "analyzer_version": int(unpacked[4]),
+        "sample_rate": int(unpacked[5]),
+        "detail_hz_milli": int(unpacked[6]),
+        "duration_ms": int(unpacked[7]),
+        "detail_count": int(unpacked[8]),
+        "overview_count": int(unpacked[9]),
+        "serato_columns": int(unpacked[10]),
+        "serato_bands": int(unpacked[11]),
+        "reserved": int(unpacked[12]),
+        "low_hz_milli": int(unpacked[13]),
+        "high_hz_milli": int(unpacked[14]),
+    }
+    return header
 
 
 def _quantize(rows: np.ndarray) -> bytes:
@@ -804,7 +880,10 @@ def _open_wave(path: Path) -> Iterator[np.ndarray]:
     def chunks() -> Iterator[np.ndarray]:
         try:
             while True:
-                raw = handle.readframes(DECODE_FRAMES)
+                try:
+                    raw = handle.readframes(DECODE_FRAMES)
+                except (wave.Error, EOFError) as exc:
+                    raise WaveformUnavailable() from exc
                 if not raw:
                     break
                 yield _resample(_pcm_bytes(raw, width, channels, little=True), rate, ANALYZE_RATE)

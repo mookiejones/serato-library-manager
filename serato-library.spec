@@ -73,6 +73,7 @@ hidden = [
 binaries = collect_dynamic_libs("webview")
 datas = [
     (str(root / "static"), "static"),
+    (str(root / "THIRD_PARTY_NOTICES.md"), "."),
 ]
 datas += collect_data_files("webview")
 # CEF bundles Chromium. Qt WebEngine does too. Neither is a system web view.

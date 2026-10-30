@@ -20,6 +20,6 @@ If the track is not in the library, or the file is missing, the bar says **Not i
 
 MP3, M4A, AAC, ALAC, FLAC, WAV, AIFF, and OGG are the types the server will send.
 
-The server can also build a frequency-colored waveform for that same library id. WAV, AIFF, FLAC, MP3, and OGG are decoded on this computer. M4A, AAC, and ALAC need ffmpeg already installed; otherwise the waveform says it is unavailable and playback still works. An hour-long WAV is analyzed in about 8 seconds. The result is cached beside the app settings, not inside the Serato folder, and the audio file is not changed. Cue points, loops, and the beatgrid on the seek bar are read from the file and are not written back.
+The server can also build a frequency-colored waveform for that same library id. WAV, AIFF, FLAC, MP3, and OGG are decoded on this computer. M4A, AAC, and ALAC need ffmpeg already installed; otherwise the waveform says it is unavailable and playback still works. A 60-minute stereo 44.1 kHz WAV is analyzed in 7.9 seconds. The result is cached beside the app settings, not inside the Serato folder, and the audio file is not changed. Cue points, loops, and the beatgrid on the seek bar are read from the file and are not written back.
 
 Music that lives behind a shortcut folder still plays, including when that folder points at another disk. A shortcut that points at a file outside the folder named in the library does not.

@@ -574,6 +574,54 @@ def _write_m4a(path: Path, items: bytes) -> None:
     )
 
 
+def serato_b64(frame_name: str, payload: bytes, *, wrap: bool) -> bytes:
+    """Encode one Serato envelope for a fixture another test module can call.
+
+    Args:
+        frame_name: Name stored in the envelope.
+        payload: GEOB payload.
+        wrap: True inserts a newline every 72 characters.
+
+    Returns:
+        The unpadded base64 text.
+    """
+    return _serato_b64(frame_name, payload, wrap=wrap)
+
+
+def write_flac_fixture(path: Path, comments: list[bytes]) -> None:
+    """Write a tiny FLAC fixture for a test outside this module.
+
+    Args:
+        path: File to create or replace.
+        comments: Vorbis comments.
+    """
+    _write_flac(path, comments)
+
+
+def freeform_atom(name: str, value: bytes, *, null_terminate: bool) -> bytes:
+    """Build one Serato freeform atom for a test outside this module.
+
+    Args:
+        name: Atom name, such as ``overview``.
+        value: Data bytes.
+        null_terminate: True appends a null after the name.
+
+    Returns:
+        The atom bytes.
+    """
+    return _freeform(name, value, null_terminate=null_terminate)
+
+
+def write_m4a_fixture(path: Path, items: bytes) -> None:
+    """Write a tiny M4A fixture for a test outside this module.
+
+    Args:
+        path: File to create or replace.
+        items: Concatenated freeform atoms.
+    """
+    _write_m4a(path, items)
+
+
 def _line_wrapped_markers() -> bytes:
     """Build a Markers2 body with Serato's inner newline wrapping.
 

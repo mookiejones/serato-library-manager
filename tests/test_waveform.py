@@ -34,7 +34,7 @@ import waveform
 from tests.fixture import ROOT, TempLibrary, open_database
 
 FIXTURES = ROOT / "tests" / "fixtures"
-from tests.test_tags import _freeform, _serato_b64, _write_flac, _write_m4a
+from tests.test_tags import freeform_atom, serato_b64, write_flac_fixture, write_m4a_fixture
 
 SECRET = b"NOT-IN-LIBRARY-SECRET"
 _RATE = 44100
@@ -234,8 +234,7 @@ class BandTests(unittest.TestCase):
             for start in range(0, len(samples), 2048):
                 yield samples[start:start + 2048]
 
-        rows, total = waveform._collect(chunks())
-        streamed = waveform._pack(rows, total, None)
+        streamed = waveform.analyze_chunks(chunks())
         whole = waveform.analyze_samples(samples, _RATE)
         self.assertEqual(waveform.parse_waveform(streamed)["detail"], waveform.parse_waveform(whole)["detail"])
 
@@ -502,6 +501,40 @@ class DecoderTests(unittest.TestCase):
         self.assertTrue(proc.killed)
         self.assertTrue(proc.waited)
 
+    def test_truncated_wav_read_is_unavailable(self) -> None:
+        """Map a short WAV read to waveform unavailable.
+
+        The file is a real WAV with its tail cut off. miniaudio is refused
+        so the stdlib reader runs. ``readframes`` then raises ``wave.Error``,
+        which must not escape as an uncaught error.
+
+        Returns:
+            None. The test fails if the exception is not ``WaveformUnavailable``.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "cut.wav"
+            _write_wav(path, _sine(440.0, 0.5))
+            whole = path.read_bytes()
+            path.write_bytes(whole[: len(whole) // 2])
+            self.assertLess(path.stat().st_size, len(whole))
+            real_open = wave.open
+
+            def open_truncated(name: str, mode: str | None = None) -> wave.Wave_read:
+                handle = real_open(name, mode)
+
+                def readframes(_count: int) -> bytes:
+                    raise wave.Error("file is truncated")
+
+                setattr(handle, "readframes", readframes)
+                return handle
+
+            with mock.patch("waveform.miniaudio.stream_file", side_effect=RuntimeError("no")):
+                with mock.patch("waveform.shutil.which", return_value=None):
+                    with mock.patch("waveform.wave.open", open_truncated):
+                        with self.assertRaises(waveform.WaveformUnavailable) as caught:
+                            waveform.load(path)
+        self.assertEqual(caught.exception.message, "waveform unavailable")
+
 
 ANALYZE_SAFE = 44100
 
@@ -610,7 +643,7 @@ class CacheTests(unittest.TestCase):
         lock = threading.Lock()
 
         def grab() -> None:
-            path = waveform._partial_cache_path(dest)
+            path = waveform.partial_cache_name(dest)
             with lock:
                 found.append(path)
 
@@ -727,9 +760,9 @@ class OverviewTests(unittest.TestCase):
             m4a = root / "overview.m4a"
             ogg = root / "overview.ogg"
             _id3_overview(id3, payload)
-            wrapped = _serato_b64("Serato Overview", payload, wrap=True)
-            _write_flac(flac, [b"SERATO_OVERVIEW=" + wrapped])
-            _write_m4a(m4a, _freeform("overview", wrapped, null_terminate=False))
+            wrapped = serato_b64("Serato Overview", payload, wrap=True)
+            write_flac_fixture(flac, [b"SERATO_OVERVIEW=" + wrapped])
+            write_m4a_fixture(m4a, freeform_atom("overview", wrapped, null_terminate=False))
             ogg_value = ((1).to_bytes(4, "big") + (5).to_bytes(4, "big") + columns).hex().encode("ascii")
             _ogg_overview(ogg, ogg_value)
             originals = {path: path.read_bytes() for path in (id3, flac, m4a, ogg)}
@@ -769,9 +802,14 @@ class MarkerTests(unittest.TestCase):
                 self.assertGreaterEqual(len(parsed["beatgrid"]), 1)
                 if bpm is not None:
                     grid = parsed["beatgrid"]
-                    spacing = (grid[1]["position"] - grid[0]["position"]) / grid[0]["beats"]
+                    beats = grid[0].get("beats")
+                    last_bpm = grid[-1].get("bpm")
+                    self.assertIsNotNone(beats)
+                    self.assertIsNotNone(last_bpm)
+                    assert beats is not None and last_bpm is not None
+                    spacing = (grid[1]["position"] - grid[0]["position"]) / beats
                     self.assertAlmostEqual(spacing, 0.5)
-                    self.assertAlmostEqual(60.0 / grid[-1]["bpm"], 60.0 / bpm)
+                    self.assertAlmostEqual(60.0 / last_bpm, 60.0 / bpm)
                 self.assertEqual(path.read_bytes(), before)
 
 
@@ -811,7 +849,9 @@ class WaveformRouteTests(unittest.TestCase):
         Returns:
             Status code, lower-cased header names, and the raw body.
         """
-        host, port = self.httpd.server_address
+        bound = self.httpd.server_address
+        host = bound[0]
+        port = bound[1]
         if isinstance(port, str):
             raise AssertionError("The test server did not bind a TCP port.")
         conn = http.client.HTTPConnection(str(host), port, timeout=10)
