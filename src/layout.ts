@@ -12,6 +12,7 @@ import type { SettingsPayload } from "./api-types";
 import { el } from "./dom";
 import { mountSplitter, type Splitter } from "./splitter";
 import { setNotice } from "./views";
+import { t } from "./i18n";
 
 /** Narrowest track list that still shows title, artist, BPM, key, and time. */
 export const TRACK_LIST_MIN_WIDTH = 360;
@@ -37,7 +38,7 @@ function save(width: number | null): void {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     postJSON("/api/settings", { layout: { track_list_width: width } }).catch(() => {
-      setNotice("Couldn't save the pane width. It goes back to the last saved width next time.");
+      setNotice(t("layout.widthNotSaved"));
     });
   }, SAVE_DELAY_MS);
 }

@@ -6,6 +6,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { setLocale } from "./i18n";
 import { installPage } from "./test-page";
 import { open } from "./wizard-view";
 
@@ -172,3 +173,70 @@ describe("setup completion is posted only from Done", () => {
     expect(call?.body).toBe(JSON.stringify({ wizard_complete: true }));
   });
 });
+
+describe("setup follows the page language", () => {
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.stubGlobal("fetch", fakeFetch);
+    // The wizard wires its buttons once, so keep the page it wired.
+    if (!document.getElementById("wizard")) installPage();
+  });
+
+  afterEach(() => {
+    calls.length = 0;
+    if (wizardDialog().open) button("wizard-cancel").click();
+    setLocale("en");
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("repaints the open step when the language changes", async () => {
+    await openWizard();
+    expect(document.getElementById("wizard-step-label")?.textContent).toBe("Step 1 of 4");
+    setLocale("es");
+    expect(document.getElementById("wizard-title")?.textContent).toBe("Mira tu biblioteca de Serato");
+    expect(document.getElementById("wizard-step-label")?.textContent).toBe("Paso 1 de 4");
+    expect(button("wizard-primary").textContent).toBe("Empezar");
+    expect(document.getElementById("wizard-body")?.textContent).toContain("Esta app muestra");
+    button("wizard-primary").click();
+    await vi.waitFor(() => {
+      expect(document.getElementById("wizard-title")?.textContent).toBe("Encuentra tu biblioteca");
+    });
+    // The server summary is data and stays as sent.
+    expect(document.getElementById("wizard-body")?.textContent).toBe("Found your Serato library on Macintosh HD, 2 tracks.");
+    expect(button("wizard-primary").textContent).toBe("Usar esta biblioteca");
+  });
+
+  it("shows a translated server error by its code", async () => {
+    await openWizard();
+    const original = fakeFetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.startsWith("/api/settings") && init?.method === "POST") {
+        return jsonResponse({ error: "Setup could not be saved.", code: "setup_not_saved" }, 500);
+      }
+      return original(input, init);
+    });
+    setLocale("es");
+    await reachDoneFromWelcome();
+    button("wizard-primary").click();
+    await vi.waitFor(() => {
+      expect(document.getElementById("wizard-status")?.textContent).toBe("No se pudo guardar la configuración.");
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+  });
+});
+
+async function reachDoneFromWelcome(): Promise<void> {
+  button("wizard-primary").click();
+  await vi.waitFor(() => expect(button("wizard-primary").textContent).toBe("Usar esta biblioteca"));
+  button("wizard-primary").click();
+  await vi.waitFor(() => expect(button("wizard-primary").textContent).toBe("Tomar una instantánea de seguridad"));
+  button("wizard-primary").click();
+  await vi.waitFor(() => expect(button("wizard-primary").textContent).toBe("Continuar"));
+  button("wizard-primary").click();
+  await vi.waitFor(() => expect(button("wizard-primary").textContent).toBe("Abrir mi biblioteca"));
+}

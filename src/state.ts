@@ -19,6 +19,7 @@ import type {
   SnapshotInfo,
   Track,
 } from "./api-types";
+import type { MessageKey } from "./i18n";
 
 // Row height in pixels. It matches --row in app.css. The painter divides
 // the scroll offset by this value, so the two must stay equal.
@@ -26,15 +27,16 @@ export const ROW = 36;
 export const FILE_ROW = 44;
 export const ROOT_ROW = 64;
 
-export const COLORS: Array<[number, string]> = [
-  [0xffffff, "None"],
-  [0xcc0000, "Red"],
-  [0xff8800, "Orange"],
-  [0xffcc00, "Yellow"],
-  [0x33aa55, "Green"],
-  [0x2255cc, "Blue"],
-  [0x8833cc, "Purple"],
-  [0xe23b8a, "Pink"],
+// The second item is the message key for the color name.
+export const COLORS: Array<[number, MessageKey]> = [
+  [0xffffff, "color.none"],
+  [0xcc0000, "color.red"],
+  [0xff8800, "color.orange"],
+  [0xffcc00, "color.yellow"],
+  [0x33aa55, "color.green"],
+  [0x2255cc, "color.blue"],
+  [0x8833cc, "color.purple"],
+  [0xe23b8a, "color.pink"],
 ];
 
 export const COLOR_NAMES: Record<string, number> = {
@@ -98,9 +100,11 @@ export interface PageState {
   snapshots: SnapshotInfo[];
   snapshotLoading: boolean;
   snapshotError: string;
-  snapshotMessage: string;
+  snapshotMessage: MessageKey | "";
   snapshotUndo: PendingUndo | null;
   writeBlock: string;
+  writeBlockCode: string;
+  writeBlockParams: Record<string, string | number> | null;
   seratoRunning: boolean;
   snapshotPlanId: string;
   view: Track[];
@@ -159,6 +163,8 @@ export const state: PageState = {
   snapshotMessage: "",
   snapshotUndo: null,
   writeBlock: "",
+  writeBlockCode: "",
+  writeBlockParams: null,
   seratoRunning: false,
   snapshotPlanId: "",
   view: [],

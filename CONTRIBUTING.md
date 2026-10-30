@@ -99,6 +99,7 @@ Python has no separate linter. The page uses ESLint, which rejects `any`. The su
 - `docs/index.md` and `docs/guide/` when a DJ can see the change.
 - `SECURITY.md` when the threat notes or the attestation commands change.
 - `PRIVACY.md` and the README when sharing, local logs, or telemetry keys change.
+- `locales/en.json` and every other file in `locales/` when the page shows new text. Use `t("key")` in `src/` and `data-i18n` in `index.html`, never a bare English string. A new fixed server error sentence goes in `error_codes.py` with an `error.<code>` entry in each locale. Open the page with `?locale=qps-ploc` to spot text that skipped translation and labels that cannot take longer strings.
 
 The pull request template asks for the same list.
 

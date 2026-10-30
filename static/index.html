@@ -25,57 +25,57 @@
 </head>
 <body>
   <div class="app">
-    <aside class="rail" aria-label="Library">
+    <aside class="rail" aria-label="Library" data-i18n-attr="aria-label:status.library">
       <header class="brand">
-        <h1>Library</h1>
-        <p id="status">Checking Serato</p>
+        <h1 data-i18n="rail.heading">Library</h1>
+        <p id="status" data-i18n="status.checking">Checking Serato</p>
       </header>
       <label class="rail-field">
-        <span class="visually-hidden">Space</span>
-        <select id="space" aria-label="Space">
-          <option value="Serato Library">Library</option>
-          <option value="Serato Video">Video</option>
-          <option value="Apple Music">Apple Music</option>
-          <option value="Prepare">Prepare</option>
+        <span class="visually-hidden" data-i18n="space.label">Space</span>
+        <select id="space" aria-label="Space" data-i18n-attr="aria-label:space.label">
+          <option value="Serato Library" data-i18n="space.library">Library</option>
+          <option value="Serato Video" data-i18n="space.video">Video</option>
+          <option value="Apple Music" data-i18n="space.appleMusic">Apple Music</option>
+          <option value="Prepare" data-i18n="space.prepare">Prepare</option>
         </select>
       </label>
-      <div id="views" class="view-switch" role="tablist" aria-label="Views">
-        <button type="button" data-view="crates" role="tab">Crates</button>
-        <button type="button" data-view="history" role="tab">History</button>
-        <button type="button" data-view="missing" role="tab">Missing</button>
-        <button type="button" data-view="duplicates" role="tab">Duplicates</button>
-        <button type="button" data-view="stems" role="tab">Stems</button>
-        <button type="button" data-view="files" role="tab">Files</button>
-        <button type="button" data-view="snapshots" role="tab">Snapshots</button>
+      <div id="views" class="view-switch" role="tablist" aria-label="Views" data-i18n-attr="aria-label:view.label">
+        <button type="button" data-view="crates" role="tab" data-i18n="view.crates">Crates</button>
+        <button type="button" data-view="history" role="tab" data-i18n="view.history">History</button>
+        <button type="button" data-view="missing" role="tab" data-i18n="view.missing">Missing</button>
+        <button type="button" data-view="duplicates" role="tab" data-i18n="view.duplicates">Duplicates</button>
+        <button type="button" data-view="stems" role="tab" data-i18n="view.stems">Stems</button>
+        <button type="button" data-view="files" role="tab" data-i18n="view.files">Files</button>
+        <button type="button" data-view="snapshots" role="tab" data-i18n="view.snapshots">Snapshots</button>
       </div>
       <div id="crate-tools">
         <label class="rail-field">
-          <span class="visually-hidden">Find a crate</span>
-          <input id="crate-search" type="search" placeholder="Find a crate" autocomplete="off">
+          <span class="visually-hidden" data-i18n="crates.find">Find a crate</span>
+          <input id="crate-search" type="search" placeholder="Find a crate" autocomplete="off" data-i18n-attr="placeholder:crates.find">
         </label>
-        <div class="sort-crates" role="group" aria-label="Sort crates">
-          <button type="button" data-crate-sort="order">Order</button>
-          <button type="button" data-crate-sort="name">Name</button>
-          <button type="button" data-crate-sort="added">Added</button>
+        <div class="sort-crates" role="group" aria-label="Sort crates" data-i18n-attr="aria-label:crates.sort">
+          <button type="button" data-crate-sort="order" data-i18n="crates.sort.order">Order</button>
+          <button type="button" data-crate-sort="name" data-i18n="crates.sort.name">Name</button>
+          <button type="button" data-crate-sort="added" data-i18n="crates.sort.added">Added</button>
         </div>
       </div>
-      <div id="crate-list" class="crates" role="tree" aria-label="Crates"></div>
-      <div id="session-list" class="crates" role="listbox" aria-label="History sessions" hidden></div>
+      <div id="crate-list" class="crates" role="tree" aria-label="Crates" data-i18n-attr="aria-label:crates.heading"></div>
+      <div id="session-list" class="crates" role="listbox" aria-label="History sessions" data-i18n-attr="aria-label:history.sessions" hidden></div>
       <p id="mode-note" class="mode-note" hidden></p>
       <div id="duplicate-actions" class="crate-actions" hidden>
-        <button id="merge-duplicates" type="button">Merge copies</button>
+        <button id="merge-duplicates" type="button" data-i18n="merge.title">Merge copies</button>
       </div>
       <p id="crate-foot" class="crate-foot"></p>
       <div id="crate-actions" class="crate-actions">
-        <button id="crate-new" type="button">New</button>
-        <button id="crate-rename" type="button">Rename</button>
-        <button id="crate-color" type="button">Color</button>
-        <button id="crate-delete" type="button">Delete</button>
+        <button id="crate-new" type="button" data-i18n="crates.new">New</button>
+        <button id="crate-rename" type="button" data-i18n="crates.rename">Rename</button>
+        <button id="crate-color" type="button" data-i18n="field.color">Color</button>
+        <button id="crate-delete" type="button" data-i18n="common.delete">Delete</button>
       </div>
       <footer class="rail-foot">
         <p id="app-version" class="app-version" hidden></p>
-        <button id="open-shortcuts" type="button" aria-haspopup="dialog">Shortcuts</button>
-        <button id="open-settings" type="button" aria-haspopup="dialog">Settings</button>
+        <button id="open-shortcuts" type="button" aria-haspopup="dialog" data-i18n="shortcuts.open">Shortcuts</button>
+        <button id="open-settings" type="button" aria-haspopup="dialog" data-i18n="settings.title">Settings</button>
       </footer>
     </aside>
 
@@ -83,36 +83,38 @@
       <section id="browser" class="browser">
         <div class="browser-bar">
           <label class="search">
-            <span class="visually-hidden">Search tracks</span>
-            <input id="search" type="search" placeholder="Search tracks" autocomplete="off">
+            <span class="visually-hidden" data-i18n="search.tracks">Search tracks</span>
+            <input id="search" type="search" placeholder="Search tracks" autocomplete="off" data-i18n-attr="placeholder:search.tracks">
           </label>
-          <p id="count" class="count" aria-live="polite">Loading the library</p>
-          <button id="export-m3u" type="button">Export</button>
-          <button id="export-rekordbox" type="button" title="Download rekordbox.xml">Rekordbox</button>
+          <p id="count" class="count" aria-live="polite" data-i18n="library.loading">Loading the library</p>
+          <div class="browser-actions">
+            <button id="export-m3u" type="button" data-i18n="export.m3u">Export</button>
+            <button id="export-rekordbox" type="button" title="Download rekordbox.xml" data-i18n-attr="title:rekordbox.downloadTitle">Rekordbox</button>
+            <button id="import-m3u" type="button" data-i18n="import.button">Import</button>
+            <input id="import-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl" hidden>
+            <button id="reload" type="button" data-i18n="common.reload">Reload</button>
+          </div>
           <span class="rekordbox-options">
             <label class="rekordbox-option">
               <input id="rekordbox-memory" type="checkbox" checked>
-              Memory cues
+              <span data-i18n="rekordbox.memoryCues">Memory cues</span>
             </label>
             <span class="rekordbox-option rekordbox-hot-loops">
               <label>
                 <input id="rekordbox-hot-loops" type="checkbox" aria-describedby="rekordbox-hot-loops-help">
-                Hot loops
+                <span data-i18n="rekordbox.hotLoops">Hot loops</span>
               </label>
-              <span id="rekordbox-hot-loops-help" class="rekordbox-help">Uses a free hot-cue pad</span>
+              <span id="rekordbox-hot-loops-help" class="rekordbox-help" data-i18n="rekordbox.hotLoopsHelp">Uses a free hot-cue pad</span>
             </span>
           </span>
           <label class="rekordbox-option">
-            <span class="visually-hidden">Rekordbox key notation</span>
-            <select id="rekordbox-key" aria-label="Rekordbox key notation">
-              <option value="asis">Key as stored</option>
-              <option value="camelot">Camelot key</option>
-              <option value="classical">Classical key</option>
+            <span class="visually-hidden" data-i18n="rekordbox.keyNotation">Rekordbox key notation</span>
+            <select id="rekordbox-key" aria-label="Rekordbox key notation" data-i18n-attr="aria-label:rekordbox.keyNotation">
+              <option value="asis" data-i18n="rekordbox.keyAsis">Key as stored</option>
+              <option value="camelot" data-i18n="rekordbox.keyCamelot">Camelot key</option>
+              <option value="classical" data-i18n="rekordbox.keyClassical">Classical key</option>
             </select>
           </label>
-          <button id="import-m3u" type="button">Import</button>
-          <input id="import-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl" hidden>
-          <button id="reload" type="button">Reload</button>
         </div>
         <p id="notice" class="notice" hidden></p>
         <div class="columns" aria-hidden="true">
@@ -122,167 +124,176 @@
           <button type="button" data-sort="key">Key</button>
           <button type="button" data-sort="length_ms">Time</button>
         </div>
-        <div id="list" class="list" tabindex="0" role="listbox" aria-label="Tracks"></div>
+        <div id="list" class="list" tabindex="0" role="listbox" aria-label="Tracks" data-i18n-attr="aria-label:list.label"></div>
       </section>
 
-      <div id="track-splitter" class="splitter" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="browser" aria-label="Resize the track list" title="Drag to resize. Double-click to reset."></div>
+      <div id="track-splitter" class="splitter" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="browser" aria-label="Resize the track list" title="Drag to resize. Double-click to reset." data-i18n-attr="aria-label:layout.resize;title:layout.resizeHint"></div>
 
       <section id="detail" class="detail" aria-live="polite">
-        <p class="detail-empty">Select a track to read its attributes.</p>
+        <p class="detail-empty" data-i18n="detail.empty">Select a track to read its attributes.</p>
       </section>
 
       <section id="files-panel" class="files-panel" hidden>
         <div class="browser-bar">
-          <button id="files-up" type="button">Up</button>
-          <nav id="files-path" class="files-path" aria-label="Folder path"></nav>
+          <button id="files-up" type="button" data-i18n="common.up">Up</button>
+          <nav id="files-path" class="files-path" aria-label="Folder path" data-i18n-attr="aria-label:files.path"></nav>
           <label class="search files-search" for="files-search">
-            <span class="visually-hidden">Search files</span>
-            <input id="files-search" type="search" placeholder="Search files" autocomplete="off" spellcheck="false">
+            <span class="visually-hidden" data-i18n="files.searchLabel">Search files</span>
+            <input id="files-search" type="search" placeholder="Search files" autocomplete="off" spellcheck="false" data-i18n-attr="placeholder:files.searchPlaceholder">
           </label>
-          <button id="files-refresh" type="button">Refresh</button>
-          <button id="files-elsewhere" class="files-elsewhere" type="button">Browse elsewhere…</button>
+          <button id="files-refresh" type="button" data-i18n="common.refresh">Refresh</button>
+          <button id="files-elsewhere" class="files-elsewhere" type="button" data-i18n="files.browseElsewhere">Browse elsewhere…</button>
         </div>
-        <p id="files-pick" class="files-pick" hidden>Choose the destination folder. Then confirm the move.</p>
+        <p id="files-pick" class="files-pick" hidden data-i18n="files.chooseDestination">Choose the destination folder. Then confirm the move.</p>
         <p id="files-status" class="notice" role="status" aria-live="polite"></p>
-        <div id="files-list" class="files-list" role="group" aria-label="Folder contents" aria-busy="false" tabindex="0"></div>
+        <div id="files-list" class="files-list" role="group" aria-label="Folder contents" data-i18n-attr="aria-label:files.contents" aria-busy="false" tabindex="0"></div>
         <div class="files-actions">
-          <button id="files-rename" type="button">Rename</button>
-          <button id="files-move" type="button">Move to folder</button>
-          <button id="files-move-folder" type="button">Move this folder</button>
-          <button id="files-replace" type="button">Replace file</button>
-          <button id="files-delete" type="button">Delete</button>
-          <button id="files-move-here" type="button" hidden>Move here</button>
-          <button id="files-pick-cancel" type="button" hidden>Cancel</button>
+          <button id="files-rename" type="button" data-i18n="crates.rename">Rename</button>
+          <button id="files-move" type="button" data-i18n="files.moveToFolder">Move to folder</button>
+          <button id="files-move-folder" type="button" data-i18n="files.moveFolder">Move this folder</button>
+          <button id="files-replace" type="button" data-i18n="files.replaceFile">Replace file</button>
+          <button id="files-delete" type="button" data-i18n="common.delete">Delete</button>
+          <button id="files-move-here" type="button" hidden data-i18n="files.moveHere">Move here</button>
+          <button id="files-pick-cancel" type="button" hidden data-i18n="common.cancel">Cancel</button>
         </div>
       </section>
 
       <section id="snapshots-panel" class="files-panel" hidden>
         <div class="browser-bar">
-          <p id="snapshots-heading" class="files-path">Snapshots</p>
-          <button id="snapshots-refresh" type="button">Refresh</button>
-          <button id="snapshots-take" type="button">Take a snapshot</button>
+          <p id="snapshots-heading" class="files-path" data-i18n="view.snapshots">Snapshots</p>
+          <button id="snapshots-refresh" type="button" data-i18n="common.refresh">Refresh</button>
+          <button id="snapshots-take" type="button" data-i18n="snapshots.take">Take a snapshot</button>
         </div>
         <p id="snapshots-block" class="notice" role="status" hidden></p>
         <div id="snapshots-undo" class="snapshot-undo" hidden>
           <p id="snapshots-undo-text"></p>
-          <button id="snapshots-undo-button" type="button">Review undo</button>
+          <button id="snapshots-undo-button" type="button" data-i18n="snapshots.reviewUndo">Review undo</button>
         </div>
         <p id="snapshots-status" class="notice" role="status" aria-live="polite"></p>
-        <div id="snapshots-list" class="files-list" role="list" aria-label="Snapshots" aria-busy="false" tabindex="0"></div>
+        <div id="snapshots-list" class="files-list" role="list" aria-label="Snapshots" data-i18n-attr="aria-label:view.snapshots" aria-busy="false" tabindex="0"></div>
       </section>
       <div id="player-bar" class="player-bar"></div>
     </main>
   </div>
   <dialog id="consent-dialog" aria-labelledby="consent-title" aria-describedby="consent-body">
-    <h2 id="consent-title">Share anonymous usage stats and crash reports?</h2>
-    <p id="consent-body">Counts and actions only, plus the app name, the app version, and the operating system. Track titles, crate names, file paths, and library contents stay on this computer. Sharing stays off unless you turn it on.</p>
+    <h2 id="consent-title" data-i18n="wizard.heading.consent">Share anonymous usage stats and crash reports?</h2>
+    <p id="consent-body" data-i18n="consent.body">Counts and actions only, plus the app name, the app version, and the operating system. Track titles, crate names, file paths, and library contents stay on this computer. Sharing stays off unless you turn it on.</p>
     <div class="dialog-actions">
-      <button id="consent-decline" type="button" autofocus>Don't share</button>
-      <button id="consent-accept" type="button">Share</button>
+      <button id="consent-decline" type="button" autofocus data-i18n="consent.decline">Don't share</button>
+      <button id="consent-accept" type="button" data-i18n="consent.accept">Share</button>
     </div>
     <p id="consent-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
   <dialog id="settings-dialog" aria-labelledby="settings-title">
-    <h2 id="settings-title">Settings</h2>
+    <h2 id="settings-title" data-i18n="settings.title">Settings</h2>
     <label class="check">
       <input id="telemetry-toggle" type="checkbox">
-      Share anonymous usage stats and crash reports
+      <span data-i18n="settings.share">Share anonymous usage stats and crash reports</span>
     </label>
     <p id="telemetry-note" class="dialog-note"></p>
+    <label class="settings-field">
+      <span data-i18n="settings.language">Language</span>
+      <select id="language-select">
+        <option value="" data-i18n="settings.languageSystem">Same as the system</option>
+        <option value="en" lang="en">English</option>
+        <option value="es" lang="es">Español</option>
+      </select>
+    </label>
+    <p id="language-status" class="dialog-status" role="status" aria-live="polite"></p>
     <section class="about" aria-labelledby="about-title">
-      <h3 id="about-title">About</h3>
+      <h3 id="about-title" data-i18n="settings.about">About</h3>
       <p id="about-version" class="about-version"></p>
       <div class="dialog-actions">
-        <button id="copy-version" type="button">Copy version</button>
+        <button id="copy-version" type="button" data-i18n="settings.copyVersion">Copy version</button>
       </div>
       <p id="version-copy-status" class="dialog-status" role="status" aria-live="polite"></p>
     </section>
     <div class="dialog-actions">
-      <button id="rerun-wizard" class="wizard-quiet" type="button">Run setup again</button>
-      <button id="open-logs" type="button">Open logs folder</button>
-      <button id="copy-logs" type="button">Copy logs</button>
-      <button id="settings-close" type="button">Close</button>
+      <button id="rerun-wizard" class="wizard-quiet" type="button" data-i18n="settings.rerunSetup">Run setup again</button>
+      <button id="open-logs" type="button" data-i18n="settings.openLogs">Open logs folder</button>
+      <button id="copy-logs" type="button" data-i18n="settings.copyLogs">Copy logs</button>
+      <button id="settings-close" type="button" data-i18n="common.close">Close</button>
     </div>
     <p id="settings-status" class="dialog-status" role="status" aria-live="polite"></p>
-    <textarea id="log-fallback" class="log-fallback" readonly hidden aria-label="Log text"></textarea>
+    <textarea id="log-fallback" class="log-fallback" readonly hidden aria-label="Log text" data-i18n-attr="aria-label:settings.logText"></textarea>
   </dialog>
   <dialog id="merge-dialog" aria-labelledby="merge-title" aria-describedby="merge-intro">
-    <h2 id="merge-title">Merge copies</h2>
-    <p id="merge-intro">Keep one copy. The others leave the library. Audio files stay on disk unless you move them to the Trash.</p>
+    <h2 id="merge-title" data-i18n="merge.title">Merge copies</h2>
+    <p id="merge-intro" data-i18n="merge.intro">Keep one copy. The others leave the library. Audio files stay on disk unless you move them to the Trash.</p>
     <fieldset>
-      <legend>Copy to keep</legend>
+      <legend data-i18n="merge.keep">Copy to keep</legend>
       <div id="merge-choices"></div>
     </fieldset>
     <div id="merge-preview" aria-live="polite"></div>
     <label class="check">
       <input id="merge-trash" type="checkbox" aria-describedby="merge-trash-note">
-      Move the other audio files to the Trash
+      <span data-i18n="merge.trashLabel">Move the other audio files to the Trash</span>
     </label>
-    <p id="merge-trash-note" class="dialog-note">Off by default. Files go to the Trash, where you can restore them. They are not permanently deleted.</p>
+    <p id="merge-trash-note" class="dialog-note" data-i18n="merge.trashNote">Off by default. Files go to the Trash, where you can restore them. They are not permanently deleted.</p>
     <div class="dialog-actions">
-      <button id="merge-cancel" type="button" autofocus>Cancel</button>
-      <button id="merge-confirm" type="button">Merge copies</button>
+      <button id="merge-cancel" type="button" autofocus data-i18n="common.cancel">Cancel</button>
+      <button id="merge-confirm" type="button" data-i18n="merge.title">Merge copies</button>
     </div>
     <p id="merge-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
   <dialog id="rekordbox-dialog" aria-labelledby="rekordbox-title" aria-describedby="rekordbox-intro">
-    <h2 id="rekordbox-title">Download rekordbox.xml?</h2>
-    <p id="rekordbox-intro">These items are not copied into Rekordbox. The file downloads after you confirm.</p>
-    <ul id="rekordbox-report" aria-label="What is not copied"></ul>
+    <h2 id="rekordbox-title" data-i18n="rekordbox.dialogTitle">Download rekordbox.xml?</h2>
+    <p id="rekordbox-intro" data-i18n="rekordbox.intro">These items are not copied into Rekordbox. The file downloads after you confirm.</p>
+    <ul id="rekordbox-report" aria-label="What is not copied" data-i18n-attr="aria-label:rekordbox.reportLabel"></ul>
     <div class="dialog-actions">
-      <button id="rekordbox-cancel" type="button" autofocus>Cancel</button>
-      <button id="rekordbox-download" type="button">Download</button>
+      <button id="rekordbox-cancel" type="button" autofocus data-i18n="common.cancel">Cancel</button>
+      <button id="rekordbox-download" type="button" data-i18n="rekordbox.download">Download</button>
     </div>
     <p id="rekordbox-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
   <dialog id="files-dialog" aria-labelledby="files-dialog-title">
-    <h2 id="files-dialog-title">Review this change</h2>
+    <h2 id="files-dialog-title" data-i18n="files.reviewTitle">Review this change</h2>
     <p id="files-summary"></p>
-    <p class="dialog-note">Nothing is changed until you confirm.</p>
+    <p class="dialog-note" data-i18n="files.nothingUntilConfirm">Nothing is changed until you confirm.</p>
     <label id="files-name-label" class="files-field" hidden>
-      <span>New name</span>
+      <span data-i18n="files.newName">New name</span>
       <input id="files-name" type="text" autocomplete="off">
     </label>
     <label id="files-replace-label" class="files-field" hidden>
-      <span>New file</span>
+      <span data-i18n="files.newFile">New file</span>
       <input id="files-replacement" type="text" autocomplete="off" spellcheck="false">
     </label>
     <ul id="files-changes"></ul>
     <p id="files-warning" class="dialog-note"></p>
     <p id="files-dialog-status" class="dialog-status" role="status" aria-live="polite"></p>
     <div class="dialog-actions">
-      <button id="files-cancel" type="button">Cancel</button>
-      <button id="files-review" type="button">Review</button>
-      <button id="files-confirm" type="button">Confirm</button>
+      <button id="files-cancel" type="button" data-i18n="common.cancel">Cancel</button>
+      <button id="files-review" type="button" data-i18n="files.review">Review</button>
+      <button id="files-confirm" type="button" data-i18n="common.confirm">Confirm</button>
     </div>
   </dialog>
   <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title" aria-describedby="shortcuts-intro">
-    <h2 id="shortcuts-title" tabindex="-1">Keyboard shortcuts</h2>
-    <p id="shortcuts-intro">These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.</p>
+    <h2 id="shortcuts-title" tabindex="-1" data-i18n="shortcuts.title">Keyboard shortcuts</h2>
+    <p id="shortcuts-intro" data-i18n="shortcuts.intro">These keys work anywhere on this screen, except while you are typing in a field. Esc still closes a dialog or clears a search.</p>
     <div class="dialog-actions">
-      <button id="shortcuts-close" type="button">Close</button>
+      <button id="shortcuts-close" type="button" data-i18n="common.close">Close</button>
     </div>
     <div id="shortcuts-body"></div>
   </dialog>
   <dialog id="quick-open" aria-labelledby="quick-open-title">
-    <h2 id="quick-open-title">Find a track or file</h2>
-    <label id="quick-open-label" for="quick-open-query">Name</label>
-    <input id="quick-open-query" type="search" placeholder="Track or file name" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="quick-open-list" aria-expanded="true">
+    <h2 id="quick-open-title" data-i18n="quickOpen.title">Find a track or file</h2>
+    <label id="quick-open-label" for="quick-open-query" data-i18n="quickOpen.label">Name</label>
+    <input id="quick-open-query" type="search" placeholder="Track or file name" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-controls="quick-open-list" aria-expanded="true" data-i18n-attr="placeholder:quickOpen.placeholder">
     <p id="quick-open-status" class="dialog-status" role="status" aria-live="polite"></p>
-    <button id="quick-open-retry" type="button" hidden>Try again</button>
-    <ul id="quick-open-list" role="listbox" aria-label="Matches"></ul>
+    <button id="quick-open-retry" type="button" hidden data-i18n="common.tryAgain">Try again</button>
+    <ul id="quick-open-list" role="listbox" aria-label="Matches" data-i18n-attr="aria-label:quickOpen.matches"></ul>
     <div class="dialog-actions">
-      <button id="quick-open-close" type="button">Close</button>
+      <button id="quick-open-close" type="button" data-i18n="common.close">Close</button>
     </div>
   </dialog>
   <dialog id="snapshot-dialog" aria-labelledby="snapshot-title" aria-describedby="snapshot-intro">
-    <h2 id="snapshot-title">Restore this snapshot</h2>
-    <p id="snapshot-intro">Nothing is changed until you confirm. A new snapshot is saved first, so this restore can be undone.</p>
+    <h2 id="snapshot-title" data-i18n="snapshots.restoreTitle">Restore this snapshot</h2>
+    <p id="snapshot-intro" data-i18n="snapshots.restoreIntro">Nothing is changed until you confirm. A new snapshot is saved first, so this restore can be undone.</p>
     <div id="snapshot-plan" aria-live="polite"></div>
     <p id="snapshot-block" class="dialog-note" role="status"></p>
     <div class="dialog-actions">
-      <button id="snapshot-cancel" type="button">Cancel</button>
-      <button id="snapshot-confirm" type="button">Restore</button>
+      <button id="snapshot-cancel" type="button" data-i18n="common.cancel">Cancel</button>
+      <button id="snapshot-confirm" type="button" data-i18n="snapshots.restore">Restore</button>
     </div>
     <p id="snapshot-status" class="dialog-status" role="status" aria-live="polite"></p>
   </dialog>
@@ -302,25 +313,25 @@
     <p id="wizard-body"></p>
     <p id="wizard-next" class="dialog-note" hidden></p>
     <p id="wizard-status" class="wizard-status" role="status" aria-live="polite"></p>
-    <progress id="wizard-progress" max="1" aria-label="Saving a safety copy" hidden></progress>
+    <progress id="wizard-progress" max="1" aria-label="Saving a safety copy" data-i18n-attr="aria-label:wizard.progressLabel" hidden></progress>
     <div id="wizard-folders" hidden>
       <p id="wizard-folder-name" class="wizard-folder-name"></p>
-      <div id="wizard-folder-list" class="wizard-folders" role="group" aria-label="Folders"></div>
+      <div id="wizard-folder-list" class="wizard-folders" role="group" aria-label="Folders" data-i18n-attr="aria-label:wizard.folders"></div>
       <div class="wizard-folder-actions">
-        <button id="wizard-folder-up" class="wizard-quiet" type="button">Up</button>
-        <button id="wizard-folder-use" type="button">Use this folder</button>
-        <button id="wizard-folder-close" class="wizard-quiet" type="button">Close folder list</button>
+        <button id="wizard-folder-up" class="wizard-quiet" type="button" data-i18n="common.up">Up</button>
+        <button id="wizard-folder-use" type="button" data-i18n="wizard.useFolder">Use this folder</button>
+        <button id="wizard-folder-close" class="wizard-quiet" type="button" data-i18n="wizard.closeFolders">Close folder list</button>
       </div>
     </div>
     <div id="wizard-consent" class="wizard-choices" hidden>
-      <button id="wizard-no" class="wizard-choice" type="button">No, don't share</button>
-      <button id="wizard-yes" class="wizard-choice" type="button">Yes, share</button>
+      <button id="wizard-no" class="wizard-choice" type="button" data-i18n="wizard.no">No, don't share</button>
+      <button id="wizard-yes" class="wizard-choice" type="button" data-i18n="wizard.yes">Yes, share</button>
     </div>
     <div class="wizard-actions">
       <div class="wizard-actions-start">
-        <button id="wizard-back" class="wizard-quiet" type="button">Back</button>
-        <button id="wizard-cancel" class="wizard-quiet" type="button">Cancel</button>
-        <button id="wizard-secondary" class="wizard-quiet" type="button">Choose a folder</button>
+        <button id="wizard-back" class="wizard-quiet" type="button" data-i18n="common.back">Back</button>
+        <button id="wizard-cancel" class="wizard-quiet" type="button" data-i18n="common.cancel">Cancel</button>
+        <button id="wizard-secondary" class="wizard-quiet" type="button" data-i18n="wizard.chooseFolder">Choose a folder</button>
       </div>
       <button id="wizard-primary" type="button">Get started</button>
     </div>

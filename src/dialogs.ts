@@ -33,6 +33,7 @@ import {
   selectedFiles,
   setNotice,
 } from "./views";
+import { PSEUDO, getLocale, isLanguage, resolveLocale, serverMessage, setLocale, t } from "./i18n";
 
 let rekordboxXml = "";
 let mergePreview: MergePreview | null = null;
@@ -194,7 +195,7 @@ function renderMergePreview(preview: MergePreview | null) {
   el("merge-preview").replaceChildren();
   if (!preview) {
     const pending = document.createElement("p");
-    pending.textContent = "Reading the preview…";
+    pending.textContent = t("merge.readingPreview");
     el("merge-preview").append(pending);
     return;
   }
@@ -210,32 +211,32 @@ function renderMergePreview(preview: MergePreview | null) {
     const names = added.map((crate) => (
       crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name
     ));
-    item(`Add the kept copy to ${names.join(", ")}.`);
+    item(t("merge.addToCrates", { crates: names.join(", ") }));
   } else if ((preview.crates_kept || []).length) {
-    item("The kept copy is already in every crate the others use. It stays where it is.");
+    item(t("merge.alreadyInCrates"));
   } else {
-    item("None of the copies are in a crate.");
+    item(t("merge.noCrates"));
   }
-  for (const space of preview.spaces_added || []) item(`Add the kept copy to the ${space} space.`);
+  for (const space of preview.spaces_added || []) item(t("merge.addToSpace", { space }));
   if ((preview.fields || []).length) {
     for (const field of preview.fields || []) {
       const before = previewFieldValue(field.field || "", field.before);
       const after = previewFieldValue(field.field || "", field.after);
-      item(`${field.label} changes from ${before} to ${after}.`);
+      item(t("merge.fieldChange", { label: field.label ?? "", before, after }));
     }
   } else {
-    item("No empty fields or higher play count to copy.");
+    item(t("merge.noFields"));
   }
   if (preview.history_repointed) {
     const count = Number(preview.history_entries) || 0;
     item(count
-      ? `Point ${count} history ${count === 1 ? "entry" : "entries"} at the kept copy.`
-      : "No history entries point at the other copies.");
+      ? t("merge.repointHistory", { count })
+      : t("merge.noHistory"));
   } else {
-    item("This library has no history track id to repoint.");
+    item(t("merge.noHistoryId"));
   }
   const removed = (preview.removed || []).length;
-  item(`Remove ${removed} ${removed === 1 ? "copy" : "copies"} from the library.`);
+  item(t("merge.removeCopies", { count: removed }));
   for (const file of preview.files || []) {
     if (file.reason) item(`${file.file}: ${file.reason}`);
   }
@@ -268,12 +269,12 @@ function syncTrashChoice() {
   if (el("merge-trash").disabled) el("merge-trash").checked = false;
   const danger = el("merge-trash").checked;
   el("merge-confirm").classList.toggle("danger", danger);
-  el("merge-confirm").textContent = mergeLoading ? "Merging…" : (danger ? "Merge and move files to Trash" : "Merge copies");
+  el("merge-confirm").textContent = mergeLoading ? t("merge.merging") : (danger ? t("merge.confirmTrash") : t("merge.title"));
   el("merge-confirm").disabled = mergeLoading || !mergePreview || mergePreview.writable === false;
   const note = el("merge-file-note");
   if (!note) return;
-  if (danger) note.textContent = `Move ${trashable.map((file) => file.file).join(", ")} to the Trash.`;
-  else note.textContent = "Audio files stay on disk.";
+  if (danger) note.textContent = t("merge.trashFiles", { files: trashable.map((file) => file.file).join(", ") });
+  else note.textContent = t("merge.filesStay");
 }
 
 /**
@@ -304,7 +305,7 @@ async function refreshMergePreview() {
     mergePreview = preview;
     renderMergePreview(preview);
     if (preview.writable === false) {
-      el("merge-status").textContent = "Quit Serato before merging. The preview shows the plan.";
+      el("merge-status").textContent = t("merge.quitSerato");
     }
     syncTrashChoice();
   } catch (error) {
@@ -312,7 +313,7 @@ async function refreshMergePreview() {
     mergePreview = null;
     el("merge-preview").replaceChildren();
     const failed = document.createElement("p");
-    failed.textContent = "The preview could not be read.";
+    failed.textContent = t("merge.previewFailed");
     el("merge-preview").append(failed);
     el("merge-status").textContent = failureOf(error).message;
     syncTrashChoice();
@@ -347,14 +348,14 @@ function renderMergeChoices() {
     });
     const text = document.createElement("span");
     const name = document.createElement("span");
-    name.textContent = track.file || `Track ${id}`;
+    name.textContent = track.file || t("track.numbered", { id: String(id) });
     const meta = document.createElement("span");
     meta.className = "merge-meta";
     const parts = [];
-    if (track.play_count != null) parts.push(`${track.play_count} plays`);
+    if (track.play_count != null) parts.push(t("merge.plays", { count: Number(track.play_count) }));
     const crates = crateNamesFor(id);
     if (crates.length) parts.push(crates.join(", "));
-    if (track.missing) parts.push("missing");
+    if (track.missing) parts.push(t("track.missingBadge"));
     meta.textContent = parts.join(" · ");
     text.append(name, meta);
     label.append(input, text);
@@ -407,8 +408,8 @@ async function confirmMerge() {
     });
     el("merge-dialog").close();
     const count = (result.removed || []).length;
-    const name = result.kept?.file || "the kept copy";
-    let message = `Merged ${count} ${count === 1 ? "copy" : "copies"} into ${name}.`;
+    const name = result.kept?.file || t("merge.keptCopy");
+    let message = t("merge.merged", { count, name });
     if (result.warning) message = `${message} ${result.warning}`;
     if (result.cue_warning) message = `${message} ${result.cue_warning}`;
     setNotice(message);
@@ -438,12 +439,12 @@ async function confirmMerge() {
  */
 function telemetryNoteText() {
   if (!state.telemetryConfigured) {
-    return "This copy has no telemetry keys, so nothing is sent either way.";
+    return t("sharing.noKeys");
   }
   if (state.telemetryConsent === true) {
-    return "Anonymous counts and crash reports can be sent.";
+    return t("sharing.canSend");
   }
-  return "Nothing is sent.";
+  return t("sharing.nothingSent");
 }
 
 /**
@@ -455,6 +456,68 @@ function telemetryNoteText() {
  * @param {object} payload Settings object from the server.
  * @returns {void}
  */
+/**
+ * Apply the saved language to the picker and the page.
+ *
+ * A payload without `language` leaves both alone. A saved code switches
+ * the page to it. Null follows the OS language. The pseudo-locale from
+ * the URL is kept, since it is only for layout checks. No request is made.
+ *
+ * @param {object} payload Settings object from the server.
+ * @returns {void}
+ */
+export function applyLanguage(payload: SettingsPayload): void {
+  if (!("language" in payload)) return;
+  const saved = isLanguage(payload.language) ? payload.language : null;
+  el("language-select").value = saved ?? "";
+  if (getLocale() !== PSEUDO) setLocale(resolveLocale(saved, systemLanguages()));
+}
+
+function systemLanguages(): string[] {
+  return Array.isArray(navigator.languages) && navigator.languages.length
+    ? [...navigator.languages]
+    : [navigator.language || "en"];
+}
+
+/**
+ * Save the language picked in Settings and switch the page now.
+ *
+ * The page switches before the save answers, so the choice shows at once.
+ * A failed save says so and keeps the new language for this session.
+ *
+ * @returns {Promise<void>}
+ */
+export async function saveLanguage(): Promise<void> {
+  const value = el("language-select").value;
+  const saved = isLanguage(value) ? value : null;
+  el("language-status").textContent = "";
+  setLocale(resolveLocale(saved, systemLanguages()));
+  try {
+    await postJSON("/api/settings", { language: saved });
+  } catch {
+    el("language-status").textContent = t("settings.languageNotSaved");
+  }
+}
+
+/**
+ * Paint open dialogs again in the active language.
+ *
+ * The merge plan, the sharing note, and the file dialog's confirm label
+ * are built in code, so a language change repaints them here.
+ *
+ * @returns {void}
+ */
+export function repaintDialogs(): void {
+  el("telemetry-note").textContent = telemetryNoteText();
+  if (el("merge-dialog").open) {
+    renderMergePreview(mergeLoading ? null : mergePreview);
+    syncTrashChoice();
+  }
+  if (el("files-dialog").open) {
+    el("files-confirm").textContent = filesAction === "delete" ? t("files.moveToTrash") : t("common.confirm");
+  }
+}
+
 function applyPrivacy(payload: SettingsPayload) {
   state.telemetryConsent = payload.telemetry_consent ?? null;
   state.telemetryConfigured = Boolean(payload.telemetry_configured);
@@ -477,16 +540,14 @@ function applyPrivacy(payload: SettingsPayload) {
  * @returns {Promise<boolean>} True when the server stored the choice.
  */
 async function saveConsent(value: boolean, status: HTMLElement) {
-  status.textContent = "Saving…";
+  status.textContent = t("wizard.saving");
   try {
     const payload = await postJSON("/api/settings", { telemetry_consent: value });
     applyPrivacy(payload);
-    status.textContent = value
-      ? "Sharing is on. Anonymous counts and crash reports can be sent."
-      : "Sharing is off. Nothing is sent.";
+    status.textContent = value ? t("sharing.on") : t("sharing.off");
     return true;
   } catch (error) {
-    status.textContent = "Couldn't save that choice. Try again.";
+    status.textContent = t("wizard.consentFailed");
     return false;
   }
 }
@@ -552,8 +613,9 @@ export async function loadPrivacy() {
   const token = rekordboxToken;
   const response = await fetch("/api/settings");
   const payload = await readJSONOr<SettingsPayload>(response, {});
-  if (!response.ok) throw new Error(payload.error || "Couldn't load sharing settings.");
+  if (!response.ok) throw new Error(serverMessage(payload, t("sharing.loadFailed")));
   applyPrivacy(payload);
+  applyLanguage(payload);
   applyLayout(payload);
   if (token === rekordboxToken) applyRekordboxExport(payload);
   if (!state.wizardComplete && openWizard(false, el("search"))) return;
@@ -586,7 +648,7 @@ function openFilesDialog(action: string, trigger: EventTarget | null) {
   if (action === "replace") el("files-replacement").value = "";
   const confirm = el("files-confirm");
   confirm.classList.toggle("danger", action === "delete");
-  confirm.textContent = action === "delete" ? "Move to Trash" : "Confirm";
+  confirm.textContent = action === "delete" ? t("files.moveToTrash") : t("common.confirm");
   syncFilesDialog();
   el("files-dialog").showModal();
   if (action === "delete" || action === "move" || action === "move_folder") {
@@ -624,24 +686,26 @@ function syncFilesDialog() {
  */
 async function reviewFiles() {
   const body = filesBody(false);
-  el("files-dialog-status").textContent = "Checking what will change.";
+  el("files-dialog-status").textContent = t("files.checking");
   const payload = await postJSON("/api/files", body);
   filesPreview = payload;
   el("files-summary").textContent = payload.summary || "";
   el("files-warning").textContent = payload.warning || "";
-  el("files-dialog-status").textContent = payload.ok ? "" : (payload.error || "That change was not saved.");
+  el("files-dialog-status").textContent = payload.ok ? "" : serverMessage(payload, t("files.notSaved"));
   const list = el("files-changes");
   list.replaceChildren();
   for (const change of payload.changes || []) {
     const item = document.createElement("li");
-    const crates = Array.isArray(change.crates) && change.crates.length ? ` Crates: ${change.crates.join(", ")}.` : "";
-    const effect = change.effect === "trash" ? "Trash" : change.to;
+    const crates = Array.isArray(change.crates) && change.crates.length
+      ? ` ${t("files.changeCrates", { crates: change.crates.join(", ") })}`
+      : "";
+    const effect = change.effect === "trash" ? t("files.trash") : change.to;
     item.textContent = `${change.from} → ${effect}${crates}`;
     list.append(item);
   }
   if (payload.more) {
     const more = document.createElement("li");
-    more.textContent = `And ${payload.more} more.`;
+    more.textContent = t("files.andMore", { count: Number(payload.more) });
     list.append(more);
   }
   if (payload.serato) applyStatus(payload.serato);
@@ -698,7 +762,7 @@ async function confirmFiles() {
   if (!filesPreview?.ok || !state.writable) return;
   const confirm = el("files-confirm");
   confirm.disabled = true;
-  el("files-dialog-status").textContent = "Saving.";
+  el("files-dialog-status").textContent = t("files.saving");
   try {
     const payload = await postJSON("/api/files", filesBody(true));
     if (payload.serato) applyStatus(payload.serato);
@@ -706,7 +770,7 @@ async function confirmFiles() {
     state.filesPick = null;
     state.filesPickPaths = [];
     state.filesPickSource = "";
-    state.filesMessage = payload.summary || "The files were updated.";
+    state.filesMessage = payload.summary || t("files.updated");
     if (payload.warning) state.filesMessage = `${state.filesMessage} ${payload.warning}`;
     await loadFolder(payload.browse || state.filesPath || "", { keepMessage: true });
     await loadLibrary();
@@ -737,7 +801,7 @@ export function wireDialogs(): void {
   el("rekordbox-memory").addEventListener("change", saveExportBar);
   el("rekordbox-key").addEventListener("change", saveExportBar);
   loadPrivacy().catch((error: unknown) => {
-    setNotice(failureOf(error).message || "Couldn't load sharing settings. Nothing is sent.");
+    setNotice(failureOf(error).message || t("sharing.loadFailedOff"));
   });
   el("export-rekordbox").addEventListener("click", () => {
     rekordboxXml = "";
@@ -745,7 +809,7 @@ export function wireDialogs(): void {
       .then((response) => response.json().then((body) => ({ ok: response.ok, body })))
       .then(({ ok, body }) => {
         if (!ok || typeof body.xml !== "string" || !body.xml.startsWith("<?xml")) {
-          setNotice(body.error || "The Rekordbox export failed.");
+          setNotice(serverMessage(body, t("rekordbox.failed")));
           return;
         }
         rekordboxXml = body.xml;
@@ -763,7 +827,7 @@ export function wireDialogs(): void {
 
   el("rekordbox-download").addEventListener("click", () => {
     if (!rekordboxXml.startsWith("<?xml")) {
-      el("rekordbox-status").textContent = "The export did not produce an XML file.";
+      el("rekordbox-status").textContent = t("rekordbox.notXml");
       return;
     }
     const blob = new Blob([rekordboxXml], { type: "application/xml" });
@@ -819,6 +883,10 @@ export function wireDialogs(): void {
     el("settings-dialog").showModal();
   });
 
+  el("language-select").addEventListener("change", () => {
+    void saveLanguage();
+  });
+
   el("settings-close").addEventListener("click", () => {
     el("settings-dialog").close();
   });
@@ -847,13 +915,13 @@ export function wireDialogs(): void {
   el("open-logs").addEventListener("click", () => {
     const button = el("open-logs");
     button.disabled = true;
-    el("settings-status").textContent = "Opening…";
+    el("settings-status").textContent = t("wizard.opening");
     postJSON("/api/logs/open", {})
       .then(() => {
-        el("settings-status").textContent = "Opened the logs folder.";
+        el("settings-status").textContent = t("logs.opened");
       })
       .catch(() => {
-        el("settings-status").textContent = "Couldn't open the logs folder.";
+        el("settings-status").textContent = t("logs.openFailed");
       })
       .finally(() => {
         button.disabled = false;
@@ -863,14 +931,14 @@ export function wireDialogs(): void {
   el("copy-logs").addEventListener("click", async () => {
     const button = el("copy-logs");
     button.disabled = true;
-    el("settings-status").textContent = "Copying…";
+    el("settings-status").textContent = t("logs.copying");
     try {
       const response = await fetch("/api/logs");
       const payload = await readJSONOr<LogsPayload>(response, {});
-      if (!response.ok) throw new Error(payload.error || "Couldn't copy the logs.");
+      if (!response.ok) throw new Error(serverMessage(payload, t("logs.copyFailed")));
       const text = payload.text || "";
       if (!text) {
-        el("settings-status").textContent = "No log entries yet.";
+        el("settings-status").textContent = t("logs.empty");
         return;
       }
       let copied = false;
@@ -885,17 +953,17 @@ export function wireDialogs(): void {
       if (copied) {
         el("log-fallback").hidden = true;
         el("settings-status").textContent = payload.truncated
-          ? "Copied the latest log entries. Older entries were left out."
-          : "Copied the logs.";
+          ? t("logs.copiedTruncated")
+          : t("logs.copied");
         return;
       }
       el("log-fallback").hidden = false;
       el("log-fallback").value = text;
       el("log-fallback").focus();
       el("log-fallback").select();
-      el("settings-status").textContent = "Couldn't copy automatically. Select the log text and copy it.";
+      el("settings-status").textContent = t("logs.copyManual");
     } catch (error) {
-      el("settings-status").textContent = "Couldn't copy the logs.";
+      el("settings-status").textContent = t("logs.copyFailed");
     } finally {
       button.disabled = false;
     }
@@ -918,7 +986,7 @@ export function wireDialogs(): void {
 
   el("files-rename").addEventListener("click", (event) => {
     if (selectedFiles().length !== 1) {
-      state.filesError = "Choose one file to rename.";
+      state.filesError = t("files.chooseOneRename");
       renderFiles();
       return;
     }
@@ -928,14 +996,14 @@ export function wireDialogs(): void {
   el("files-move").addEventListener("click", () => {
     const selected = selectedFiles();
     if (!selected.length) {
-      state.filesError = "Choose files to move.";
+      state.filesError = t("files.chooseMove");
       renderFiles();
       return;
     }
     state.filesPick = "move";
     state.filesPickPaths = selected.map((entry) => entry.path);
     state.filesError = "";
-    state.filesMessage = "Choose the destination folder. Then confirm the move.";
+    state.filesMessage = t("files.chooseDestination");
     renderFiles();
   });
 
@@ -943,7 +1011,7 @@ export function wireDialogs(): void {
     state.filesPick = "move_folder";
     state.filesPickSource = state.filesPath;
     state.filesError = "";
-    state.filesMessage = "Choose the destination folder. Then confirm the move.";
+    state.filesMessage = t("files.chooseDestination");
     renderFiles();
   });
 
@@ -961,7 +1029,7 @@ export function wireDialogs(): void {
 
   el("files-replace").addEventListener("click", (event) => {
     if (selectedFiles().length !== 1) {
-      state.filesError = "Choose one file to replace.";
+      state.filesError = t("files.chooseOneReplace");
       renderFiles();
       return;
     }
@@ -970,7 +1038,7 @@ export function wireDialogs(): void {
 
   el("files-delete").addEventListener("click", (event) => {
     if (!selectedFiles().length) {
-      state.filesError = "Choose files to delete.";
+      state.filesError = t("files.chooseDelete");
       renderFiles();
       return;
     }

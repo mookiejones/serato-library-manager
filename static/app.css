@@ -335,8 +335,18 @@ body.is-resizing {
 }
 
 .search {
-  flex: 1 1 12rem;
-  min-width: min(100%, 12rem);
+  flex: 1 1 8rem;
+  min-width: min(100%, 8rem);
+}
+
+/* Export, Import, and Reload stay together. The Rekordbox options wrap
+   under them, so a longer translation does not leave Reload on its own row. */
+.browser-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-3);
 }
 
 .search input {
@@ -378,6 +388,7 @@ button:disabled { cursor: default; }
 
 .rekordbox-options {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
@@ -434,6 +445,13 @@ button:disabled { cursor: default; }
   align-items: center;
 }
 
+/* History's played header is "Reproducida" in Spanish. 8.5rem fits it at 15px
+   without clipping. The track view keeps the narrower BPM, key, and time columns. */
+.columns.for-history,
+.list.for-history .row {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 4.25rem 8.5rem 5.25rem;
+}
+
 .columns {
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--rule);
@@ -446,6 +464,14 @@ button:disabled { cursor: default; }
 }
 
 .columns button[data-active="true"] { color: var(--ink); }
+
+/* Translated headers can be longer than the fixed number columns. */
+.columns button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .list {
   position: relative;
@@ -627,7 +653,7 @@ button:disabled { cursor: default; }
   border-top: 1px solid var(--rule);
 }
 
-.field .label { color: var(--quiet); }
+.field .label { color: var(--quiet); overflow-wrap: anywhere; }
 
 .field .column {
   display: block;
@@ -886,6 +912,25 @@ dialog .check {
 dialog .check input {
   width: 20px;
   height: 20px;
+}
+
+/* Language picker in Settings. */
+dialog .settings-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-height: 44px;
+  margin-top: var(--space-2);
+}
+
+dialog .settings-field select {
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-control-edge);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
 }
 
 #merge-dialog { max-width: 36rem; }

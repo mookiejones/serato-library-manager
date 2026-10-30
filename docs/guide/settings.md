@@ -23,9 +23,10 @@ The two buttons have the same weight. The line **Saving…** means the choice is
 1. Click **Settings** at the bottom of the left rail.
 2. Tick **Share anonymous usage stats and crash reports** to turn sharing on. Clear the tick to turn it off.
 3. Read the line under the tick.
-4. Choose **Run setup again** to see the first-run steps another time. **Cancel** on that run leaves the library as it is and does not forget that you already finished setup.
-5. Read **About**. The line is the version of this copy, such as **v1.4.2**. A development copy can also show a short commit. Click **Copy version** to put that line on the clipboard. The next line says **Copied**. When the version cannot be read, About says **Version unavailable** and the footer of the sidebar stays blank. The page does not show an error code.
-6. Click **Close**.
+4. Pick a **Language**: **Same as the system** follows your computer's language, or choose **English** or **Español**. The whole page changes at once, without reloading the library. If the choice cannot be saved, the line under the picker says so, and the page keeps that language until you close the app.
+5. Choose **Run setup again** to see the first-run steps another time. **Cancel** on that run leaves the library as it is and does not forget that you already finished setup.
+6. Read **About**. The line is the version of this copy, such as **v1.4.2**. A development copy can also show a short commit. Click **Copy version** to put that line on the clipboard. The next line says **Copied**. When the version cannot be read, About says **Version unavailable** and the footer of the sidebar stays blank. The page does not show an error code.
+7. Click **Close**.
 
 | Line under the tick | Meaning |
 | --- | --- |
@@ -76,4 +77,4 @@ If the copy fails, a box of log text appears. The line says **Couldn't copy auto
 | macOS | `~/Library/Application Support/Serato Library/settings.json` |
 | Windows | `%APPDATA%\Serato Library\settings.json` |
 
-This folder is **Serato Library**, with a space. It is separate from `Serato/Library`, which holds `master.sqlite`. The same file records whether setup has finished, the window size, and the width of the track list. A new install runs setup until you choose **Open my library**. It also stores the Rekordbox export bar: Memory cues, Hot loops, and the key notation. Those choices stay on this computer. If setup was pointed at a library that is not in the usual folder, `library.json` in this same folder remembers that file. The path stays on this computer. It is not a usage report.
+This folder is **Serato Library**, with a space. It is separate from `Serato/Library`, which holds `master.sqlite`. The same file records whether setup has finished, the window size, the width of the track list, and the language you picked. A new install runs setup until you choose **Open my library**. It also stores the Rekordbox export bar: Memory cues, Hot loops, and the key notation. Those choices stay on this computer. If setup was pointed at a library that is not in the usual folder, `library.json` in this same folder remembers that file. The path stays on this computer. It is not a usage report.
