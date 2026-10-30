@@ -142,4 +142,4 @@ CI runs that discovery with `python` in [`.github/workflows/ci.yml`](.github/wor
 
 The user guide is [docs/index.md](docs/index.md) and [the published site](https://mookiejones.github.io/serato-library-manager/). Contributing is [CONTRIBUTING.md](CONTRIBUTING.md). Security reports are [SECURITY.md](SECURITY.md). Actions and releases are [docs/github.md](docs/github.md). The roadmap is the [Serato Tools Roadmap](https://github.com/users/mookiejones/projects/3).
 
-This repository has no `LICENSE` file. GitHub reports the license as not specified.
+This repository has no `LICENSE` file. GitHub reports the license as not specified. Third-party license notes, including the GCC Runtime Library Exception for `libgfortran` and `libquadmath` inside the NumPy wheel, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

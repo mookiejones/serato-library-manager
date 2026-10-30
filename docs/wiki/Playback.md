@@ -15,3 +15,5 @@ Cue points from the file sit on the seek bar in their colors. Click a cue to jum
 Playback does not change the audio file and does not add a history row. If the track is not in the library, or the file is missing, the bar says **Not in the library or file missing**. If the window cannot play the file, the bar says **This file cannot be played in this window.**
 
 Music behind a shortcut folder still plays, including when that folder points at another disk. A shortcut that points at a file outside the folder named in the library does not.
+
+The server builds a waveform for the same library id. WAV, AIFF, FLAC, MP3, and OGG are decoded here. M4A, AAC, and ALAC need ffmpeg on this computer; without it the waveform is unavailable and the track still plays. A 60-minute stereo 44.1 kHz WAV is analyzed in 7.9 seconds and cached next to the app settings. The Serato folder and the audio file are not changed.

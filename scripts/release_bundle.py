@@ -770,6 +770,9 @@ def run_smoke(exe: Path, cwd: Path) -> None:
     env["LOCALAPPDATA"] = str(home)
     env["APPDATA"] = str(home)
     env[desktop.SMOKE_ENV] = str(marker)
+    tone = cwd / "waveform-smoke.wav"
+    _write_smoke_wav(tone)
+    env[desktop.WAVEFORM_SMOKE_ENV] = str(tone)
     stdout_path = cwd / "smoke-stdout.txt"
     stderr_path = cwd / "smoke-stderr.txt"
     stdout = stdout_path.open("wb")
@@ -852,6 +855,57 @@ def launch_unzipped(archive: Path) -> None:
         run_smoke(bundle.exe, Path(tmp))
 
 
+def _write_smoke_wav(path: Path) -> None:
+    """Write a short silent WAV the frozen app can analyze.
+
+    Args:
+        path: File to replace.
+
+    Returns:
+        None. Half a second of 16-bit mono silence at 44100 Hz.
+    """
+    import wave
+
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(44100)
+        handle.writeframes(b"\x00\x00" * 22050)
+
+
+def assert_miniaudio_bundled(root: Path) -> None:
+    """Require the compiled miniaudio extension inside a PyInstaller tree.
+
+    Args:
+        root: App bundle or the collected ``dist`` folder.
+
+    Raises:
+        SystemExit: No ``miniaudio`` shared library or extension is present.
+    """
+    suffixes = {".so", ".pyd", ".dylib", ".dll"}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if "miniaudio" in path.name.lower() and path.suffix.lower() in suffixes:
+            return
+    raise SystemExit("The bundle does not contain the miniaudio extension")
+
+
+def assert_notices_bundled(root: Path) -> None:
+    """Require ``THIRD_PARTY_NOTICES.md`` inside a PyInstaller tree.
+
+    Args:
+        root: App bundle or the collected ``dist`` folder.
+
+    Raises:
+        SystemExit: The notices file is not in the tree.
+    """
+    for path in root.rglob("THIRD_PARTY_NOTICES.md"):
+        if path.is_file() and not path.is_symlink():
+            return
+    raise SystemExit("The bundle does not contain THIRD_PARTY_NOTICES.md")
+
+
 def verify_tree(dist: Path) -> Bundle:
     """Check bundle size and that its page matches ``static/``.
 
@@ -869,6 +923,8 @@ def verify_tree(dist: Path) -> Bundle:
     bundle = find_bundle(dist)
     assert_size(str(bundle.root), directory_bytes(bundle.root), MIN_BUNDLE_BYTES, MAX_BUNDLE_BYTES)
     assert_static_matches(bundle.root, source_static())
+    assert_miniaudio_bundled(bundle.root)
+    assert_notices_bundled(bundle.root)
     return bundle
 
 

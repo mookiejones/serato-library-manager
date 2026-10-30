@@ -992,6 +992,8 @@ class PackageTests(unittest.TestCase):
         self.assertIn("webview.platforms.gtk", spec)
         self.assertIn('"cefpython3"', spec)
         self.assertIn('"pystray"', spec)
+        self.assertIn('"miniaudio"', spec)
+        self.assertIn('collect_dynamic_libs("miniaudio")', spec)
         self.assertNotIn("pystray._", spec)
         self.assertNotIn("LSUIElement", spec)
 

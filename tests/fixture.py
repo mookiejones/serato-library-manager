@@ -349,7 +349,12 @@ class TempLibrary:
             raise RuntimeError("The test database is not in a temporary directory.")
         return self
 
-    def __exit__(self, *_) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
         """Restore ``library.MASTER`` and delete the temporary directory.
 
         Restores the previous backup-once set and drops the server cache.
@@ -357,8 +362,9 @@ class TempLibrary:
         SQLite handle, so a leak is reported instead of ignored.
 
         Args:
-            *_: Exception type, value, and traceback from the ``with`` block.
-                Cleanup runs whether or not the block raised.
+            exc_type: Exception type from the ``with`` block, or None.
+            exc: Exception instance, or None.
+            traceback: Traceback, or None. Cleanup runs either way.
 
         Returns:
             None. A leak raises instead of being swallowed.

@@ -34,6 +34,7 @@ import static_assets
 import telemetry
 
 SMOKE_ENV = "SERATO_LIBRARY_SMOKE"
+WAVEFORM_SMOKE_ENV = "SERATO_LIBRARY_WAVEFORM_SMOKE"
 NO_WINDOW_ENV = "SERATO_LIBRARY_NO_WINDOW"
 NO_WINDOW_FLAG = "--no-window"
 LOCK_NAME = "instance.lock"
@@ -390,8 +391,12 @@ def smoke_main(marker: Path) -> None:
 
     Does not open the Serato library, a window, or telemetry. The server
     listens on 127.0.0.1 and a free port. The web view is not imported.
+    When ``SERATO_LIBRARY_WAVEFORM_SMOKE`` is a WAV path, that file is
+    analyzed before the server starts. A missing miniaudio extension
+    fails the process here.
     """
     _validate_marker(marker)
+    _smoke_waveform()
     missing = static_assets.missing_static_files(server.app_root() / "static")
     if missing:
         raise SystemExit("Missing bundled files: " + ", ".join(missing))
@@ -410,6 +415,28 @@ def smoke_main(marker: Path) -> None:
             httpd.shutdown()
             thread.join(timeout=3)
         httpd.server_close()
+
+
+def _smoke_waveform() -> None:
+    """Analyze the smoke WAV when the harness asked for a waveform.
+
+    Returns:
+        None when the variable is unset.
+
+    Raises:
+        SystemExit: The file cannot be decoded, or the body is not ``SWF1``.
+    """
+    probe = os.environ.get(WAVEFORM_SMOKE_ENV)
+    if not probe:
+        return
+    import waveform
+
+    try:
+        body, _cached = waveform.load(Path(probe))
+    except waveform.WaveformUnavailable as exc:
+        raise SystemExit("Waveform smoke could not decode the file") from exc
+    if not body.startswith(b"SWF1"):
+        raise SystemExit("Waveform smoke did not produce a waveform")
 
 
 def window_skipped(argv: list[str] | None = None) -> bool:

@@ -43,10 +43,12 @@ npm test
 node scripts/build_frontend.mjs --check
 ```
 
-The test job installs `requirements.txt`, then runs the suite. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
+The test job installs `requirements.txt`, then runs the suite. The Ubuntu Python 3.12 job also installs `pyright==1.1.407` and runs `python -m pyright waveform.py tests/test_waveform.py` in strict mode (`pyrightconfig.json`). Those files are on the strict include list. The rest of the include list is not gated by this step. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
 
 ```bash
 python3 -m pip install -r requirements.txt
+python3 -m pip install pyright==1.1.407
+python3 -m pyright waveform.py tests/test_waveform.py
 python3 -m unittest discover -s tests -t . -v
 ```
 
@@ -72,7 +74,7 @@ The job name is `review dependency changes`. It needs only `contents: read`. A p
 
 GitHub Releases is the only download. The workflow does not publish a Homebrew formula, a winget package, or a website.
 
-`macos-latest` builds `Serato-Library-macos-arm64.dmg`. That runner is Apple silicon. `macos-15-intel` builds `Serato-Library-macos-x64.dmg`. PyInstaller does not produce a reliable universal binary from one Python install, so the two architectures are separate disk images. `macos-15-intel` is the GitHub-hosted Intel image and is scheduled to remain available through August 2027. `windows-latest` builds `Serato-Library-windows-setup.exe` with Inno Setup 6.7.3 and `Serato-Library-windows.zip`, the portable folder. The builds use Python 3.12, `requirements-build.txt` (`pywebview==6.2.1`, `pythonnet==3.2.1` and `clr-loader==0.3.1` on Windows, `sentry-sdk==2.73.0`, `posthog==7.75.11`, and `pyinstaller==6.22.3`), and, on macOS, `requirements-macos.txt` (`pyobjc-core==12.2.2`, `pyobjc-framework-Cocoa==12.2.2`, `pyobjc-framework-Quartz==12.2.2`, `pyobjc-framework-WebKit==12.2.2`, `pyobjc-framework-Security==12.2.2`, and `pyobjc-framework-UniformTypeIdentifiers==12.2.2`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only. The window uses the system web view. The spec excludes CEF and Qt WebEngine, so the installer does not bundle Chromium.
+`macos-latest` builds `Serato-Library-macos-arm64.dmg`. That runner is Apple silicon. `macos-15-intel` builds `Serato-Library-macos-x64.dmg`. PyInstaller does not produce a reliable universal binary from one Python install, so the two architectures are separate disk images. `macos-15-intel` is the GitHub-hosted Intel image and is scheduled to remain available through August 2027. `windows-latest` builds `Serato-Library-windows-setup.exe` with Inno Setup 6.7.3 and `Serato-Library-windows.zip`, the portable folder. The builds use Python 3.12, `requirements-build.txt` (`pywebview==6.2.1`, `pythonnet==3.2.1` and `clr-loader==0.3.1` on Windows, `sentry-sdk==2.73.0`, `posthog==7.75.11`, `miniaudio==1.71`, `cffi==2.1.1`, `pycparser==3.12`, `numpy==2.5.4`, and `pyinstaller==6.22.3`), and, on macOS, `requirements-macos.txt` (`pyobjc-core==12.2.2`, `pyobjc-framework-Cocoa==12.2.2`, `pyobjc-framework-Quartz==12.2.2`, `pyobjc-framework-WebKit==12.2.2`, `pyobjc-framework-Security==12.2.2`, and `pyobjc-framework-UniformTypeIdentifiers==12.2.2`). Source tests also cover Python 3.14. The frozen app embeds 3.12 only. The window uses the system web view. The spec excludes CEF and Qt WebEngine, so the installer does not bundle Chromium.
 
 Sharing stays off until the person opts in. Setup asks with **No, don't share** and **Yes, share**. Esc cancels setup and does not save a choice. A missing key keeps that service off even after opt-in. If `static/wizard.js` did not load, the older dialog still saves a decline when it closes.
 

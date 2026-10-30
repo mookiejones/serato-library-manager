@@ -1,8 +1,9 @@
-"""Read Serato cue points, loops, flips, and beatgrids from audio files.
+"""Read Serato cue points, loops, flips, beatgrids, and overviews from audio files.
 
 Serato stores these outside the library database. MP3, AIFF, and WAV keep
 them in ID3 GEOB frames. FLAC keeps them in Vorbis comments. M4A and MP4
-keep them in freeform atoms. Reading never rewrites a file.
+keep them in freeform atoms. Ogg Vorbis keeps an overview in a comment
+whose bytes use a different header. Reading never rewrites a file.
 ``copy_serato_geob`` copies existing Serato GEOB frames onto another file
 when that file has a plain ID3v2.3 tag, or when it is an MP3 with no tag
 yet. Other frames and the audio bytes stay as they are. Any other layout
@@ -395,6 +396,8 @@ _B64_ALPHABET = frozenset(
 _ENVELOPE_MARK = b"application/octet-stream\x00\x00"
 _SERATO_MEAN = b"com.serato.dj"
 _SERATO_FRAME_NAMES = frozenset({"Serato Markers2", "Serato BeatGrid"})
+_OVERVIEW_NAMES = frozenset({"Serato Overview"})
+_OVERVIEW_COLUMNS = 8192
 _HEAD_READ = 2_000_000
 _TAIL_READ = 512_000
 
@@ -445,7 +448,10 @@ def _decode_serato_base64(raw: bytes) -> bytes | None:
         return None
 
 
-def _unwrap_serato_envelope(raw: bytes) -> tuple[str, bytes] | None:
+def _unwrap_serato_envelope(
+    raw: bytes,
+    names: frozenset[str] | None = None,
+) -> tuple[str, bytes] | None:
     """Split one FLAC or MP4 Serato value into a frame name and payload.
 
     The value is base64 of ``application/octet-stream``, two nulls, a
@@ -454,11 +460,14 @@ def _unwrap_serato_envelope(raw: bytes) -> tuple[str, bytes] | None:
 
     Args:
         raw: The Vorbis comment value or the MP4 data bytes.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
+            ``read_serato_overview`` passes ``Serato Overview``.
 
     Returns:
-        The frame name and payload for Markers2 or BeatGrid. Other Serato
+        The frame name and payload when the name is allowed. Other Serato
         blocks, and values that do not decode, return None.
     """
+    allowed = _SERATO_FRAME_NAMES if names is None else names
     decoded = _decode_serato_base64(raw)
     if not decoded or not decoded.startswith(_ENVELOPE_MARK):
         return None
@@ -466,7 +475,7 @@ def _unwrap_serato_envelope(raw: bytes) -> tuple[str, bytes] | None:
     if not sep or not name:
         return None
     label = name.decode("utf-8", "replace")
-    if label not in _SERATO_FRAME_NAMES:
+    if label not in allowed:
         return None
     return label, payload
 
@@ -495,6 +504,7 @@ def _container_frames(
     path: Path,
     size: int,
     head: bytes,
+    names: frozenset[str] | None = None,
 ) -> list[tuple[str, bytes]]:
     """Collect Markers2 and BeatGrid payloads stored outside ID3.
 
@@ -506,19 +516,24 @@ def _container_frames(
         path: Filesystem path, used for the suffix check.
         size: File size in bytes.
         head: Leading bytes already read.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
 
     Returns:
         Frame name and payload pairs. The file is not written.
     """
     frames: list[tuple[str, bytes]] = []
     if head.startswith(b"fLaC") or path.suffix.lower() == ".flac":
-        frames.extend(_flac_serato_frames(handle, size))
+        frames.extend(_flac_serato_frames(handle, size, names))
     if _is_mp4_family(path, head):
-        frames.extend(_mp4_moov_frames(handle, size))
+        frames.extend(_mp4_moov_frames(handle, size, names))
     return frames
 
 
-def _flac_serato_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
+def _flac_serato_frames(
+    handle: BinaryIO,
+    size: int,
+    names: frozenset[str] | None = None,
+) -> list[tuple[str, bytes]]:
     """Read Serato Vorbis comments by walking every FLAC metadata block.
 
     Each block header is 4 bytes: a type, a last-block flag, and a 24-bit
@@ -529,6 +544,7 @@ def _flac_serato_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
     Args:
         handle: Open file positioned anywhere.
         size: File size in bytes.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
 
     Returns:
         Frame name and payload pairs. A file that does not start with
@@ -559,7 +575,7 @@ def _flac_serato_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
             block = handle.read(length)
             if len(block) != length:
                 break
-            frames.extend(_vorbis_comment_frames(block))
+            frames.extend(_vorbis_comment_frames(block, names))
         if is_last:
             break
         next_pos = data_at + length
@@ -569,13 +585,17 @@ def _flac_serato_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
     return frames
 
 
-def _vorbis_comment_frames(block: bytes) -> list[tuple[str, bytes]]:
+def _vorbis_comment_frames(
+    block: bytes,
+    names: frozenset[str] | None = None,
+) -> list[tuple[str, bytes]]:
     """Read ``SERATO_*`` fields from one Vorbis comment block.
 
     Lengths are little-endian, which is the Vorbis comment rule.
 
     Args:
         block: Comment block bytes, vendor string included.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
 
     Returns:
         Frame name and payload pairs. A short or truncated block is empty.
@@ -605,18 +625,23 @@ def _vorbis_comment_frames(block: bytes) -> list[tuple[str, bytes]]:
             continue
         if not key.decode("utf-8", "replace").upper().startswith("SERATO_"):
             continue
-        unwrapped = _unwrap_serato_envelope(value)
+        unwrapped = _unwrap_serato_envelope(value, names)
         if unwrapped is not None:
             frames.append(unwrapped)
     return frames
 
 
-def _mp4_moov_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
+def _mp4_moov_frames(
+    handle: BinaryIO,
+    size: int,
+    names: frozenset[str] | None = None,
+) -> list[tuple[str, bytes]]:
     """Read Serato atoms from each top-level ``moov``, skipping audio.
 
     Args:
         handle: Open MP4 file.
         size: File size in bytes.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
 
     Returns:
         Frame name and payload pairs. ``mdat`` is skipped by its declared
@@ -652,17 +677,21 @@ def _mp4_moov_frames(handle: BinaryIO, size: int) -> list[tuple[str, bytes]]:
                     _TAG_LIMIT,
                 )
                 body_len = _TAG_LIMIT
-            frames.extend(_mp4_serato_frames(handle.read(body_len)))
+            frames.extend(_mp4_serato_frames(handle.read(body_len), names))
         pos += atom_size
     return frames
 
 
-def _mp4_serato_frames(blob: bytes) -> list[tuple[str, bytes]]:
+def _mp4_serato_frames(
+    blob: bytes,
+    names: frozenset[str] | None = None,
+) -> list[tuple[str, bytes]]:
     """Find ``----:com.serato.dj`` atoms in a byte window.
 
     Args:
         blob: Bytes that may contain a freeform atom. The window does not
             have to start on an atom boundary.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
 
     Returns:
         Frame name and payload pairs.
@@ -674,13 +703,17 @@ def _mp4_serato_frames(blob: bytes) -> list[tuple[str, bytes]]:
         if index < 0:
             break
         start = index + len(_SERATO_MEAN)
-        parsed = _mp4_freeform_at(blob, index)
+        parsed = _mp4_freeform_at(blob, index, names)
         if parsed is not None:
             frames.append(parsed)
     return frames
 
 
-def _mp4_freeform_at(blob: bytes, index: int) -> tuple[str, bytes] | None:
+def _mp4_freeform_at(
+    blob: bytes,
+    index: int,
+    names: frozenset[str] | None = None,
+) -> tuple[str, bytes] | None:
     """Parse the freeform atom whose mean string starts at ``index``.
 
     The layout is a 32-bit ``----`` atom, then ``mean``, ``name``, and
@@ -690,6 +723,7 @@ def _mp4_freeform_at(blob: bytes, index: int) -> tuple[str, bytes] | None:
     Args:
         blob: Bytes containing the atom.
         index: Index of ``com.serato.dj``.
+        names: Frame names to keep. None keeps Markers2 and BeatGrid.
 
     Returns:
         The frame name and payload, or None when the bytes around the mean
@@ -718,7 +752,7 @@ def _mp4_freeform_at(blob: bytes, index: int) -> tuple[str, bytes] | None:
             break
     if data is None:
         return None
-    return _unwrap_serato_envelope(data)
+    return _unwrap_serato_envelope(data, names)
 
 
 def _mp4_atoms(buf: bytes) -> list[tuple[bytes, bytes]]:
@@ -747,6 +781,229 @@ def _mp4_atoms(buf: bytes) -> list[tuple[bytes, bytes]]:
         atoms.append((kind, buf[pos + header_len:pos + atom_size]))
         pos += atom_size
     return atoms
+
+
+def read_serato_overview(path: str | None) -> bytes | None:
+    """Read the Serato Overview tag without rewriting the file.
+
+    ID3 GEOB, FLAC Vorbis comments, and MP4 freeform atoms use the same
+    walks as the marker reader. An Ogg page is read only when the file
+    starts with ``OggS`` or the suffix is ``.ogg`` or ``.oga``. The Ogg
+    value is either the shared base64 envelope or the hex layout Serato
+    writes for Vorbis: two big-endian version words, 1 and 5, then the
+    columns. Marker parsing still ignores this tag, so ``found`` stays
+    false when an overview is the only Serato block.
+
+    Args:
+        path: Filesystem path of the audio file, or None.
+
+    Returns:
+        Bytes that start with ``01 05`` and then complete 16-byte columns.
+        A short tail is dropped. None when the tag is missing or unreadable.
+        At most 8192 columns are returned.
+    """
+    if not path:
+        return None
+    file = Path(path)
+    try:
+        if not file.is_file():
+            return None
+        size = file.stat().st_size
+        with file.open("rb") as handle:
+            head = handle.read(min(size, _HEAD_READ))
+            tail = b""
+            if size > _HEAD_READ:
+                handle.seek(max(0, size - _TAIL_READ))
+                tail = handle.read(_TAIL_READ)
+            for name, payload in _geob_frames(head) + _geob_frames(tail):
+                if name == "Serato Overview":
+                    normalized = _normalize_overview(payload)
+                    if normalized is not None:
+                        return normalized
+            for name, payload in _container_frames(handle, file, size, head, _OVERVIEW_NAMES):
+                if name == "Serato Overview":
+                    normalized = _normalize_overview(payload)
+                    if normalized is not None:
+                        return normalized
+            if head.startswith(b"OggS") or file.suffix.lower() in {".ogg", ".oga"}:
+                handle.seek(0)
+                return _ogg_overview(handle)
+    except OSError:
+        return None
+    return None
+
+
+def _normalize_overview(payload: bytes) -> bytes | None:
+    """Return a versioned overview payload of complete 16-byte columns.
+
+    Args:
+        payload: GEOB data, an unwrapped container payload, or hex text.
+
+    Returns:
+        ``01 05`` plus up to 8192 columns. None when the version is not
+        1.5 or there is not one full column. A hex string is decoded once.
+    """
+    direct = _normalize_overview_bytes(payload)
+    if direct is not None:
+        return direct
+    decoded = _unhex(payload)
+    if decoded is None:
+        return None
+    return _normalize_overview_bytes(decoded)
+
+
+def _normalize_overview_bytes(payload: bytes) -> bytes | None:
+    """Accept the ID3 layout or the Ogg uint32 version words.
+
+    Args:
+        payload: Binary overview bytes, not hex text.
+
+    Returns:
+        ``01 05`` plus complete columns, or None when the version does not match.
+    """
+    if len(payload) >= 2 and payload[0] == 1 and payload[1] == 5:
+        return _trim_columns(payload[2:])
+    if len(payload) >= 8:
+        major = int.from_bytes(payload[0:4], "big")
+        minor = int.from_bytes(payload[4:8], "big")
+        if (major, minor) == (1, 5):
+            return _trim_columns(payload[8:])
+    return None
+
+
+def _trim_columns(body: bytes) -> bytes | None:
+    """Keep whole 16-byte columns and prefix the shared version bytes.
+
+    Args:
+        body: Column bytes after the version header.
+
+    Returns:
+        ``01 05`` plus at most 8192 columns. None when ``body`` has no column.
+    """
+    cols = min(len(body) // 16, _OVERVIEW_COLUMNS)
+    if cols < 1:
+        return None
+    return bytes((1, 5)) + body[: cols * 16]
+
+
+def _unhex(raw: bytes) -> bytes | None:
+    """Decode a hex overview value, ignoring nothing else.
+
+    Args:
+        raw: Comment text that may be hexadecimal.
+
+    Returns:
+        The decoded bytes when every character is hex and the length is
+        even. None otherwise.
+    """
+    if len(raw) < 16 or len(raw) % 2:
+        return None
+    if any(byte not in b"0123456789abcdefABCDEF" for byte in raw):
+        return None
+    try:
+        return bytes.fromhex(raw.decode("ascii"))
+    except ValueError:
+        return None
+
+
+def _ogg_overview(handle: BinaryIO) -> bytes | None:
+    """Read ``serato_overview`` from the Vorbis comment packet.
+
+    Args:
+        handle: Open file positioned at the first Ogg page.
+
+    Returns:
+        A normalized overview payload, or None when the comment is absent.
+        Audio pages after the comment packet are not read.
+    """
+    packets = _ogg_packets(handle, 2)
+    if len(packets) < 2:
+        return None
+    comment = packets[1]
+    block = comment[7:] if comment.startswith(b"\x03vorbis") else comment
+    for key, value in _comment_pairs(block):
+        if key.upper() != "SERATO_OVERVIEW":
+            continue
+        unwrapped = _unwrap_serato_envelope(value, _OVERVIEW_NAMES)
+        if unwrapped is not None:
+            normalized = _normalize_overview(unwrapped[1])
+            if normalized is not None:
+                return normalized
+        normalized = _normalize_overview(value)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _ogg_packets(handle: BinaryIO, limit: int) -> list[bytes]:
+    """Read the first Vorbis packets from an Ogg file.
+
+    Args:
+        handle: Open file at the first page.
+        limit: Stop after this many complete packets.
+
+    Returns:
+        Packets in order. A page that is not ``OggS`` ends the list.
+        A packet larger than 1 MB is abandoned.
+    """
+    packets: list[bytes] = []
+    current = bytearray()
+    for _page in range(8):
+        header = handle.read(27)
+        if len(header) < 27 or header[:4] != b"OggS":
+            break
+        count = header[26]
+        table = handle.read(count)
+        if len(table) < count:
+            break
+        for seg_len in table:
+            piece = handle.read(seg_len)
+            if len(piece) < seg_len:
+                return packets
+            current.extend(piece)
+            if len(current) > 1_000_000:
+                return packets
+            if seg_len < 255:
+                packets.append(bytes(current))
+                current.clear()
+                if len(packets) >= limit:
+                    return packets
+    return packets
+
+
+def _comment_pairs(block: bytes) -> list[tuple[str, bytes]]:
+    """List every Vorbis comment in one block.
+
+    Args:
+        block: Vendor string and comments, little-endian lengths. The
+            Ogg framing byte after the comments is ignored.
+
+    Returns:
+        Key and value pairs. A truncated block stops early.
+    """
+    if len(block) < 8:
+        return []
+    vendor_len = int.from_bytes(block[0:4], "little")
+    if vendor_len > len(block) - 8:
+        return []
+    pos = 4 + vendor_len
+    count = int.from_bytes(block[pos:pos + 4], "little")
+    pos += 4
+    pairs: list[tuple[str, bytes]] = []
+    for _ in range(min(count, len(block))):
+        if pos + 4 > len(block):
+            break
+        comment_len = int.from_bytes(block[pos:pos + 4], "little")
+        pos += 4
+        if comment_len > len(block) - pos:
+            break
+        comment = block[pos:pos + comment_len]
+        pos += comment_len
+        key, sep, value = comment.partition(b"=")
+        if not sep:
+            continue
+        pairs.append((key.decode("utf-8", "replace"), value))
+    return pairs
 
 
 def _parse_markers2(payload: bytes) -> MarkerEntries:
