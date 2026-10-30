@@ -289,6 +289,12 @@ def library_allows(real: Path, nominal: Path) -> bool:
         file outside the roots. Returning True for every call is what
         lets that shortcut through.
     """
+    # A file symlink, or a directory symlink that leaves the folder the
+    # library path names, is refused even when root discovery followed it
+    # and listed the outside folder. This does not depend on is_symlink
+    # for the leaf: realpath leaving the stored parent is enough.
+    if _left_stored_directory(nominal, real):
+        return False
     roots = _music_root_reals()
     if _inside_any(real, roots):
         return True
@@ -296,9 +302,7 @@ def library_allows(real: Path, nominal: Path) -> bool:
         named = Path(os.path.realpath(nominal))
     except OSError:
         return False
-    if _key(real) != _key(named):
-        return False
-    return not _symlink_leaves_roots(nominal, real, roots)
+    return _key(real) == _key(named)
 
 
 def _asset_row(asset_id: int, space: str | None) -> sqlite3.Row | None:
@@ -446,68 +450,37 @@ def _inside(child: Path, root: Path) -> bool:
         return False
 
 
-def _symlink_leaves_roots(nominal: Path, real: Path, roots: list[Path]) -> bool:
-    """Return whether a symlink carried ``real`` outside the music roots.
+def _left_stored_directory(nominal: Path, real: Path) -> bool:
+    """Return whether resolving ``nominal`` left the directory it names.
 
     Args:
-        nominal: Stored path. A symlink leaf is still a symlink.
-        real: Real path of that file.
-        roots: Real music roots. An empty list does not treat an operating
-            system shortcut such as ``/tmp`` as an escape.
+        nominal: Stored path. A symlink leaf stays a symlink.
+        real: Real path of the file.
 
     Returns:
-        True when the leaf is a symlink, or a directory symlink on the
-        path lands outside every root. A shortcut that is only an ancestor
-        of a root, such as ``/tmp`` on macOS, is not an escape.
+        True when ``real`` is outside the real directory of the stored
+        parent, or a directory symlink on that path points outside the
+        directory that contains the shortcut. An operating-system shortcut
+        such as ``/tmp`` on macOS points at a directory that still contains
+        the file's folder, so it is not an escape.
     """
-    if _inside_any(real, roots):
-        return False
     try:
-        if nominal.is_symlink():
-            return True
-        current = nominal.parent
-        while True:
-            if current.is_symlink():
-                target = Path(os.path.realpath(current))
-                if _inside(real, target) and not _ancestor_of_any_root(target, roots):
-                    return True
-            if current.parent == current:
-                break
-            current = current.parent
+        holder = Path(os.path.realpath(nominal.parent))
     except OSError:
         return True
-    return False
-
-
-def _ancestor_of_any_root(target: Path, roots: list[Path]) -> bool:
-    """Return whether ``target`` contains a music root.
-
-    Args:
-        target: Real path of a symlink.
-        roots: Real music roots.
-
-    Returns:
-        True when there are no roots, or when a root is ``target`` or a
-        directory inside it.
-    """
-    if not roots:
+    if not _inside(real, holder):
         return True
-    return _inside_any_root_under(target, roots)
-
-
-def _inside_any_root_under(target: Path, roots: list[Path]) -> bool:
-    """Return whether any root is ``target`` or a folder inside it.
-
-    Args:
-        target: Real directory.
-        roots: Real music roots.
-
-    Returns:
-        True when one root stays inside ``target``.
-    """
-    for root in roots:
-        if _inside(root, target):
-            return True
+    try:
+        probe = nominal.parent
+        while probe != probe.parent:
+            if probe.is_symlink():
+                target = Path(os.path.realpath(probe))
+                container = Path(os.path.realpath(probe.parent))
+                if not _inside(target, container) and _key(target) != _key(container):
+                    return True
+            probe = probe.parent
+    except OSError:
+        return True
     return False
 
 
