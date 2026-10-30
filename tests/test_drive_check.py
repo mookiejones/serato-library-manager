@@ -969,10 +969,14 @@ class DriveCheckTests(unittest.TestCase):
                     "file_size",
                 },
             )
-            self.assertEqual(
-                set(body["errors"][0]) if body["errors"] else set(),
-                set() if not body["errors"] else {"crate", "message"},
-            )
+            unread = urlencode({"drive": str(drive)}, quote_via=quote)
+            with patch.object(drive_check, "_read_bytes", side_effect=OSError("unreadable")):
+                with urllib.request.urlopen(f"http://{host}:{port}/api/drive-check?{unread}", timeout=10) as response:
+                    failed = json.loads(response.read().decode("utf-8"))
+            self.assertTrue(failed["errors"])
+            for error in failed["errors"]:
+                self.assertEqual(set(error), {"crate", "message"})
+            self.assertFalse(failed["ready"])
             missing = urlencode({"drive": str(Path(self._tmp.name) / "absent")}, quote_via=quote)
             with urllib.request.urlopen(f"http://{host}:{port}/api/drive-check?{missing}", timeout=10) as response:
                 absent = json.loads(response.read().decode("utf-8"))
