@@ -407,18 +407,20 @@ _TRACK_PATH_TAGS = ("ptrk", "pfil")
 """Path fields inside an ``otrk``: ``ptrk`` in a crate, ``pfil`` in ``database V2``."""
 
 
-def _otrk_path(body: bytes) -> str:
+def _otrk_path(body: bytes, tags: tuple[str, ...] = _TRACK_PATH_TAGS) -> str:
     """Return the first non-empty path in one ``otrk``.
 
     Args:
         body: The ``otrk`` payload.
+        tags: Path fields to accept. ``database V2`` rows pass only
+            ``pfil`` so a crate is never read as a database.
 
     Returns:
-        The ``ptrk`` or ``pfil`` text, whichever comes first, or an empty
-        string. One track gives at most one path.
+        The first non-empty text among ``tags``, or an empty string. One
+        track gives at most one path.
     """
     for inner, payload in _chunks(body):
-        if inner in _TRACK_PATH_TAGS:
+        if inner in tags:
             text = _utf16be(payload)
             if text:
                 return text
@@ -463,7 +465,7 @@ def parse_database_v2(data: bytes) -> list[dict[str, object]]:
                 row[key] = _utf16be(payload)
             elif inner == "bmis":
                 row["serato_missing"] = payload[:1] == b"\x01"
-        path = _otrk_path(body)
+        path = _otrk_path(body, ("pfil",))
         if path:
             row["path"] = path
             rows.append(row)

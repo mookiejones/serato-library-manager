@@ -68,6 +68,10 @@ class ParseDatabaseV2PathsTests(unittest.TestCase):
                     self.assertEqual([r["path"] for r in rows], snapshots.parse_serato_bytes(data))
         both = _chunk("otrk", _text("pfil", "Music/a.mp3") + _text("ptrk", "Music/b.mp3") + _text("tsng", "T"))
         self.assertEqual(snapshots.parse_database_v2(both), [{"title": "T", "path": "Music/a.mp3"}])
+        ptrk_first = _chunk("otrk", _text("ptrk", "Music/b.mp3") + _text("pfil", "Music/a.mp3"))
+        self.assertEqual(snapshots.parse_database_v2(ptrk_first), [{"path": "Music/a.mp3"}])
+        self.assertEqual(snapshots.parse_serato_bytes(ptrk_first), ["Music/b.mp3"])
+        self.assertEqual(snapshots.parse_database_v2(_chunk("otrk", _text("ptrk", "Music/b.mp3"))), [])
         self.assertEqual(snapshots.parse_database_v2(_chunk("otrk", _text("pfil", "") + _text("tsng", "T"))), [])
 
     def test_unmounted_drive_database_is_read(self) -> None:
