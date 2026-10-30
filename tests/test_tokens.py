@@ -450,6 +450,13 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     ("#wizard-primary", ("--color-primary",), 20, 700),
     ("#wizard-folder-use", ("--color-text",), 15, 400),
     (".wizard-folder", ("--color-button",), 15, 400),
+    (".player-title", ("--color-card",), 14, 600),
+    (".player-artist", ("--color-card",), 13, 400),
+    (".player-status", ("--color-card",), 13, 400),
+    (".player-toggle", ("--color-card",), 13, 600),
+    (".player-time", ("--color-card",), 13, 400),
+    (".player-volume", ("--color-card",), 11, 400),
+    (".detail-play", ("--color-card",), 13, 600),
 )
 
 # Large or inherited text whose color comes from an ancestor rule.
@@ -501,6 +508,7 @@ _DECORATIVE = {
     ".shortcut-table th",
     ".shortcut-table td",
     ".swatch",
+    ".player-bar",
 }
 
 # The only visible edge of these fields. Card surfaces use the sheet.
@@ -519,6 +527,7 @@ _CONTROL_EDGE = (
     (".files-field input", "--color-card", "border-bottom"),
     ("#quick-open-query", "--color-card", "border"),
     (".shortcut-table kbd", "--color-card", "border"),
+    (".row-play", "--color-card", "border"),
     (".rule-edit textarea", "--color-card", "border"),
     (".wizard-folder", "--color-card", "border"),
 )
@@ -656,7 +665,7 @@ class ContrastTests(unittest.TestCase):
             ratio = contrast(_over(mark, surface, alpha or 0), surface)
             self.assertGreaterEqual(ratio, 3, f"holds-selection on {background_name} is {ratio:.2f}:1")
 
-        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#copy-version", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice"):
+        for selector in ("#consent-accept", "#open-logs", "#copy-logs", "#copy-version", "#rekordbox-cancel", "#merge-cancel", ".wizard-choice", ".player-toggle", ".detail-play"):
             border = _paint(self._rule(selector)["border"], self.colors)
             ratio = contrast(border, self._surface("--color-card"))
             self.assertGreaterEqual(ratio, 3, f"{selector} border is {ratio:.2f}:1")
@@ -718,6 +727,8 @@ class ContrastTests(unittest.TestCase):
             "#merge-cancel",
             ".wizard-choice",
             ".quick-open-option.is-active",
+            ".player-toggle",
+            ".detail-play",
         } | {selector for selector, _, _ in _CONTROL_EDGE}
         self.assertEqual(bordered - checked_borders, set(), "borders missing from the contrast list")
         self.assertEqual(checked_borders - bordered, set(), "contrast list names a border that is not painted")

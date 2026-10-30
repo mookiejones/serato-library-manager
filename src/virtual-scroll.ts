@@ -9,6 +9,8 @@
 import { bridge } from "./bridge";
 import { el } from "./dom";
 import { clockLabel, colorHex, lengthLabel } from "./format";
+import { getPlayerState, play, subscribe } from "./player";
+import { playerStrings } from "./player-strings";
 import { ROW, state } from "./state";
 
 const spacer = document.createElement("div");
@@ -57,8 +59,7 @@ export function paintRows() {
   }
   for (let index = start; index < end; index += 1) {
     const track = view[index]!;
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = document.createElement("div");
     button.className = "row";
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", String(track.id === state.selectedId));
@@ -68,6 +69,28 @@ export function paintRows() {
     titleCell.className = "cell";
     const line = document.createElement("span");
     line.className = "title-line";
+    if (!track.entry) {
+      const playingNow = getPlayerState();
+      const playingThis = playingNow.trackId === track.id && playingNow.playing;
+      const playButton = document.createElement("button");
+      playButton.type = "button";
+      playButton.className = "row-play";
+      const labelName = track.name || playerStrings.untitled;
+      playButton.setAttribute("aria-label", `${playerStrings.play} ${labelName}`);
+      playButton.setAttribute("aria-pressed", String(playingThis));
+      const icon = document.createElement("span");
+      icon.className = "row-play-icon";
+      icon.setAttribute("aria-hidden", "true");
+      playButton.append(icon);
+      playButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        bridge.selectTrack(track.id);
+        play(track.id);
+        el("list").focus({ preventScroll: true });
+      });
+      playButton.addEventListener("dblclick", (event) => event.stopPropagation());
+      line.append(playButton);
+    }
     const hex = colorHex(track.color);
     if (hex) {
       const swatch = document.createElement("span");
@@ -119,7 +142,14 @@ export function paintRows() {
     }
 
     button.append(titleCell, artist, third, fourth, fifth);
-    button.addEventListener("click", () => (track.entry ? bridge.selectEntry(track.id) : bridge.selectTrack(track.id)));
+    button.addEventListener("click", () => {
+      if (track.entry) bridge.selectEntry(track.id);
+      else bridge.selectTrack(track.id);
+      el("list").focus({ preventScroll: true });
+    });
+    button.addEventListener("dblclick", () => {
+      if (!track.entry) play(track.id);
+    });
     rows.append(button);
   }
 }
@@ -193,6 +223,19 @@ export function wireVirtualScroll(): void {
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       moveSelection(-1);
+    } else if (event.key === "Enter") {
+      const selected = state.view.find((item) => item.id === state.selectedId);
+      if (!selected || selected.entry) return;
+      event.preventDefault();
+      play(selected.id);
     }
+  });
+  let paintedId: number | null = null;
+  let paintedPlaying = false;
+  subscribe((next) => {
+    if (next.trackId === paintedId && next.playing === paintedPlaying) return;
+    paintedId = next.trackId;
+    paintedPlaying = next.playing;
+    paintRows();
   });
 }

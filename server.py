@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 import app_config
 import app_log
+import audio_stream
 import drive_check
 import files
 import legacy_library
@@ -606,10 +607,14 @@ def db_stamp() -> tuple[int, ...]:
 
 
 def invalidate() -> None:
-    """Drop the cached library payloads and the Files music-root cache."""
+    """Drop the cached library payloads and the Files music-root cache.
+
+    The audio index is dropped too, so the next play rereads asset paths.
+    """
     _cache["stamp"] = None
     _cache["libraries"] = {}
     files.invalidate_browse_cache()
+    audio_stream.invalidate_index()
 
 
 def display_name(name: str) -> str:
@@ -1619,6 +1624,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/status":
                 self.send_json(as_dict(_library_call("status")))
                 return
+            if parsed.path == "/api/audio":
+                self._serve_audio(query, head=False)
+                return
             if parsed.path == "/api/track":
                 raw = query_text(query, "id", "") or ""
                 try:
@@ -1727,6 +1735,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "That request is not valid."}, status=400)
             return
         self.send_file(parsed.path)
+
+    def do_HEAD(self) -> None:
+        """Answer a HEAD request for one library audio file.
+
+        ``/api/audio`` sends the same headers as GET, including
+        ``Accept-Ranges`` and ``Content-Length``, and does not send a body.
+        Any other path is not served. A Host or Origin that is not this
+        computer is refused first.
+        """
+        try:
+            if self._refuse_foreign_host():
+                return
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/audio":
+                self.send_error(501, "Unsupported method")
+                return
+            self._serve_audio(parse_qs(parsed.query), head=True)
+        except Exception as exc:
+            self._report_failure(exc)
 
     def do_POST(self) -> None:
         """Answer a JSON POST that edits the library, reveals a file, or saves settings.
@@ -2277,6 +2304,132 @@ class Handler(BaseHTTPRequestHandler):
         crates = [item.strip() for item in query.get("crate", []) if item.strip()]
         report = drive_check.check_drive(raw, crates or None)
         self.send_json(report.to_dict())
+
+    def _serve_audio(self, query: dict[str, list[str]], *, head: bool) -> None:
+        """Stream one library track, or send the headers for HEAD.
+
+        Args:
+            query: Parsed query. ``id`` is an asset id. ``path`` is used
+                only when ``id`` is absent, and only as a lookup into the
+                library index. ``space`` limits an id to that space.
+            head: When true, send headers and no body. The file is not opened.
+
+        The bytes are read in chunks from the indexed path. The request
+        path is never passed to ``open``. A refusal is JSON and does not
+        include a filesystem path.
+        """
+        raw_id = query_text(query, "id", "") or ""
+        raw_path = query_text(query, "path")
+        space_text = query_text(query, "space")
+        asset_id: int | None
+        if raw_id == "":
+            asset_id = None
+        else:
+            try:
+                asset_id = int(raw_id)
+            except ValueError:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            if asset_id < 0:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+        space: str | None = None
+        if space_text:
+            try:
+                space = require_space(space_text)
+            except library.LibraryError as exc:
+                self.send_json({"error": exc.message}, status=exc.status)
+                return
+        try:
+            target = audio_stream.resolve_audio(
+                asset_id=asset_id,
+                raw_path=None if asset_id is not None else raw_path,
+                space=space,
+            )
+        except audio_stream.AudioRefusal as exc:
+            self.send_json({"error": exc.message}, status=exc.status)
+            return
+        except library.LibraryError as exc:
+            if "Serato library not found" in exc.message:
+                self.send_json(
+                    {"error": "No Serato library was found on this computer."},
+                    status=404,
+                )
+                return
+            self.send_json({"error": exc.message}, status=exc.status)
+            return
+        span = audio_stream.parse_range(self.headers.get("Range"), target.size)
+        if span.status == 416:
+            self._send_audio_headers(target, span, head=True)
+            return
+        length = 0 if span.end < span.start else span.end - span.start + 1
+        chunks: Iterator[bytes] | None = None
+        first = b""
+        if not head and length:
+            chunks = audio_stream.iter_bytes(target.path, span.start, span.end)
+            try:
+                first = next(chunks)
+            except StopIteration:
+                chunks = None
+                first = b""
+            except OSError:
+                if chunks is not None:
+                    chunks.close()
+                self.send_json({"error": "That track is not in the library."}, status=404)
+                return
+        self._send_audio_headers(target, span, head=head)
+        if head or chunks is None:
+            if first:
+                try:
+                    self.wfile.write(first)
+                except ConnectionError:
+                    return
+            return
+        try:
+            self.wfile.write(first)
+            for block in chunks:
+                self.wfile.write(block)
+        except ConnectionError:
+            return
+        finally:
+            chunks.close()
+
+    def _send_audio_headers(
+        self,
+        target: audio_stream.AudioTarget,
+        span: audio_stream.ByteRange,
+        *,
+        head: bool,
+    ) -> None:
+        """Send status and headers for an audio response.
+
+        Args:
+            target: Indexed file. Its path is not written into a header.
+            span: Parsed range. 416 sends ``Content-Range: bytes */size``.
+            head: Accepted so the caller can share this with HEAD. The body
+                is not written here.
+        """
+        del head
+        if span.status == 416:
+            self.send_response(416)
+            self.send_header("Content-Type", target.media_type)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Range", f"bytes */{target.size}")
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "private")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            return
+        length = 0 if span.end < span.start else span.end - span.start + 1
+        self.send_response(span.status)
+        self.send_header("Content-Type", target.media_type)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(length))
+        if span.status == 206:
+            self.send_header("Content-Range", f"bytes {span.start}-{span.end}/{target.size}")
+        self.send_header("Cache-Control", "private")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
 
     def send_json(self, payload: object, status: int = 200) -> None:
         """Write a JSON response.

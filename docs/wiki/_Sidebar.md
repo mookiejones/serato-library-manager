@@ -11,6 +11,7 @@
 **Your library**
 
 [Crates](Crates)
+[Playback](Playback)
 [Hot loops and Cue points](Hot-Loops-and-Cue-Points)
 [Backups and restore](Backups-and-Restore)
 [Export to Rekordbox](Export-to-Rekordbox)

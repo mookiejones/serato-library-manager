@@ -20,6 +20,8 @@ The long guide is published at <https://mookiejones.github.io/serato-library-man
 
 The views are **Crates**, **History**, **Missing**, **Duplicates**, **Stems**, **Files**, and **Snapshots**.
 
+Double-click a track to play it. The bar under the list has pause, seek, and volume. Playback does not change the file.
+
 The space menu shows **Library**, **Video**, **Apple Music**, and **Prepare**.
 
 **Shortcuts** and **Settings** are at the bottom of that sidebar. **Shortcuts** lists the keys. Ctrl+K or Command+K finds a track or a file.

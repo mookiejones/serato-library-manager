@@ -10,7 +10,7 @@
 - [ ] Tests use only synthetic fixtures and cover relevant edge cases (Windows/macOS paths, symlinks/unmounted drives, Serato 4 vs 5, empty/missing library)
 - [ ] Ran locally and pasted results: `npm ci`, `npx tsc --noEmit`, `npx eslint src`, `npm test`, `npm run build` (rebuilt `static/app.js` and `static/wizard.js` committed)
 - [ ] `python3 -m unittest discover -s tests -t . -v` passes
-- [ ] CI is green, including `tests (windows-latest, Python 3.12)`
+- [ ] CI is green, including `tests (windows-latest, Python 3.12)`, `tests (macos-latest, Python 3.12)`, and `frontend (macos-latest)`
 - [ ] Docs for this change are in this pull request
 - [ ] Anything not merged is marked PREVIEW
 - [ ] `docs/architecture.md` is updated when behavior, the API, the layout, or the run path changes

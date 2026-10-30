@@ -41,6 +41,7 @@ App version **1.1.0** is in source and is not a GitHub Release yet. The [release
 These are on `main` (1.1.0).
 
 - Browse crates, history, missing files, stems, and Prepare.
+- Play a track in the window. Double-click a row, or use Play. The player bar has pause, seek, and volume. Only files already in the library are streamed, and playback does not write to them.
 - Merge duplicate copies into the file you keep. Cue points stay in the audio file.
 - Import and export M3U. Export `rekordbox.xml`. **Hot loops** starts off, and the app remembers that checkbox in its settings. Uses a free hot-cue pad. What that file keeps is in [docs/coming-from-rekordbox.md](docs/coming-from-rekordbox.md).
 - Save related tracks in `related.sqlite` next to the app settings, not in Serato's library.

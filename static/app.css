@@ -275,6 +275,7 @@ textarea:focus-visible,
   --track-list-width: 1.15fr;
   display: grid;
   grid-template-columns: minmax(0, var(--track-list-width)) 9px minmax(300px, 0.85fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   margin: var(--space-3) var(--space-3) var(--space-3) 0;
@@ -467,6 +468,7 @@ button:disabled { cursor: default; }
   text-align: left;
   background: transparent;
   border-radius: 0;
+  cursor: pointer;
 }
 
 .row:hover { background: color-mix(in srgb, var(--cadmium) 6%, transparent); }
@@ -510,9 +512,37 @@ button:disabled { cursor: default; }
 }
 
 .title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.row-play {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--color-control-edge);
+  border-radius: 999px;
+  background: var(--manila);
+}
+
+.row-play-icon {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent;
+  border-left-color: var(--ink);
+}
+
+.row-play[aria-pressed="true"] .row-play-icon {
+  width: 8px;
+  height: 9px;
+  border: 0;
+  background: linear-gradient(to right, var(--ink) 0 2px, transparent 2px 6px, var(--ink) 6px 8px);
 }
 
 .missing-word {
@@ -949,10 +979,119 @@ dialog .check input {
 
 .files-panel {
   grid-column: 1 / -1;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.player-audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.player-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  border-top: 1px solid var(--rule);
+  background: var(--manila);
+}
+
+.player-controls {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  min-height: 64px;
+}
+
+.player-meta {
+  min-width: 0;
+}
+
+.player-title,
+.player-artist,
+.player-status {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-title {
+  font-size: var(--font-heading);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.player-artist,
+.player-status {
+  color: var(--ink);
+  font-size: var(--font-body);
+}
+
+.player-toggle {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius-card);
+  background: var(--manila);
+  color: var(--ink);
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+
+.player-toggle:disabled {
+  opacity: 0.45;
+}
+
+.player-seek {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.player-range,
+.player-volume input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  accent-color: var(--color-primary);
+}
+
+.player-time {
+  color: var(--ink);
+  font-size: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.2rem;
+}
+
+.player-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 9rem;
+  color: var(--ink);
+  font-size: var(--font-caption);
+}
+
+.detail-play {
+  min-height: 44px;
+  margin: var(--space-3) 0;
+  padding: 0 var(--space-4);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius-card);
+  background: var(--manila);
+  color: var(--ink);
+  font-size: var(--font-body);
+  font-weight: 600;
 }
 
 .snapshot-undo {
@@ -1266,8 +1405,21 @@ dialog .check input {
   .files-actions { order: 1; }
   .files-list { order: 2; flex: none; max-height: 46vh; }
   .splitter { display: none; }
-  .detail { border-top: 1px solid var(--rule); }
+  .detail { border-top: 1px solid var(--rule); grid-row: 2; }
+  .browser { grid-row: 1; }
+  .player-bar { grid-row: 3; }
   .detail h2 { font-size: 32px; }
+  .player-controls {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "meta toggle"
+      "seek seek"
+      "volume volume";
+  }
+  .player-meta { grid-area: meta; }
+  .player-toggle { grid-area: toggle; }
+  .player-seek { grid-area: seek; }
+  .player-volume { grid-area: volume; width: auto; }
 }
 
 .files-match-detail {

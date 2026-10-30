@@ -503,8 +503,10 @@ class WorkflowTests(unittest.TestCase):
     def test_ci_matches_the_documented_suite(self) -> None:
         """Match the CI command to the suite documented for this repository.
 
-        CI runs unittest discovery on Ubuntu and Windows. It does not run a
-        macOS test job. The dependency audit pins ``pip-audit``.
+        CI runs unittest discovery on Ubuntu, Windows, and macOS. macOS
+        uses Python 3.12 only. Python 3.14 stays on Ubuntu. The page
+        typecheck runs on all three operating systems. The dependency
+        audit pins ``pip-audit``.
 
         Returns:
             None. The test fails if the workflow command drifts from the docs.
@@ -520,7 +522,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("pull_request:", text)
         self.assertIn("pip-audit==2.10.1", text)
         self.assertIn("cancel-in-progress: true", text)
-        self.assertNotIn("macos-latest", text)
+        self.assertIn("- os: macos-latest\n            python: \"3.12\"", text)
+        self.assertIn("os: [ubuntu-latest, windows-latest, macos-latest]", text)
+        self.assertNotIn("macos-latest\n            python: \"3.14\"", text)
+        guide = (ROOT / "docs" / "github.md").read_text(encoding="utf-8")
+        self.assertIn("tests (macos-latest, Python 3.12)", guide)
+        self.assertIn("frontend (macos-latest)", guide)
 
     def test_release_does_not_cancel_and_checks_the_zip(self) -> None:
         """Keep a release running, and check the zip without launching it on Linux.
