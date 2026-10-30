@@ -23,6 +23,7 @@ import {
   takeSnapshot,
 } from "./restore";
 import { state } from "./state";
+import { loadVersion, wireVersion } from "./version";
 import { loadLibrary, showFailure, wireLibrary } from "./views";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
@@ -64,5 +65,7 @@ wireVirtualScroll();
 wireDialogs();
 wireSnapshots();
 wireLayout();
+wireVersion();
+void loadVersion();
 bindLibraryReload(loadLibrary);
 loadLibrary().catch(showFailure);

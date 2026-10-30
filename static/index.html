@@ -72,9 +72,10 @@
         <button id="crate-color" type="button">Color</button>
         <button id="crate-delete" type="button">Delete</button>
       </div>
-      <div class="rail-foot">
+      <footer class="rail-foot">
+        <p id="app-version" class="app-version" hidden></p>
         <button id="open-settings" type="button" aria-haspopup="dialog">Settings</button>
-      </div>
+      </footer>
     </aside>
 
     <main class="sheet">
@@ -132,8 +133,9 @@
       <section id="files-panel" class="files-panel" hidden>
         <div class="browser-bar">
           <button id="files-up" type="button">Up</button>
-          <p id="files-path" class="files-path"></p>
+          <nav id="files-path" class="files-path" aria-label="Folder path"></nav>
           <button id="files-refresh" type="button">Refresh</button>
+          <button id="files-elsewhere" class="files-elsewhere" type="button">Browse elsewhere…</button>
         </div>
         <p id="files-pick" class="files-pick" hidden>Choose the destination folder. Then confirm the move.</p>
         <p id="files-status" class="notice" role="status" aria-live="polite"></p>
@@ -181,6 +183,14 @@
       Share anonymous usage stats and crash reports
     </label>
     <p id="telemetry-note" class="dialog-note"></p>
+    <section class="about" aria-labelledby="about-title">
+      <h3 id="about-title">About</h3>
+      <p id="about-version" class="about-version"></p>
+      <div class="dialog-actions">
+        <button id="copy-version" type="button">Copy version</button>
+      </div>
+      <p id="version-copy-status" class="dialog-status" role="status" aria-live="polite"></p>
+    </section>
     <div class="dialog-actions">
       <button id="rerun-wizard" class="wizard-quiet" type="button">Run setup again</button>
       <button id="open-logs" type="button">Open logs folder</button>

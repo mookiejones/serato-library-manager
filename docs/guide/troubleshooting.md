@@ -128,6 +128,8 @@ Read the line under the checkbox in **Settings**. **This copy has no telemetry k
 
 **Settings**, then **Open logs folder** or **Copy logs**. The folders are in [Settings and privacy](settings.md#logs). The log can include the path of `master.sqlite`. It is not uploaded.
 
+The same Settings dialog has **About**. **Copy version** puts the version on the clipboard for a bug report. The line says **Copied**. When the version cannot be read, About says **Version unavailable** and the sidebar does not show a version.
+
 ## Does this upload my music?
 
 No. The window stays on this computer. Audio files stay on disk unless you move them to the Trash from [Duplicates](duplicates.md) or [Files](files.md). Those files go to the Trash or the Recycle Bin, not to a server.

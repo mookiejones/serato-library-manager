@@ -80,6 +80,10 @@ export interface ElementIds {
   "settings-close": HTMLButtonElement;
   "open-logs": HTMLButtonElement;
   "copy-logs": HTMLButtonElement;
+  "app-version": HTMLParagraphElement;
+  "about-version": HTMLParagraphElement;
+  "copy-version": HTMLButtonElement;
+  "version-copy-status": HTMLParagraphElement;
   "files-dialog": HTMLDialogElement;
   "files-list": HTMLDivElement;
   "files-status": HTMLParagraphElement;
@@ -88,8 +92,9 @@ export interface ElementIds {
   "files-pick": HTMLParagraphElement;
   "files-move-here": HTMLButtonElement;
   "files-pick-cancel": HTMLButtonElement;
-  "files-path": HTMLParagraphElement;
+  "files-path": HTMLElement;
   "files-up": HTMLButtonElement;
+  "files-elsewhere": HTMLButtonElement;
   "files-rename": HTMLButtonElement;
   "files-move": HTMLButtonElement;
   "files-move-folder": HTMLButtonElement;

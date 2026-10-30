@@ -770,3 +770,32 @@ class ReleaseDocTests(unittest.TestCase):
         self.assertIn("write_version.py", github)
         self.assertIn("0.0.0+dev", github)
         self.assertIn("Serato Library", github)
+
+
+class PageVersionTests(unittest.TestCase):
+    """The page reads ``GET /api/version`` and shows that text."""
+
+    def test_page_includes_the_version_hook(self) -> None:
+        """Point the footer and About at the version request.
+
+        This does not execute the script. It ties the elements the person
+        reads to the request ``app.js`` sends. A missing id would leave
+        the typed lookup with nothing to paint.
+
+        Returns:
+            None. The test fails if the hook, the copy control, or the
+            unavailable sentence is missing from the page the server ships.
+        """
+        page = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="app-version"', page)
+        self.assertIn('id="about-version"', page)
+        self.assertIn('id="copy-version"', page)
+        self.assertIn('id="version-copy-status"', page)
+        self.assertIn('aria-live="polite"', page)
+        self.assertIn(">About<", page)
+        self.assertIn(">Copy version<", page)
+        self.assertIn('"/api/version"', script)
+        self.assertIn("Version unavailable", script)
+        self.assertIn("Copied", script)
+        self.assertNotIn("innerHTML", script)

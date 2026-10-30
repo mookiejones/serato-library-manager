@@ -201,6 +201,38 @@ export interface FileEntry {
   kind: string;
   path: string;
   in_library?: boolean;
+  missing?: boolean;
+  detail?: string;
+}
+
+export interface FileRoot {
+  name: string;
+  path: string;
+  kind: string;
+  missing?: boolean;
+}
+
+export type LibraryRootKind = "music_library" | "serato_drive" | "user_folder";
+
+export interface LibraryRoot {
+  id: string;
+  path: string;
+  label: string;
+  detail: string;
+  kind: LibraryRootKind;
+  serato: boolean;
+  removable: boolean;
+  missing: boolean;
+}
+
+export interface LibraryRootsPayload {
+  roots: LibraryRoot[];
+  computed_at: string;
+}
+
+export interface FileCrumb {
+  name: string;
+  path: string;
 }
 
 export interface FileChange {
@@ -214,6 +246,10 @@ export interface FilesPayload {
   path?: string;
   parent?: string | null;
   entries?: FileEntry[];
+  roots?: FileRoot[];
+  root?: FileRoot | null;
+  breadcrumb?: FileCrumb[];
+  elsewhere?: boolean;
   truncated?: boolean;
   serato?: SeratoStatus | null;
   error?: string;
@@ -312,6 +348,13 @@ export interface SettingsPayload {
   app_version?: string;
   rekordbox?: RekordboxSettings;
   error?: string;
+}
+
+/** JSON body of GET /api/version. commit is null when git cannot name one. */
+export interface VersionPayload {
+  version: string;
+  commit: string | null;
+  source: "release" | "git" | "dev";
 }
 
 export interface LogsPayload {

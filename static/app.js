@@ -11,6 +11,49 @@
     if (error instanceof Error) return error;
     return new Error(typeof error === "string" ? error : "Request failed");
   }
+  var ROOT_KINDS = ["music_library", "serato_drive", "user_folder"];
+  function isLibraryRoot(value) {
+    if (!value || typeof value !== "object") return false;
+    const record = value;
+    return typeof record.id === "string" && typeof record.path === "string" && typeof record.label === "string" && typeof record.detail === "string" && ROOT_KINDS.includes(record.kind) && typeof record.serato === "boolean" && typeof record.removable === "boolean" && typeof record.missing === "boolean";
+  }
+  async function fetchLibraryRoots(refresh = false) {
+    const response = await fetch(refresh ? "/api/library-roots?refresh=1" : "/api/library-roots");
+    const payload = await readJSONOr(response, {
+      roots: [],
+      computed_at: ""
+    });
+    if (!response.ok) {
+      const error = new Error(payload.error || "Music folders could not be read.");
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+    return {
+      roots: Array.isArray(payload.roots) ? payload.roots.filter(isLibraryRoot) : [],
+      computed_at: typeof payload.computed_at === "string" ? payload.computed_at : ""
+    };
+  }
+  function isVersionSource(value) {
+    return value === "release" || value === "git" || value === "dev";
+  }
+  function isVersionPayload(value) {
+    if (!value || typeof value !== "object") return false;
+    const record = value;
+    return typeof record.version === "string" && record.version.trim() !== "" && (record.commit === null || typeof record.commit === "string") && isVersionSource(record.source);
+  }
+  async function getVersion() {
+    const response = await fetch("/api/version");
+    const payload = await readJSONOr(response, null);
+    if (!response.ok || !isVersionPayload(payload)) {
+      throw new Error("Version unavailable");
+    }
+    return {
+      version: payload.version.trim(),
+      commit: payload.commit,
+      source: payload.source
+    };
+  }
   async function postJSON(url, body) {
     const response = await fetch(url, {
       method: "POST",
@@ -35,6 +78,8 @@
     },
     openMergeDialog() {
       return Promise.resolve();
+    },
+    openSetup() {
     }
   };
 
@@ -57,7 +102,7 @@
     const available = () => container.clientWidth - handle.offsetWidth;
     const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
     const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
-    function paint() {
+    function paint2() {
       if (current == null) container.style.removeProperty(property);
       else container.style.setProperty(property, `${fitted(current)}px`);
       const room = available();
@@ -67,7 +112,7 @@
     }
     function move(width) {
       current = fitted(width);
-      paint();
+      paint2();
     }
     handle.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -109,22 +154,24 @@
     });
     handle.addEventListener("dblclick", () => {
       current = null;
-      paint();
+      paint2();
       onCommit(null);
     });
-    paint();
+    paint2();
     return {
       set(width) {
         current = width == null ? null : Math.round(width);
-        paint();
+        paint2();
       },
       width: () => current,
-      refit: paint
+      refit: paint2
     };
   }
 
   // src/state.ts
   var ROW = 36;
+  var FILE_ROW = 44;
+  var ROOT_ROW = 64;
   var COLORS = [
     [16777215, "None"],
     [13369344, "Red"],
@@ -184,6 +231,12 @@
     filesError: "",
     filesMessage: "",
     filesTruncated: false,
+    filesAtRoots: false,
+    filesRoots: [],
+    filesRoot: null,
+    filesBreadcrumb: [],
+    filesElsewhere: false,
+    filesActive: 0,
     snapshots: [],
     snapshotLoading: false,
     snapshotError: "",
@@ -897,6 +950,10 @@
     el("crate-delete").disabled = !state.writable || !crateChosen;
     syncMergeButton();
     if (filesMode) {
+      if (state.filesAtRoots) {
+        el("crate-foot").textContent = state.filesLoading ? "Reading music folders" : `${state.filesRoots.length.toLocaleString()} music folders`;
+        return;
+      }
       const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
       el("crate-foot").textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
       return;
@@ -1501,7 +1558,7 @@
     form.className = "related-form";
     form.hidden = true;
     block.append(label, results, form);
-    const paint = () => {
+    const paint2 = () => {
       results.replaceChildren();
       form.hidden = true;
       form.replaceChildren();
@@ -1532,8 +1589,8 @@
         results.append(item);
       }
     };
-    input.addEventListener("input", paint);
-    paint();
+    input.addEventListener("input", paint2);
+    paint2();
     return block;
   }
   function relatedLinkForm(track, section, form, hit, query) {
@@ -2008,7 +2065,8 @@
     }
     if (mode === "files") {
       state.filesLoading = true;
-      loadFolder(state.filesPath || "").catch((error) => failFiles(error));
+      const path = state.filesAtRoots ? "" : state.filesPath || "";
+      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots }).catch((error) => failFiles(error));
     }
     if (mode === "snapshots") {
       loadSnapshots().catch((error) => failSnapshots(error));
@@ -2042,24 +2100,67 @@
     state.filesError = failureOf(error).message || "That folder could not be read.";
     renderFiles();
   }
+  var filesRequest = 0;
+  var FILE_OVERSCAN = 8;
   async function loadFolder(path, options = {}) {
+    const elsewhere = options.elsewhere === true;
+    const refresh = options.refresh === true;
+    const atRoots = path === "" && !elsewhere;
+    const token = ++filesRequest;
     state.filesLoading = true;
     state.filesError = "";
     if (!options.keepMessage) state.filesMessage = "";
     state.filesSelected = /* @__PURE__ */ new Set();
+    state.filesActive = 0;
+    state.filesAtRoots = atRoots;
+    state.filesElsewhere = elsewhere;
+    if (atRoots) {
+      state.filesPath = "";
+      state.filesParent = null;
+      state.filesEntries = [];
+      state.filesBreadcrumb = [];
+      state.filesRoot = null;
+    }
     renderFiles();
-    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    if (refresh || atRoots) {
+      const rootsPayload = await fetchLibraryRoots(refresh);
+      if (token !== filesRequest) return;
+      state.filesRoots = rootsPayload.roots.filter(isLibraryRoot);
+    }
+    if (atRoots) {
+      state.filesPath = "";
+      state.filesParent = null;
+      state.filesEntries = [];
+      state.filesBreadcrumb = [];
+      state.filesRoot = null;
+      state.filesElsewhere = false;
+      state.filesAtRoots = true;
+      state.filesTruncated = false;
+      state.filesLoading = false;
+      el("files-list").scrollTop = 0;
+      renderFiles();
+      return;
+    }
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (elsewhere) params.set("elsewhere", "1");
+    const query = params.size ? `?${params.toString()}` : "";
     const response = await fetch(`/api/files${query}`);
     const payload = await readJSONOr(response, {});
+    if (token !== filesRequest) return;
     if (!response.ok) throw new Error(payload.error || "That folder could not be read.");
     state.filesPath = payload.path || "";
-    state.filesParent = payload.parent || null;
+    state.filesParent = typeof payload.parent === "string" && payload.parent ? payload.parent : null;
     state.filesEntries = Array.isArray(payload.entries) ? payload.entries : [];
+    state.filesRoot = isFileRoot(payload.root) ? payload.root : null;
+    state.filesBreadcrumb = Array.isArray(payload.breadcrumb) ? payload.breadcrumb.filter(isFileCrumb) : [];
+    state.filesElsewhere = Boolean(payload.elsewhere);
+    state.filesAtRoots = !state.filesPath && !state.filesElsewhere;
     state.filesTruncated = Boolean(payload.truncated);
     state.filesLoading = false;
+    el("files-list").scrollTop = 0;
     if (payload.serato) applyStatus(payload.serato);
-    else renderFiles();
-    if (payload.serato) renderFiles();
+    renderFiles();
   }
   function renderFiles() {
     if (state.mode !== "files") return;
@@ -2069,35 +2170,21 @@
     pick.hidden = !state.filesPick;
     moveHere.hidden = !state.filesPick;
     pickCancel.hidden = !state.filesPick;
-    el("files-path").textContent = state.filesPath || "Home";
+    renderBreadcrumb();
+    const elsewhere = el("files-elsewhere");
+    elsewhere.textContent = state.filesElsewhere ? "Music folders" : "Browse elsewhere…";
     el("files-up").disabled = !state.filesParent || state.filesLoading;
     const notes = [];
-    if (state.filesLoading) notes.push("Reading this folder.");
+    if (state.filesLoading) notes.push(state.filesAtRoots ? "Reading music folders." : "Reading this folder.");
     if (state.filesError) notes.push(state.filesError);
     if (state.filesMessage) notes.push(state.filesMessage);
     if (state.filesTruncated) notes.push("Some files are not listed.");
     el("files-status").textContent = notes.join(" ");
-    el("files-list").setAttribute("aria-busy", String(state.filesLoading));
-    el("files-list").replaceChildren();
-    if (state.filesLoading && !state.filesEntries.length) {
-      const loading = document.createElement("p");
-      loading.className = "files-empty";
-      loading.textContent = "Reading this folder.";
-      el("files-list").append(loading);
-    } else if (!state.filesEntries.length) {
-      const empty = document.createElement("p");
-      empty.className = "files-empty";
-      empty.textContent = state.filesError || "This folder is empty.";
-      el("files-list").append(empty);
-    } else {
-      const rank = { dir: 0, file: 1, link: 2 };
-      const entries = [...state.filesEntries].sort((left, right) => {
-        return (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3) || left.name.localeCompare(right.name);
-      });
-      for (const entry of entries) el("files-list").append(fileRow(entry));
-    }
+    const scroll = el("files-list").scrollTop;
+    paintFileWindow();
+    if (el("files-list").scrollTop !== scroll) el("files-list").scrollTop = scroll;
     const selected = selectedFiles();
-    const locked = !state.writable || state.filesLoading;
+    const locked = !state.writable || state.filesLoading || state.filesAtRoots;
     el("files-rename").disabled = locked || selected.length !== 1;
     el("files-move").disabled = locked || !selected.length || Boolean(state.filesPick);
     el("files-move-folder").disabled = locked || !state.filesPath || Boolean(state.filesPick);
@@ -2106,25 +2193,268 @@
     moveHere.disabled = locked;
     renderShell();
   }
-  function fileRow(entry) {
+  function renderBreadcrumb() {
+    const nav = el("files-path");
+    nav.replaceChildren();
+    const list = document.createElement("ol");
+    list.className = "files-crumbs";
+    const crumbs = visibleCrumbs();
+    crumbs.forEach((crumb, index) => {
+      const item = document.createElement("li");
+      const last = index === crumbs.length - 1;
+      if (!last && crumb.path) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "files-crumb";
+        button.textContent = crumb.name;
+        button.addEventListener("click", () => {
+          loadFolder(crumb.path, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
+        });
+        item.append(button);
+      } else {
+        const current = document.createElement("span");
+        current.className = "files-crumb";
+        current.setAttribute("aria-current", "page");
+        current.textContent = crumb.name;
+        item.append(current);
+      }
+      if (!last) {
+        const sep = document.createElement("span");
+        sep.className = "files-sep";
+        sep.setAttribute("aria-hidden", "true");
+        sep.textContent = "/";
+        item.append(sep);
+      }
+      list.append(item);
+    });
+    nav.append(list);
+  }
+  function visibleCrumbs() {
+    if (state.filesBreadcrumb.length) return state.filesBreadcrumb;
+    if (state.filesAtRoots) return [{ name: "Music folders", path: "" }];
+    if (state.filesPath) return [{ name: state.filesPath, path: state.filesPath }];
+    return [{ name: "Music folders", path: "" }];
+  }
+  function filesRowHeight() {
+    return state.filesAtRoots ? ROOT_ROW : FILE_ROW;
+  }
+  function browserRows() {
+    if (state.filesAtRoots) {
+      return state.filesRoots.map((root) => {
+        const entry = {
+          name: root.label,
+          path: root.path,
+          detail: root.detail,
+          kind: root.kind === "serato_drive" ? "drive" : "folder",
+          missing: root.missing
+        };
+        return entry;
+      });
+    }
+    const rank = { dir: 0, file: 1, link: 2 };
+    return [...state.filesEntries].sort((left, right) => {
+      return (rank[left.kind] ?? 3) - (rank[right.kind] ?? 3) || left.name.localeCompare(right.name, void 0, { numeric: true, sensitivity: "base" });
+    });
+  }
+  function paintFileWindow() {
+    const list = el("files-list");
+    const rows2 = browserRows();
+    list.setAttribute("aria-busy", String(state.filesLoading));
+    list.setAttribute("aria-label", state.filesAtRoots ? "Music folders" : "Folder contents");
+    if (state.filesLoading && !rows2.length) {
+      list.replaceChildren(fileNote(state.filesAtRoots ? "Reading music folders." : "Reading this folder."));
+      list.tabIndex = 0;
+      return;
+    }
+    if (state.filesError && !rows2.length) {
+      list.replaceChildren(fileNote(state.filesError));
+      list.tabIndex = 0;
+      return;
+    }
+    if (state.filesAtRoots && !state.filesRoots.length) {
+      list.replaceChildren(rootsEmpty());
+      list.tabIndex = -1;
+      return;
+    }
+    if (!rows2.length) {
+      list.replaceChildren(fileNote("This folder is empty."));
+      list.tabIndex = 0;
+      return;
+    }
+    list.tabIndex = -1;
+    if (state.filesActive >= rows2.length) state.filesActive = rows2.length - 1;
+    if (state.filesActive < 0) state.filesActive = 0;
+    const rowHeight = filesRowHeight();
+    const view = list.clientHeight || 600;
+    const maxScroll = Math.max(0, rows2.length * rowHeight - view);
+    const scrollTop = Math.min(Math.max(0, list.scrollTop), maxScroll);
+    const start = Math.max(0, Math.floor(scrollTop / rowHeight) - FILE_OVERSCAN);
+    const end = Math.min(rows2.length, Math.ceil((scrollTop + view) / rowHeight) + FILE_OVERSCAN);
+    const spacer2 = fileSpacer(list);
+    const windowEl = spacer2.querySelector(".files-window");
+    if (!windowEl) return;
+    spacer2.style.height = `${rows2.length * rowHeight}px`;
+    windowEl.style.transform = `translateY(${start * rowHeight}px)`;
+    windowEl.replaceChildren();
+    for (let index = start; index < end; index += 1) {
+      const entry = rows2[index];
+      if (entry) windowEl.append(fileRow(entry, index));
+    }
+    if (state.filesActive >= start && state.filesActive < end) {
+      list.setAttribute("aria-activedescendant", `files-item-${state.filesActive}`);
+    } else list.removeAttribute("aria-activedescendant");
+  }
+  function fileSpacer(list) {
+    const first = list.firstElementChild;
+    if (first instanceof HTMLDivElement && first.classList.contains("files-spacer") && list.childElementCount === 1) {
+      return first;
+    }
+    list.replaceChildren();
+    const spacer2 = document.createElement("div");
+    spacer2.className = "files-spacer";
+    const windowEl = document.createElement("div");
+    windowEl.className = "files-window";
+    spacer2.append(windowEl);
+    list.append(spacer2);
+    return spacer2;
+  }
+  function fileNote(text) {
+    const note = document.createElement("p");
+    note.className = "files-empty";
+    note.textContent = text;
+    return note;
+  }
+  function rootsEmpty() {
+    const box = document.createElement("div");
+    box.className = "files-empty-state";
+    const heading = document.createElement("h2");
+    heading.textContent = "No music folders yet";
+    const copy = document.createElement("p");
+    copy.textContent = "Setup finds the folders Serato uses for your music.";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "files-run-setup";
+    button.className = "files-primary";
+    button.textContent = "Run setup";
+    button.addEventListener("click", () => bridge.openSetup());
+    box.append(heading, copy, button);
+    return box;
+  }
+  function focusFilesIndex(index) {
+    const rows2 = browserRows();
+    if (!rows2.length) return;
+    state.filesActive = Math.max(0, Math.min(rows2.length - 1, index));
+    const list = el("files-list");
+    const rowHeight = filesRowHeight();
+    const view = list.clientHeight || 600;
+    const top = state.filesActive * rowHeight;
+    const maxScroll = Math.max(0, rows2.length * rowHeight - view);
+    if (top < list.scrollTop) list.scrollTop = top;
+    if (top + rowHeight > list.scrollTop + view) list.scrollTop = Math.min(maxScroll, top + rowHeight - view);
+    paintFileWindow();
+    const control = list.querySelector(`[data-files-index="${state.filesActive}"]`);
+    control?.focus();
+  }
+  function activateFilesIndex(index) {
+    const entry = browserRows()[index];
+    if (!entry) return;
+    if (entry.kind === "file") {
+      if (state.filesSelected.has(entry.path)) state.filesSelected.delete(entry.path);
+      else state.filesSelected.add(entry.path);
+      renderFiles();
+      focusFilesIndex(index);
+      return;
+    }
+    if (entry.kind === "link") return;
+    openBrowserRow(entry);
+  }
+  function openBrowserRow(entry) {
+    if (entry.missing) return;
+    const elsewhere = state.filesElsewhere && entry.kind === "dir";
+    loadFolder(entry.path, { elsewhere }).catch((error) => failFiles(error));
+  }
+  function onFilesKey(event) {
+    if (state.mode !== "files") return;
+    const list = el("files-list");
+    if (!(event.target instanceof Node) || !list.contains(event.target)) return;
+    const rows2 = browserRows();
+    if (!rows2.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      if (event.key === "ArrowDown") focusFilesIndex(state.filesActive + 1);
+      else if (event.key === "ArrowUp") focusFilesIndex(state.filesActive - 1);
+      else if (event.key === "Home") focusFilesIndex(0);
+      else focusFilesIndex(rows2.length - 1);
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const control = event.target instanceof HTMLElement ? event.target.closest("button, input") : null;
+    if (control && list.contains(control)) return;
+    event.preventDefault();
+    activateFilesIndex(state.filesActive);
+  }
+  function fileRow(entry, index) {
     const row = document.createElement("div");
     row.className = "files-row";
-    if (entry.kind === "dir") {
+    if (entry.detail) row.classList.add("is-root");
+    if (entry.missing) row.classList.add("is-missing");
+    if (index === state.filesActive) row.classList.add("is-active");
+    row.setAttribute("role", "listitem");
+    const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
+    if (openKind) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "files-open";
-      button.textContent = entry.name;
-      button.setAttribute("aria-label", `Open ${entry.name}`);
-      button.addEventListener("click", () => {
-        loadFolder(entry.path).catch((error) => failFiles(error));
-      });
+      button.dataset.filesIndex = String(index);
+      button.id = `files-item-${index}`;
+      button.tabIndex = index === state.filesActive ? 0 : -1;
+      if (entry.kind === "drive" || entry.kind === "folder") button.append(fileIcon(entry.kind === "drive" ? "drive" : "folder"));
+      if (entry.detail) {
+        const copy = document.createElement("span");
+        copy.className = "files-root-copy";
+        const label2 = document.createElement("span");
+        label2.className = "files-root-label";
+        label2.textContent = entry.name;
+        const detail = document.createElement("span");
+        detail.className = "files-root-detail";
+        detail.textContent = entry.detail;
+        copy.append(label2, detail);
+        button.append(copy);
+      } else {
+        const name2 = document.createElement("span");
+        name2.textContent = entry.name;
+        button.append(name2);
+      }
+      button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
+      if (entry.missing) {
+        button.setAttribute("aria-disabled", "true");
+        button.setAttribute("aria-label", `${entry.name}, Drive not connected`);
+        const badge = document.createElement("span");
+        badge.className = "files-badge";
+        badge.textContent = "Drive not connected";
+        button.append(badge);
+        button.addEventListener("click", () => {
+          state.filesActive = index;
+        });
+      } else {
+        button.setAttribute("aria-label", `Open ${entry.name}`);
+        button.addEventListener("click", () => {
+          state.filesActive = index;
+          openBrowserRow(entry);
+        });
+      }
       row.append(button);
       return row;
     }
     if (entry.kind !== "file") {
-      const label2 = document.createElement("span");
+      const label2 = document.createElement("button");
+      label2.type = "button";
       label2.className = "files-kind";
+      label2.dataset.filesIndex = String(index);
+      label2.id = `files-item-${index}`;
+      label2.tabIndex = index === state.filesActive ? 0 : -1;
       label2.textContent = `${entry.name} (shortcut)`;
+      label2.setAttribute("aria-label", `${entry.name} shortcut`);
       row.append(label2);
       return row;
     }
@@ -2132,14 +2462,20 @@
     label.className = "files-file";
     const box = document.createElement("input");
     box.type = "checkbox";
+    box.dataset.filesIndex = String(index);
+    box.id = `files-item-${index}`;
+    box.tabIndex = index === state.filesActive ? 0 : -1;
     box.checked = state.filesSelected.has(entry.path);
+    box.setAttribute("aria-label", entry.name);
     box.addEventListener("change", () => {
+      state.filesActive = index;
       if (box.checked) state.filesSelected.add(entry.path);
       else state.filesSelected.delete(entry.path);
       renderFiles();
     });
     const name = document.createElement("span");
     name.textContent = entry.name;
+    name.title = entry.name;
     label.append(box, name);
     if (entry.in_library) {
       const badge = document.createElement("span");
@@ -2150,10 +2486,43 @@
     row.append(label);
     return row;
   }
+  function fileIcon(kind) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "20");
+    svg.setAttribute("height", "20");
+    svg.setAttribute("aria-hidden", "true");
+    svg.classList.add("files-icon", kind === "drive" ? "files-icon-drive" : "files-icon-folder");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.5");
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute(
+      "d",
+      kind === "drive" ? "M5 8.5h14v8H5z M8 14.5h.01 M12 14.5h4" : "M4 8.5h6l2 2h8v7.5H4z"
+    );
+    svg.append(path);
+    return svg;
+  }
+  function isFileRoot(value) {
+    if (!value || typeof value !== "object") return false;
+    const record = value;
+    return typeof record.name === "string" && typeof record.path === "string" && typeof record.kind === "string";
+  }
+  function isFileCrumb(value) {
+    if (!value || typeof value !== "object") return false;
+    const record = value;
+    return typeof record.name === "string" && typeof record.path === "string";
+  }
   function selectedFiles() {
     return state.filesEntries.filter((entry) => entry.kind === "file" && state.filesSelected.has(entry.path));
   }
   function wireLibrary() {
+    el("files-list").addEventListener("scroll", () => {
+      if (state.mode === "files") paintFileWindow();
+    });
+    el("files-list").addEventListener("keydown", onFilesKey);
     el("search").addEventListener("input", () => {
       state.query = el("search").value;
       el("list").scrollTop = 0;
@@ -2898,10 +3267,17 @@
       }
     });
     el("files-up").addEventListener("click", () => {
-      if (state.filesParent) loadFolder(state.filesParent).catch((error) => failFiles(error));
+      if (state.filesParent) {
+        loadFolder(state.filesParent, { elsewhere: state.filesElsewhere }).catch((error) => failFiles(error));
+      }
     });
     el("files-refresh").addEventListener("click", () => {
-      loadFolder(state.filesPath || "").catch((error) => failFiles(error));
+      const path = state.filesAtRoots ? "" : state.filesPath;
+      loadFolder(path, { elsewhere: state.filesElsewhere && !state.filesAtRoots, refresh: true }).catch((error) => failFiles(error));
+    });
+    el("files-elsewhere").addEventListener("click", () => {
+      if (state.filesElsewhere) loadFolder("").catch((error) => failFiles(error));
+      else loadFolder("", { elsewhere: true }).catch((error) => failFiles(error));
     });
     el("files-rename").addEventListener("click", (event) => {
       if (selectedFiles().length !== 1) {
@@ -2982,6 +3358,86 @@
     });
   }
   bridge.openMergeDialog = openMergeDialog;
+  function openSetup() {
+    const trigger = document.getElementById("files-run-setup");
+    openWizard(true, trigger instanceof HTMLElement ? trigger : el("search"));
+  }
+  bridge.openSetup = openSetup;
+
+  // src/version.ts
+  var VERSION_UNAVAILABLE = "Version unavailable";
+  var COPY_FAILED = "Couldn't copy the version.";
+  var copyText = "";
+  function versionLabel(info) {
+    const version = formatVersion(info.version);
+    if (info.source === "release") return version;
+    const commit = shortCommit(info.commit);
+    if (!commit || version.toLowerCase().includes(commit)) return version;
+    return `${version} · ${commit}`;
+  }
+  function formatVersion(version) {
+    const trimmed = version.trim();
+    if (/^\d+\.\d+\.\d+/.test(trimmed)) return `v${trimmed}`;
+    return trimmed;
+  }
+  function shortCommit(commit) {
+    if (commit === null) return null;
+    const trimmed = commit.trim().toLowerCase();
+    if (!/^[0-9a-f]{7,40}$/.test(trimmed)) return null;
+    return trimmed.slice(0, 7);
+  }
+  function paint(label) {
+    const footer = el("app-version");
+    const about = el("about-version");
+    el("version-copy-status").textContent = "";
+    if (!label) {
+      copyText = "";
+      footer.hidden = true;
+      footer.replaceChildren();
+      about.textContent = VERSION_UNAVAILABLE;
+      return;
+    }
+    copyText = label;
+    footer.hidden = false;
+    footer.replaceChildren();
+    const name = document.createElement("span");
+    name.className = "visually-hidden";
+    name.textContent = "App version ";
+    const value = document.createElement("span");
+    value.textContent = label;
+    footer.append(name, value);
+    about.textContent = label;
+  }
+  async function loadVersion() {
+    try {
+      paint(versionLabel(await getVersion()));
+    } catch {
+      paint(null);
+    }
+  }
+  async function copyVersion() {
+    const status = el("version-copy-status");
+    if (!copyText) {
+      status.textContent = VERSION_UNAVAILABLE;
+      return;
+    }
+    const writeText = navigator.clipboard?.writeText;
+    if (!writeText || !window.isSecureContext) {
+      status.textContent = COPY_FAILED;
+      return;
+    }
+    try {
+      await writeText.call(navigator.clipboard, copyText);
+      status.textContent = "Copied";
+    } catch {
+      status.textContent = COPY_FAILED;
+    }
+  }
+  function wireVersion() {
+    el("copy-version").addEventListener("click", () => {
+      void copyVersion();
+    });
+  }
 
   // src/app.ts
   function wireSnapshots() {
@@ -3009,6 +3465,8 @@
   wireDialogs();
   wireSnapshots();
   wireLayout();
+  wireVersion();
+  void loadVersion();
   bindLibraryReload(loadLibrary);
   loadLibrary().catch(showFailure);
 })();
