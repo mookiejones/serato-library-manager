@@ -26,6 +26,7 @@ import app_config
 import app_log
 import audio_stream
 import drive_check
+import error_codes
 import files
 import legacy_library
 import library
@@ -2069,6 +2070,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(telemetry.public_settings())
             return
+        if keys == {"language"}:
+            language = payload.get("language")
+            if language is not None and not isinstance(language, str):
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            try:
+                app_config.set_language(language)
+            except ValueError:
+                self.send_json({"error": "That request is not valid."}, status=400)
+                return
+            except OSError:
+                self.send_json({"error": "The language could not be saved."}, status=500)
+                return
+            self.send_json(telemetry.public_settings())
+            return
         allowed = {"telemetry_consent", "rekordbox"}
         if not keys or not keys <= allowed:
             self.send_json({"error": "That request is not valid."}, status=400)
@@ -2304,12 +2320,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(store.plan(snapshot_id))
             return
         pending = store.pending_undo()
-        self.send_json({
+        notice = snapshots.write_block_notice()
+        body: dict[str, object] = {
             "snapshots": store.list_snapshots(),
             "pending_undo": pending,
-            "write_block": snapshots.write_block_message(),
+            "write_block": None if notice is None else notice.text,
             "serato_running": store.serato_running(),
-        })
+        }
+        if notice is not None and notice.code:
+            body["write_block_code"] = notice.code
+            body["write_block_params"] = dict(notice.params or {})
+        self.send_json(body)
 
     def _post_snapshots(self, payload: dict[str, object]) -> None:
         """Create a snapshot, plan a restore, restore, or undo an outside change.
@@ -2555,9 +2576,11 @@ class Handler(BaseHTTPRequestHandler):
 
         Args:
             payload: Object encoded as UTF-8 JSON. A non-finite float becomes null.
+                A known ``error`` sentence also gets its ``code`` from
+                ``error_codes`` so the page can show it in another language.
             status: HTTP status code. Defaults to 200.
         """
-        body = encode_json(payload)
+        body = encode_json(error_codes.with_code(payload))
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

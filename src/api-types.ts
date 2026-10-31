@@ -11,6 +11,10 @@ export interface SeratoStatus {
   message?: string;
   file_manager?: string;
   open?: boolean;
+  /** Stable code when `message` is a translated notice. */
+  code?: string;
+  /** Placeholder values for `code`, such as the Serato build. */
+  params?: Record<string, string>;
 }
 
 export interface EditFields {
@@ -353,7 +357,10 @@ export interface SettingsPayload {
   layout?: { track_list_width: number | null };
   app_version?: string;
   rekordbox?: RekordboxSettings;
+  /** Saved page language, or null to follow the OS. */
+  language?: string | null;
   error?: string;
+  code?: string;
 }
 
 /** JSON body of GET /api/version. commit is null when git cannot name one. */
@@ -417,6 +424,10 @@ export interface RestorePlan {
   deleted?: DeletedPlan;
   dry_run?: boolean;
   restore_blocked?: string | null;
+  /** Catalog code for `restore_blocked` when that sentence can be translated. */
+  restore_blocked_code?: string;
+  /** Placeholder values for `restore_blocked_code`. */
+  restore_blocked_params?: Record<string, string>;
   error?: string;
 }
 
@@ -439,11 +450,17 @@ export interface SnapshotList {
   snapshots?: SnapshotInfo[];
   pending_undo?: PendingUndo | null;
   write_block?: string;
+  /** Catalog code for `write_block` when that sentence can be translated. */
+  write_block_code?: string;
+  /** Placeholder values for `write_block_code`. */
+  write_block_params?: Record<string, string>;
   serato_running?: boolean;
   error?: string;
 }
 
 export interface ErrorBody {
   error?: string;
+  /** Stable code for a known error sentence. The page translates it. */
+  code?: string;
   serato?: SeratoStatus | null;
 }

@@ -6,7 +6,7 @@
  * controls exist only after a view has painted.
  */
 
-import { tips } from "./tips";
+import { hasKey } from "./i18n";
 
 /** What counts as a control. The hidden picker opens from the Import button. */
 const CONTROLS = [
@@ -35,12 +35,12 @@ export function untippedControls(root: ParentNode): HTMLElement[] {
  * List the data-tip keys under a root that have no text.
  *
  * @param root Document or element to read.
- * @returns The keys missing from the tips table.
+ * @returns The keys with no text in the catalog.
  */
 export function unknownTips(root: ParentNode): string[] {
   return [...root.querySelectorAll<HTMLElement>("[data-tip]")]
     .map((node) => node.dataset.tip as string)
-    .filter((key) => !(key in tips));
+    .filter((key) => !hasKey(`tip.${key}`));
 }
 
 /**

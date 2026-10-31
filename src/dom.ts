@@ -69,6 +69,8 @@ export interface ElementIds {
   "consent-dialog": HTMLDialogElement;
   "settings-dialog": HTMLDialogElement;
   "telemetry-toggle": HTMLInputElement;
+  "language-select": HTMLSelectElement;
+  "language-status": HTMLParagraphElement;
   "telemetry-note": HTMLParagraphElement;
   "consent-status": HTMLParagraphElement;
   "settings-status": HTMLParagraphElement;

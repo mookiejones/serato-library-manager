@@ -577,8 +577,8 @@ def status(path: Path | None = None, *, from_copy: bool = False) -> dict[str, ob
     info["file_manager"] = file_manager_name()
     import snapshots
 
-    blocked = snapshots.write_block_message()
-    info["write_block"] = blocked
+    notice = snapshots.write_block_notice()
+    info["write_block"] = None if notice is None else notice.text
     info["serato_running"] = snapshots.serato_dj_running()
     # The sidebar and the setup wizard share this flag. A running Serato DJ
     # process blocks edits even when the database lock row has not been written yet.
@@ -587,9 +587,12 @@ def status(path: Path | None = None, *, from_copy: bool = False) -> dict[str, ob
         info["writable"] = False
         info["process"] = "Serato DJ"
         info["message"] = "Serato DJ is open. Edits stay off until it quits."
-    if blocked and not info.get("open"):
+    if notice is not None and not info.get("open"):
         info["writable"] = False
-        info["message"] = blocked
+        info["message"] = notice.text
+        if notice.code:
+            info["code"] = notice.code
+            info["params"] = dict(notice.params or {})
     return info
 
 

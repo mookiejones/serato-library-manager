@@ -55,6 +55,9 @@ export interface StepPosition {
   name: string;
 }
 
+import { t, type MessageKey } from "./i18n";
+
+// English source text, kept for callers and tests. The screen uses t().
 export const BLOCKED_MESSAGE = "Close Serato DJ to continue.";
 
 export const DONE_MESSAGE = "Library ready. Snapshot saved.";
@@ -68,12 +71,12 @@ export const SNAPSHOT_BODY =
 export const CONSENT_BODY =
   "Counts and actions only, plus the app name, the app version, and the operating system. Track titles, crate names, file paths, and library contents stay on this computer. Sharing stays off unless you turn it on.";
 
-const STEP_NAME: Record<WizardStep, string> = {
-  welcome: "Welcome",
-  library: "Find your library",
-  snapshot: "Safety snapshot",
-  consent: "Sharing",
-  done: "Done",
+const STEP_NAME: Record<WizardStep, MessageKey> = {
+  welcome: "wizard.step.welcome",
+  library: "wizard.step.library",
+  snapshot: "wizard.step.snapshot",
+  consent: "wizard.step.consent",
+  done: "wizard.step.done",
 };
 
 /**
@@ -139,7 +142,7 @@ export function stepPosition(model: WizardModel): StepPosition {
   const steps = visibleSteps(model.context.needsConsent);
   const found = steps.indexOf(model.step);
   const index = found < 0 ? 1 : found + 1;
-  return { index, count: steps.length, name: STEP_NAME[model.step] };
+  return { index, count: steps.length, name: t(STEP_NAME[model.step]) };
 }
 
 /** Welcome has no Back. Back is also off while a safety copy is saving. */
@@ -216,7 +219,7 @@ export function primaryEnabled(model: WizardModel): boolean {
 /** Sentence for the live region, including the step numbers. */
 export function stepAnnouncement(model: WizardModel): string {
   const position = stepPosition(model);
-  return `Step ${position.index} of ${position.count}. ${position.name}.`;
+  return t("wizard.announce", { index: position.index, count: position.count, name: position.name });
 }
 
 function goBack(model: WizardModel): WizardModel {

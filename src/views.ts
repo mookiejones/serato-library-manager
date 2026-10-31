@@ -24,7 +24,6 @@ import type {
   Track,
 } from "./api-types";
 import { bridge } from "./bridge";
-import { copy, fill } from "./copy";
 import { el } from "./dom";
 import { clockLabel, colorHex, compare, durationLabel, sizeLabel } from "./format";
 import { failSnapshots, loadSnapshots } from "./restore";
@@ -32,6 +31,7 @@ import { COLOR_NAMES, COLORS, FILE_ROW, ROOT_ROW, state } from "./state";
 import { play } from "./player";
 import { playerStrings } from "./player-strings";
 import { paintRows } from "./virtual-scroll";
+import { codedText, formatNumber, messageParams, serverMessage, t, type MessageKey } from "./i18n";
 import { tip, type TipKey } from "./tips";
 
 /**
@@ -41,6 +41,8 @@ import { tip, type TipKey } from "./tips";
  * Incremented by loadRelated. Not sent anywhere.
  */
 let relatedRequest = 0;
+// Last track painted in the detail pane, so a language change can repaint it.
+let lastDetail: Track | null = null;
 
 /**
  * Return whether a track contains every search term.
@@ -271,7 +273,7 @@ export function buildView() {
       bpm: entry.bpm,
       length_ms: entry.length_ms,
       deck: entry.deck,
-      played: entry.played ? "Yes" : "",
+      played: entry.played ? t("common.yes") : "",
       start: entry.start_time,
       missing: entry.missing,
       entry: true,
@@ -323,7 +325,7 @@ function crateRow(crate: {
     twist.className = "twist";
     twist.tabIndex = -1;
     twist.setAttribute("aria-expanded", String(open));
-    twist.setAttribute("aria-label", `${open ? "Collapse" : "Expand"} ${crate.name}`);
+    twist.setAttribute("aria-label", t(open ? "crates.collapse" : "crates.expand", { name: crate.name }));
     twist.addEventListener("click", () => toggleCrate(crate.id));
     row.append(twist);
   } else {
@@ -359,12 +361,12 @@ function crateRow(crate: {
   if (crate.smart) {
     const smart = document.createElement("span");
     smart.className = "smart";
-    smart.textContent = "smart";
+    smart.textContent = t("crates.smartBadge");
     button.append(smart);
   }
   const meta = document.createElement("span");
   meta.className = "meta";
-  meta.textContent = (crate.count as number).toLocaleString();
+  meta.textContent = formatNumber(crate.count as number);
   button.append(meta);
   button.addEventListener("click", () => selectCrate(crate.id));
   row.append(button);
@@ -412,7 +414,7 @@ export function renderCrates() {
 
   el("crate-list").append(crateRow({
     id: "all",
-    name: "All tracks",
+    name: t("crates.allTracks"),
     depth: 0,
     childCount: 0,
     smart: false,
@@ -462,14 +464,14 @@ function renderRules() {
   line.className = "rules";
   if (Array.isArray(crate.rules.rules)) {
     const lead = document.createElement("strong");
-    lead.textContent = "Matches";
+    lead.textContent = t("rules.matches");
     const parts = crate.rules.rules.map((rule) => {
       const attribute = rule.attribute || "field";
       const operation = String(rule.operation || "").toLowerCase().replaceAll("_", " ");
       return `${attribute} ${operation} “${rule.value ?? ""}”`;
     });
-    const join = crate.rules.conjunction === "OR" ? " or " : " and ";
-    line.append(lead, document.createTextNode(` ${parts.join(join) || "no rules yet"}`));
+    const join = crate.rules.conjunction === "OR" ? t("rules.or") : t("rules.and");
+    line.append(lead, document.createTextNode(` ${parts.join(` ${join} `) || t("rules.none")}`));
   }
   const editor = document.createElement("div");
   editor.className = "rule-edit";
@@ -477,12 +479,12 @@ function renderRules() {
   tip(area, "smartRules");
   area.value = JSON.stringify(crate.rules, null, 2);
   area.disabled = !state.writable;
-  area.setAttribute("aria-label", "Smart crate rules");
+  area.setAttribute("aria-label", t("rules.label"));
   const save = document.createElement("button");
   tip(save, "smartRulesSave");
   save.type = "button";
   save.className = "text-button";
-  save.textContent = "Save rules";
+  save.textContent = t("rules.save");
   save.disabled = !state.writable;
   save.addEventListener("click", () => saveRules(crate.id, area.value));
   editor.append(area, save);
@@ -500,15 +502,22 @@ function renderRules() {
  *
  * @returns {void}
  */
+function markHistoryColumns(): void {
+  const history = state.mode === "history";
+  document.querySelector(".columns")?.classList.toggle("for-history", history);
+  el("list").classList.toggle("for-history", history);
+}
+
 export function renderColumns() {
-  const columns: Array<[string, string]> = state.mode === "history"
-    ? [["name", "Title"], ["artist", "Artist"], ["deck", "Deck"], ["played", "Played"], ["start", "Time"]]
-    : [["name", "Title"], ["artist", "Artist"], ["bpm", "BPM"], ["key", "Key"], ["length_ms", "Time"]];
+  markHistoryColumns();
+  const columns: Array<[string, MessageKey]> = state.mode === "history"
+    ? [["name", "column.title"], ["artist", "column.artist"], ["deck", "column.deck"], ["played", "column.played"], ["start", "column.time"]]
+    : [["name", "column.title"], ["artist", "column.artist"], ["bpm", "column.bpm"], ["key", "column.key"], ["length_ms", "column.time"]];
   const buttons = [...document.querySelectorAll<HTMLButtonElement>(".columns button")];
   columns.forEach(([key, label], index) => {
     const button = buttons[index]!;
     button.dataset.sort = key;
-    button.textContent = label;
+    button.textContent = t(label);
     button.dataset.active = String(button.dataset.sort === state.sort);
   });
 }
@@ -523,6 +532,7 @@ export function renderColumns() {
  * @returns {void}
  */
 export function renderShell() {
+  markHistoryColumns();
   const cratesMode = state.mode === "crates";
   const historyMode = state.mode === "history";
   el("crate-tools").hidden = !cratesMode;
@@ -537,14 +547,14 @@ export function renderShell() {
   el("detail").hidden = filesMode || snapshotsMode;
   el("files-panel").hidden = !filesMode;
   el("snapshots-panel").hidden = !snapshotsMode;
-  if (state.mode === "missing") el("mode-note").textContent = "Tracks Serato has marked missing in this space.";
+  if (state.mode === "missing") el("mode-note").textContent = t("mode.missing");
   if (state.mode === "duplicates") {
-    el("mode-note").textContent = "Same title, artist, and length. Select a copy, then merge the others into it.";
+    el("mode-note").textContent = t("mode.duplicates");
   }
-  if (state.mode === "stems") el("mode-note").textContent = "Tracks with a stems analysis state.";
-  if (filesMode) el("mode-note").textContent = "Files on disk. Cue points stay in the audio file. Crates follow the path.";
+  if (state.mode === "stems") el("mode-note").textContent = t("mode.stems");
+  if (filesMode) el("mode-note").textContent = t("mode.files");
   if (snapshotsMode) {
-    el("mode-note").textContent = "Hash-checked copies of the library, crates, and Serato frames inside audio files. Audio itself is not copied.";
+    el("mode-note").textContent = t("mode.snapshots");
   }
   for (const button of document.querySelectorAll<HTMLButtonElement>("#views button")) {
     button.setAttribute("aria-selected", String(button.dataset.view === state.mode));
@@ -561,22 +571,22 @@ export function renderShell() {
   if (filesMode) {
     if (state.filesAtRoots) {
       el("crate-foot").textContent = state.filesLoading
-        ? "Reading music folders"
-        : `${state.filesRoots.length.toLocaleString()} music folders`;
+        ? t("files.readingRoots")
+        : t("files.rootCount", { count: state.filesRoots.length });
       return;
     }
     const listed = state.filesEntries.filter((entry) => entry.kind === "file").length;
-    el("crate-foot").textContent = state.filesLoading ? "Reading this folder" : `${listed.toLocaleString()} files`;
+    el("crate-foot").textContent = state.filesLoading ? t("files.readingFolder") : t("files.fileCount", { count: listed });
     return;
   }
   if (snapshotsMode) {
-    el("crate-foot").textContent = state.snapshotLoading ? "Reading snapshots" : `${state.snapshots.length.toLocaleString()} snapshots`;
+    el("crate-foot").textContent = state.snapshotLoading ? t("snapshots.reading") : t("snapshots.count", { count: state.snapshots.length });
     return;
   }
   const pool = state.mode === "history" ? state.entries : footerTracks();
   const bytes = pool.reduce((sum, track) => sum + (Number(track.file_size) || 0), 0);
   const ms = pool.reduce((sum, track) => sum + (Number(track.length_ms) || 0), 0);
-  el("crate-foot").textContent = `${pool.length.toLocaleString()} · ${durationLabel(ms)} · ${sizeLabel(bytes)}`;
+  el("crate-foot").textContent = `${formatNumber(pool.length)} · ${durationLabel(ms)} · ${sizeLabel(bytes)}`;
 }
 
 /**
@@ -618,8 +628,7 @@ export function renderList() {
   }
   renderColumns();
   const view = buildView();
-  const noun = state.mode === "history" ? "play" : "track";
-  el("count").textContent = `${view.length.toLocaleString()} ${noun}${view.length === 1 ? "" : "s"}`;
+  el("count").textContent = t(state.mode === "history" ? "count.plays" : "count.tracks", { count: view.length });
   if (state.mode === "crates") renderCrates();
   else document.querySelector(".rules")?.remove();
   paintRows();
@@ -628,7 +637,7 @@ export function renderList() {
       state.selectedId = null;
       const empty = document.createElement("p");
       empty.className = "detail-empty";
-      empty.textContent = state.mode === "history" && !state.historyId ? "Choose a session." : "No tracks match.";
+      empty.textContent = state.mode === "history" && !state.historyId ? t("history.chooseSession") : t("list.noMatches");
       el("detail").replaceChildren(empty);
     } else if (state.mode === "history") selectEntry(view[0]!.id);
     else selectTrack(view[0]!.id);
@@ -712,12 +721,12 @@ export async function selectTrack(id: number) {
   const token = ++state.request;
   const pending = document.createElement("p");
   pending.className = "detail-empty";
-  pending.textContent = "Reading attributes";
+  pending.textContent = t("detail.reading");
   el("detail").replaceChildren(pending);
   try {
     const response = await fetch(`/api/track?id=${id}&space=${encodeURIComponent(state.space)}`);
     const payload = await readJSONOr<Track & ErrorBody>(response, {} as Track & ErrorBody);
-    if (!response.ok) throw new Error(payload.error || `Could not read track (${response.status})`);
+    if (!response.ok) throw new Error(serverMessage(payload, t("detail.readFailed", { status: String(response.status) })));
     if (token !== state.request) return;
     if (payload.serato) applyStatus(payload.serato);
     renderDetail(payload);
@@ -747,7 +756,7 @@ export function selectEntry(id: number) {
   const body = document.createElement("div");
   body.className = "detail-body";
   const title = document.createElement("h2");
-  title.textContent = entry.name || "Untitled";
+  title.textContent = entry.name || t("track.untitled");
   body.append(title);
   if (entry.artist) {
     const artist = document.createElement("p");
@@ -756,12 +765,12 @@ export function selectEntry(id: number) {
     body.append(artist);
   }
   const lines: Array<[string, string]> = [
-    ["Played", entry.played ? "Yes" : "No"],
-    ["Deck", entry.deck || "—"],
-    ["Started", clockLabel(entry.start_time) || "—"],
-    ["File", entry.file || "—"],
+    [t("column.played"), entry.played ? t("common.yes") : t("common.no")],
+    [t("column.deck"), entry.deck || "—"],
+    [t("history.started"), clockLabel(entry.start_time) || "—"],
+    [t("history.file"), entry.file || "—"],
   ];
-  if (entry.notes) lines.push(["Notes", entry.notes]);
+  if (entry.notes) lines.push([t("history.notes"), entry.notes]);
   for (const [label, value] of lines) {
     const row = document.createElement("div");
     row.className = "field";
@@ -779,7 +788,7 @@ export function selectEntry(id: number) {
     tip(open, "openInLibrary");
     open.type = "button";
     open.className = "text-button";
-    open.textContent = "Open in library";
+    open.textContent = t("history.openInLibrary");
     open.addEventListener("click", () => openInLibrary(entry.asset_id as number));
     body.append(open);
   }
@@ -826,6 +835,7 @@ function fieldInput(name: string, label: string, value: string | number | null |
  * @returns {void}
  */
 function renderDetail(track: Track) {
+  lastDetail = track;
   const writable = Boolean(track.serato?.writable && state.writable);
   const body = document.createElement("div");
   body.className = "detail-body";
@@ -860,12 +870,13 @@ function renderDetail(track: Track) {
 
   const deck = document.createElement("div");
   deck.className = "deck";
-  const facts: Array<[string, string | number | null | undefined]> = [["BPM", track.bpm], ["Key", track.key || "—"], ["Time", track.length]];
-  for (const [label, value] of facts) {
+  const facts: Array<[MessageKey, string | number | null | undefined]> = [["column.bpm", track.bpm], ["column.key", track.key || "—"], ["column.time", track.length]];
+  for (const [key, value] of facts) {
+    const label = t(key);
     const cell = document.createElement("div");
     const strong = document.createElement("strong");
     strong.textContent = String(value || "—");
-    if (label === "BPM") strong.className = "bpm";
+    if (key === "column.bpm") strong.className = "bpm";
     const span = document.createElement("span");
     span.textContent = label;
     cell.append(strong, span);
@@ -877,7 +888,7 @@ function renderDetail(track: Track) {
     swatch.className = "swatch swatch-lg";
     swatch.style.background = String(track.color ?? "");
     const span = document.createElement("span");
-    span.textContent = "Color";
+    span.textContent = t("field.color");
     cell.append(swatch, span);
     deck.append(cell);
   }
@@ -891,39 +902,37 @@ function renderDetail(track: Track) {
   const form = document.createElement("form");
   form.className = "editor";
   const edit = track.edit || {};
-  const editorFields: Array<[string, string, TipKey, boolean]> = [
-
-    ["name", "Title", "trackTitle", true],
-    ["artist", "Artist", "trackArtist", false],
-    ["album", "Album", "trackAlbum", false],
-    ["genre", "Genre", "trackGenre", false],
-    ["year", "Year", "trackYear", false],
-    ["composer", "Composer", "trackComposer", false],
-    ["remixer", "Remixer", "trackRemixer", false],
-    ["label", "Label", "trackLabel", false],
-    ["grouping", "Grouping", "trackGrouping", false],
-    ["key", "Key", "trackKey", false],
-    ["bpm", "BPM", "trackBpm", false],
-    ["emoji", "Emoji", "trackEmoji", false],
-    ["comments", "Comments", "trackComments", true],
+  const editorFields: Array<[string, MessageKey, TipKey, boolean]> = [
+    ["name", "column.title", "trackTitle", true],
+    ["artist", "column.artist", "trackArtist", false],
+    ["album", "field.album", "trackAlbum", false],
+    ["genre", "field.genre", "trackGenre", false],
+    ["year", "field.year", "trackYear", false],
+    ["composer", "field.composer", "trackComposer", false],
+    ["remixer", "field.remixer", "trackRemixer", false],
+    ["label", "field.label", "trackLabel", false],
+    ["grouping", "field.grouping", "trackGrouping", false],
+    ["key", "column.key", "trackKey", false],
+    ["bpm", "column.bpm", "trackBpm", false],
+    ["emoji", "field.emoji", "trackEmoji", false],
+    ["comments", "field.comments", "trackComments", true],
   ];
   for (const [name, label, tipKey, wide] of editorFields) {
-    form.append(fieldInput(name, label, String(edit[name] ?? ""), tipKey, wide));
+    form.append(fieldInput(name, t(label), String(edit[name] ?? ""), tipKey, wide));
   }
 
   const colorLabel = document.createElement("label");
-  colorLabel.append(document.createTextNode("Color"));
+  colorLabel.append(document.createTextNode(t("field.color")));
   const colorSelect = document.createElement("select");
   tip(colorSelect, "trackColor");
   colorSelect.name = "color";
   const currentColor = Number(edit.color ?? 0xffffff);
-  const palette = COLORS.some(([value]) => value === currentColor)
-    ? COLORS
-    : [...COLORS, [currentColor, colorHex(currentColor) || "Custom"]];
+  const palette: Array<[number, string]> = COLORS.map(([value, key]) => [value, t(key)]);
+  if (!COLORS.some(([value]) => value === currentColor)) palette.push([currentColor, colorHex(currentColor) || t("color.custom")]);
   for (const [value, label] of palette) {
     const option = document.createElement("option");
     option.value = String(value);
-    option.textContent = String(label ?? "");
+    option.textContent = label;
     option.selected = value === currentColor;
     colorSelect.append(option);
   }
@@ -931,11 +940,14 @@ function renderDetail(track: Track) {
   form.append(colorLabel);
 
   const ratingLabel = document.createElement("label");
-  ratingLabel.append(document.createTextNode("Rating"));
+  ratingLabel.append(document.createTextNode(t("field.rating")));
   const ratingSelect = document.createElement("select");
   tip(ratingSelect, "trackRating");
   ratingSelect.name = "rating";
-  const ratings: Array<[string, string]> = [["", "Not rated"], ["0.2", "1 star"], ["0.4", "2 stars"], ["0.6", "3 stars"], ["0.8", "4 stars"], ["1", "5 stars"]];
+  const ratings: Array<[string, string]> = [
+    ["", t("rating.none")],
+    ...([["0.2", 1], ["0.4", 2], ["0.6", 3], ["0.8", 4], ["1", 5]] as const).map(([value, stars]): [string, string] => [value, t("rating.stars", { count: stars })]),
+  ];
   if (edit.rating != null && !ratings.some(([value]) => Number(value) === Number(edit.rating))) {
     ratings.push([String(edit.rating), `${edit.rating}`]);
   }
@@ -956,14 +968,14 @@ function renderDetail(track: Track) {
   lockInput.type = "checkbox";
   lockInput.name = "is_beatgrid_locked";
   lockInput.checked = Boolean(edit.is_beatgrid_locked);
-  lock.append(lockInput, document.createTextNode("Beatgrid locked"));
+  lock.append(lockInput, document.createTextNode(t("field.beatgridLocked")));
   form.append(lock);
 
   const save = document.createElement("button");
   tip(save, "trackSave");
   save.type = "submit";
   save.className = "text-button wide";
-  save.textContent = "Save track";
+  save.textContent = t("detail.saveTrack");
   form.append(save);
   for (const control of form.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLButtonElement>("input, select, textarea, button")) control.disabled = !writable;
   form.addEventListener("submit", (event) => {
@@ -978,25 +990,25 @@ function renderDetail(track: Track) {
   tip(reveal, "trackReveal");
   reveal.type = "button";
   const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
-  reveal.textContent = `Reveal in ${manager}`;
+  reveal.textContent = t("detail.reveal", { manager });
   reveal.disabled = !track.file_on_disk;
   reveal.addEventListener("click", () => revealTrack(track.id));
   const prepare = document.createElement("button");
   tip(prepare, track.in_prepare ? "prepareRemove" : "prepareSend");
   prepare.type = "button";
-  prepare.textContent = track.in_prepare ? "Remove from Prepare" : "Send to Prepare";
+  prepare.textContent = track.in_prepare ? t("detail.removePrepare") : t("detail.sendPrepare");
   prepare.disabled = !writable;
   prepare.addEventListener("click", () => prepareTrack(track.id, !track.in_prepare));
   const relocate = document.createElement("button");
   tip(relocate, "trackRelocate");
   relocate.type = "button";
-  relocate.textContent = "Relocate";
+  relocate.textContent = t("detail.relocate");
   relocate.disabled = !writable;
   relocate.addEventListener("click", () => relocateTrack(track));
   const remove = document.createElement("button");
   tip(remove, "trackRemove");
   remove.type = "button";
-  remove.textContent = "Remove from library";
+  remove.textContent = t("detail.removeFromLibrary");
   remove.disabled = !writable;
   remove.addEventListener("click", () => removeTrack(track.id));
   actions.append(reveal, prepare, relocate, remove);
@@ -1004,7 +1016,7 @@ function renderDetail(track: Track) {
     const merge = document.createElement("button");
     tip(merge, "mergeCopies");
     merge.type = "button";
-    merge.textContent = "Merge copies";
+    merge.textContent = t("merge.title");
     merge.disabled = !writable;
     merge.addEventListener("click", () => {
       bridge.openMergeDialog().catch((error) => setNotice(failureOf(error).message));
@@ -1030,13 +1042,13 @@ function renderDetail(track: Track) {
       tip(toggle, "searchCopies");
       toggle.type = "button";
       toggle.className = "text-button";
-      toggle.textContent = `Search copies, ${group.fields.length} fields`;
+      toggle.textContent = t("detail.searchCopies", { count: group.fields.length });
       let shown = false;
       section.hidden = true;
       toggle.addEventListener("click", () => {
         shown = !shown;
         section.hidden = !shown;
-        toggle.textContent = shown ? "Hide search copies" : `Search copies, ${group.fields.length} fields`;
+        toggle.textContent = shown ? t("detail.hideSearchCopies") : t("detail.searchCopies", { count: group.fields.length });
       });
       body.append(toggle);
     }
@@ -1085,13 +1097,13 @@ function markerSection(track: Track) {
   const section = document.createElement("section");
   section.className = "group";
   const heading = document.createElement("h3");
-  heading.textContent = "Cues, loops, and beatgrid";
+  heading.textContent = t("markers.heading");
   section.append(heading);
   const note = document.createElement("p");
   note.className = "detail-kicker";
-  if (track.markers_unavailable) note.textContent = "The file is not on disk, so cues cannot be read.";
-  else if (!track.markers_found) note.textContent = "No Serato cues in this file.";
-  else note.textContent = "Read from the audio file. These are not written back.";
+  if (track.markers_unavailable) note.textContent = t("markers.unavailable");
+  else if (!track.markers_found) note.textContent = t("markers.none");
+  else note.textContent = t("markers.readOnly");
   section.append(note);
   /**
    * Format a cue or loop time as m:ss.sss.
@@ -1132,7 +1144,7 @@ function markerSection(track: Track) {
     const time = document.createElement("span");
     time.textContent = ms(cue.start_ms);
     const name = document.createElement("span");
-    name.textContent = cue.name || `Cue ${(cue.index as number) + 1}`;
+    name.textContent = cue.name || t("markers.cue", { number: (cue.index as number) + 1 });
     row.append(swatch, time, name);
     section.append(row);
   }
@@ -1145,7 +1157,7 @@ function markerSection(track: Track) {
     const time = document.createElement("span");
     time.textContent = `${ms(loop.start_ms)}–${ms(loop.end_ms)}`;
     const name = document.createElement("span");
-    name.textContent = loop.name || `Loop ${(loop.index as number) + 1}${loop.locked ? " locked" : ""}`;
+    name.textContent = loop.name || t(loop.locked ? "markers.loopLocked" : "markers.loop", { number: (loop.index as number) + 1 });
     row.append(swatch, time, name);
     section.append(row);
   }
@@ -1153,9 +1165,9 @@ function markerSection(track: Track) {
     const row = document.createElement("div");
     row.className = "marker";
     const time = document.createElement("span");
-    time.textContent = flip.enabled ? "On" : "Off";
+    time.textContent = flip.enabled ? t("common.on") : t("common.off");
     const name = document.createElement("span");
-    name.textContent = flip.name || `Flip ${(flip.index as number) + 1}`;
+    name.textContent = flip.name || t("markers.flip", { number: (flip.index as number) + 1 });
     row.append(document.createElement("span"), time, name);
     section.append(row);
   }
@@ -1167,9 +1179,9 @@ function markerSection(track: Track) {
     const name = document.createElement("span");
     const bpmNumber = Number(mark.bpm);
     if (mark.bpm != null && mark.bpm !== "" && Number.isFinite(bpmNumber)) {
-      name.textContent = `${bpmNumber} BPM`;
+      name.textContent = t("markers.bpm", { bpm: formatNumber(bpmNumber, { maximumFractionDigits: 20 }) });
     } else if (mark.beats != null) {
-      name.textContent = `${mark.beats} beats`;
+      name.textContent = t("markers.beats", { count: Number(mark.beats) });
     } else {
       name.textContent = "";
     }
@@ -1193,7 +1205,7 @@ function copySection(copies: CopyRow[]) {
   const section = document.createElement("section");
   section.className = "group";
   const heading = document.createElement("h3");
-  heading.textContent = "Other copies";
+  heading.textContent = t("copies.heading");
   section.append(heading);
   for (const copy of copies) {
     const row = document.createElement("div");
@@ -1202,7 +1214,7 @@ function copySection(copies: CopyRow[]) {
     tip(button, "duplicateCopy");
     button.type = "button";
     button.className = "text-button";
-    button.textContent = copy.file || `Track ${copy.id}`;
+    button.textContent = copy.file || t("track.numbered", { id: String(copy.id) });
     button.addEventListener("click", () => selectTrack(copy.id as number));
     const rate = document.createElement("span");
     rate.textContent = copy.bitrate == null ? "" : String(copy.bitrate);
@@ -1234,14 +1246,14 @@ function relatedSection(track: Track, writable: boolean) {
   section.dataset.trackId = String(track.id);
   const heading = document.createElement("h3");
   heading.id = `related-heading-${track.id}`;
-  heading.textContent = "Related tracks";
+  heading.textContent = t("related.heading");
   section.setAttribute("aria-labelledby", heading.id);
   section.setAttribute("aria-busy", "true");
   const status = document.createElement("p");
   status.className = "detail-kicker";
   status.setAttribute("role", "status");
   const path = track.resolved_path || track.edit?.portable_id || "";
-  status.textContent = path ? "Loading related tracks" : "This track has no file path, so it cannot be linked.";
+  status.textContent = path ? t("related.loading") : t("related.noPath");
   section.append(heading, status);
   if (path) loadRelated(track, section, writable, "");
   return section;
@@ -1267,7 +1279,7 @@ async function loadRelated(track: Track, section: HTMLElement, writable: boolean
     const response = await fetch(`/api/related?${params}`);
     const payload = await readJSONOr<RelatedPayload>(response, {});
     if (token !== relatedRequest || !section.isConnected) return;
-    if (!response.ok) throw new Error(payload.error || "Related tracks could not be loaded.");
+    if (!response.ok) throw new Error(serverMessage(payload, t("related.loadFailed")));
     renderRelated(track, section, writable, payload, query);
   } catch (error) {
     if (token !== relatedRequest || !section.isConnected) return;
@@ -1300,8 +1312,8 @@ function renderRelated(track: Track, section: HTMLElement, writable: boolean, pa
   status.className = "detail-kicker";
   status.setAttribute("role", "status");
   status.textContent = saved.length
-    ? `${saved.length} saved`
-    : "No saved links yet. Search for a track, or save a suggestion.";
+    ? t("related.savedCount", { count: saved.length })
+    : t("related.noneSaved");
   section.append(status);
   if (saved.length) section.append(relatedSavedList(track, section, saved));
 
@@ -1310,8 +1322,8 @@ function renderRelated(track: Track, section: HTMLElement, writable: boolean, pa
   const suggestHeading = document.createElement("p");
   suggestHeading.className = "detail-kicker";
   suggestHeading.textContent = suggested.length
-    ? "Suggested from key, tempo within 6%, and shared crates. Save stores a two-way link."
-    : "No suggestions from key, tempo, or shared crates.";
+    ? t("related.suggested")
+    : t("related.noSuggestions");
   section.append(suggestHeading);
   if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
 
@@ -1321,14 +1333,14 @@ function renderRelated(track: Track, section: HTMLElement, writable: boolean, pa
   crate.className = "text-button";
   crate.dataset.relatedCrate = "true";
   const crateName = payload.crate_name || "Related";
-  crate.textContent = "Update Serato crate";
+  crate.textContent = t("related.updateCrate");
   crate.disabled = !writable;
   crate.addEventListener("click", () => refreshRelatedCrate(track, section));
   const crateNote = document.createElement("p");
   crateNote.className = "detail-kicker";
   crateNote.textContent = writable
-    ? `Creates or refreshes the crate “${crateName}”. Serato must be quit.`
-    : "Quit Serato before writing the crate.";
+    ? t("related.crateNote", { name: crateName })
+    : t("related.quitSerato");
   section.append(crate, crateNote);
 }
 
@@ -1351,7 +1363,7 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
     item.className = "related-row";
     const main = document.createElement("div");
     const other = link.track || {};
-    const label = other.title || "Untitled";
+    const label = other.title || t("track.untitled");
     if (other.asset_id != null && other.in_library) {
       const open = document.createElement("button");
       tip(open, "relatedOpen");
@@ -1370,10 +1382,10 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
     const bits = [];
     if (other.artist) bits.push(other.artist);
     if (other.key) bits.push(other.key);
-    if (other.bpm != null && other.bpm !== "") bits.push(`${other.bpm} BPM`);
-    bits.push(link.mutual ? "Two-way" : "One-way");
-    if (link.rating != null) bits.push(`${link.rating}/5`);
-    if (!other.in_library) bits.push("Not in this library");
+    if (other.bpm != null && other.bpm !== "") bits.push(t("markers.bpm", { bpm: String(other.bpm) }));
+    bits.push(link.mutual ? t("related.twoWay") : t("related.oneWay"));
+    if (link.rating != null) bits.push(t("related.ratingOutOf", { rating: String(link.rating) }));
+    if (!other.in_library) bits.push(t("related.notInLibrary"));
     meta.textContent = bits.join(" · ");
     main.append(meta);
     if (link.note) {
@@ -1386,8 +1398,8 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
     tip(remove, "relatedRemove");
     remove.type = "button";
     remove.className = "text-button";
-    remove.textContent = "Remove";
-    remove.setAttribute("aria-label", `Remove link to ${label}`);
+    remove.textContent = t("common.remove");
+    remove.setAttribute("aria-label", t("related.removeLink", { name: label }));
     remove.addEventListener("click", () => removeRelated(track, section, link));
     item.append(main, remove);
     list.append(item);
@@ -1410,12 +1422,12 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
   const block = document.createElement("div");
   block.className = "related-search";
   const label = document.createElement("label");
-  label.append(document.createTextNode("Find a track to link"));
+  label.append(document.createTextNode(t("related.find")));
   const input = document.createElement("input");
   tip(input, "relatedSearch");
   input.type = "search";
   input.autocomplete = "off";
-  input.placeholder = "Title or artist";
+  input.placeholder = t("related.findPlaceholder");
   input.value = query || "";
   label.append(input);
   const results = document.createElement("ul");
@@ -1441,7 +1453,7 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
     if (!terms.length) {
       const hint = document.createElement("li");
       hint.className = "related-meta";
-      hint.textContent = "Type a title or artist.";
+      hint.textContent = t("related.typeHint");
       results.append(hint);
       return;
     }
@@ -1451,7 +1463,7 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
     if (!hits.length) {
       const empty = document.createElement("li");
       empty.className = "related-meta";
-      empty.textContent = "No tracks match.";
+      empty.textContent = t("list.noMatches");
       results.append(empty);
       return;
     }
@@ -1461,7 +1473,7 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
       tip(choose, "relatedChoose");
       choose.type = "button";
       choose.className = "text-button";
-      choose.textContent = hit.artist ? `${hit.name || "Untitled"} · ${hit.artist}` : (hit.name || "Untitled");
+      choose.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : (hit.name || t("track.untitled"));
       choose.addEventListener("click", () => relatedLinkForm(track, section, form, hit, input.value));
       item.append(choose);
       results.append(item);
@@ -1490,20 +1502,20 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   form.replaceChildren();
   const chosen = document.createElement("p");
   chosen.className = "related-meta";
-  chosen.textContent = hit.artist ? `${hit.name || "Untitled"} · ${hit.artist}` : (hit.name || "Untitled");
+  chosen.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : (hit.name || t("track.untitled"));
   const noteLabel = document.createElement("label");
-  noteLabel.append(document.createTextNode("Note"));
+  noteLabel.append(document.createTextNode(t("related.note")));
   const note = document.createElement("input");
   tip(note, "relatedNote");
   note.type = "text";
   note.maxLength = 500;
-  note.placeholder = "blend out of";
+  note.placeholder = t("related.notePlaceholder");
   noteLabel.append(note);
   const ratingLabel = document.createElement("label");
-  ratingLabel.append(document.createTextNode("Link rating"));
+  ratingLabel.append(document.createTextNode(t("related.linkRating")));
   const rating = document.createElement("select");
   tip(rating, "relatedRating");
-  for (const [value, text] of [["", "Not rated"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]] as Array<[string, string]>) {
+  for (const [value, text] of [["", t("rating.none")], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]] as Array<[string, string]>) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = text;
@@ -1516,12 +1528,12 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   tip(mutual, "relatedMutual");
   mutual.type = "checkbox";
   mutual.checked = true;
-  mutualLabel.append(mutual, document.createTextNode("Two-way link"));
+  mutualLabel.append(mutual, document.createTextNode(t("related.twoWayLink")));
   const save = document.createElement("button");
   tip(save, "relatedSave");
   save.type = "button";
   save.className = "text-button";
-  save.textContent = "Save link";
+  save.textContent = t("related.saveLink");
   save.addEventListener("click", () => {
     save.disabled = true;
     saveRelated(track, section, {
@@ -1556,7 +1568,7 @@ function relatedSuggestList(track: Track, section: HTMLElement, suggested: Relat
     row.className = "related-row";
     const main = document.createElement("div");
     const name = document.createElement("span");
-    name.textContent = item.artist ? `${item.title || "Untitled"} · ${item.artist}` : (item.title || "Untitled");
+    name.textContent = item.artist ? `${item.title || t("track.untitled")} · ${item.artist}` : (item.title || t("track.untitled"));
     const reasons = document.createElement("p");
     reasons.className = "related-meta";
     reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
@@ -1565,8 +1577,8 @@ function relatedSuggestList(track: Track, section: HTMLElement, suggested: Relat
     tip(save, "relatedSuggestionSave");
     save.type = "button";
     save.className = "text-button";
-    save.textContent = "Save";
-    save.setAttribute("aria-label", `Save link to ${item.title || "Untitled"}`);
+    save.textContent = t("common.save");
+    save.setAttribute("aria-label", t("related.saveLinkTo", { name: item.title || t("track.untitled") }));
     save.addEventListener("click", () => {
       save.disabled = true;
       saveRelated(track, section, {
@@ -1601,7 +1613,7 @@ function relatedSuggestList(track: Track, section: HTMLElement, suggested: Relat
 async function saveRelated(track: Track, section: HTMLElement, body: Record<string, unknown>, query: string) {
   try {
     await postJSON("/api/related", body);
-    setNotice("Link saved.");
+    setNotice(t("related.saved"));
     const kept = section.querySelector<HTMLInputElement>(".related-search input");
     await loadRelated(track, section, Boolean(track.serato?.writable && state.writable), kept ? kept.value : query);
   } catch (error) {
@@ -1624,11 +1636,11 @@ async function saveRelated(track: Track, section: HTMLElement, body: Record<stri
  * @returns {Promise<void>}
  */
 async function removeRelated(track: Track, section: HTMLElement, link: RelatedTrack) {
-  const label = link.track?.title || "this track";
-  if (!confirm(`Remove the link to “${label}”?`)) return;
+  const label = link.track?.title || t("related.thisTrack");
+  if (!confirm(t("related.confirmRemove", { name: label }))) return;
   try {
     await postJSON("/api/related", { action: "remove", id: link.id });
-    setNotice("Link removed.");
+    setNotice(t("related.removed"));
     const kept = section.querySelector<HTMLInputElement>(".related-search input");
     await loadRelated(track, section, Boolean(track.serato?.writable && state.writable), kept ? kept.value : "");
   } catch (error) {
@@ -1651,7 +1663,7 @@ async function refreshRelatedCrate(track: Track, section: HTMLElement) {
   if (button) button.disabled = true;
   try {
     const result = await postJSON("/api/related", { action: "crate", asset: track.id, space: state.space });
-    setNotice(result.warning || `Crate “${result.name}” updated.`);
+    setNotice(result.warning || t("related.crateUpdated", { name: String(result.name ?? "") }));
     await loadLibrary();
     selectTrack(track.id);
   } catch (error) {
@@ -1680,7 +1692,7 @@ function membershipSection(track: Track, writable: boolean) {
   const section = document.createElement("section");
   section.className = "group";
   const heading = document.createElement("h3");
-  heading.textContent = "Crates";
+  heading.textContent = t("crates.heading");
   section.append(heading);
   const holder = document.createElement("div");
   holder.className = "member-list";
@@ -1704,11 +1716,34 @@ function membershipSection(track: Track, writable: boolean) {
   if (smart.length) {
     const line = document.createElement("p");
     line.className = "detail-kicker";
-    line.textContent = `Smart crates: ${smart.map((crate) => crate.name).join(", ")}`;
+    line.textContent = t("crates.smartList", { names: smart.map((crate) => crate.name).join(", ") });
     section.append(line);
   }
   section.append(holder);
   return section;
+}
+
+/**
+ * Paint the library screen again in the active language.
+ *
+ * Repaints the shell, list headers, crates, rows, files, history
+ * sessions, and the open detail pane from what the page already has.
+ * The library is not fetched again. The related-tracks list in the
+ * detail pane is read again from GET /api/related.
+ *
+ * @returns {void}
+ */
+export function repaintViews(): void {
+  // The static markup pass resets the status line, so put the server's back.
+  if (state.serato) el("status").textContent = statusLine(state.serato);
+  renderList();
+  if (state.mode === "history") {
+    renderSessions();
+    if (state.selectedId != null) selectEntry(state.selectedId);
+    return;
+  }
+  const detail = lastDetail;
+  if (detail && detail.id === state.selectedId && el("detail").querySelector(".detail-body")) renderDetail(detail);
 }
 
 /**
@@ -1734,10 +1769,25 @@ export function setNotice(text: string) {
  * @param {object|null|undefined} info Status payload from /api/status or a library response.
  * @returns {void}
  */
+/**
+ * The rail status line, in the active language.
+ *
+ * A notice with a code is translated. `params` fill its placeholders, so
+ * the unknown Serato version names the build in Spanish and in the
+ * pseudo-locale. A sentence without a code stays as the server sent it.
+ *
+ * @param info Status payload. Null before the server answers.
+ * @returns The text for `#status`.
+ */
+export function statusLine(info: SeratoStatus | null | undefined): string {
+  if (info?.code) return codedText(info.message || t("status.library"), info.code, messageParams(info.params));
+  return info?.message || t("status.library");
+}
+
 export function applyStatus(info: SeratoStatus | null | undefined) {
   state.serato = info;
   state.writable = Boolean(info?.writable);
-  el("status").textContent = info?.message || "Library";
+  el("status").textContent = statusLine(info);
   renderShell();
 }
 
@@ -1789,12 +1839,12 @@ async function saveTrack(id: number, form: HTMLFormElement) {
     is_beatgrid_locked: form.querySelector<HTMLInputElement>("[name=is_beatgrid_locked]")!.checked,
   };
   if (bpm !== "" && Number.isNaN(fields.bpm)) {
-    setNotice("BPM needs a number.");
+    setNotice(t("detail.bpmNumber"));
     return;
   }
   try {
     const result = await postJSON("/api/track", { id, space: state.space, fields });
-    setNotice(result.warning || "Saved.");
+    setNotice(result.warning || t("common.saved"));
     await loadLibrary();
     selectTrack(id);
   } catch (error) {
@@ -1834,7 +1884,7 @@ async function revealTrack(id: number) {
 async function prepareTrack(id: number, add: boolean) {
   try {
     const result = await postJSON("/api/crate", { action: "prepare", asset: id, add, space: state.space });
-    setNotice(result.warning || (add ? "Sent to Prepare." : "Removed from Prepare."));
+    setNotice(result.warning || (add ? t("detail.sentPrepare") : t("detail.removedPrepare")));
     await loadLibrary();
     selectTrack(id);
   } catch (error) {
@@ -1854,7 +1904,7 @@ async function prepareTrack(id: number, add: boolean) {
  * @returns {Promise<void>}
  */
 async function relocateTrack(track: Track) {
-  const path = prompt("Path to the audio file", track.resolved_path || track.edit?.portable_id || "");
+  const path = prompt(t("detail.relocatePrompt"), track.resolved_path || track.edit?.portable_id || "");
   if (!path) return;
   try {
     const result = await postJSON("/api/track", {
@@ -1862,7 +1912,7 @@ async function relocateTrack(track: Track) {
       space: state.space,
       fields: { portable_id: path },
     });
-    setNotice(result.warning || "File location saved.");
+    setNotice(result.warning || t("detail.relocated"));
     await loadLibrary();
     selectTrack(track.id);
   } catch (error) {
@@ -1881,10 +1931,10 @@ async function relocateTrack(track: Track) {
  * @returns {Promise<void>}
  */
 async function removeTrack(id: number) {
-  if (!confirm("Remove this track from the library? The audio file stays on disk.")) return;
+  if (!confirm(t("detail.confirmRemove"))) return;
   try {
     const result = await postJSON("/api/crate", { action: "remove_library", asset: id, space: state.space });
-    setNotice(result.warning || "Removed from the library.");
+    setNotice(result.warning || t("detail.removed"));
     state.selectedId = null;
     await loadLibrary();
   } catch (error) {
@@ -1940,12 +1990,12 @@ async function saveRules(id: number, text: string) {
   try {
     rules = JSON.parse(text);
   } catch {
-    setNotice("Smart crate rules need to be JSON.");
+    setNotice(t("error.smart_rules_json"));
     return;
   }
   try {
     const result = await postJSON("/api/crate", { action: "rules", id, rules, space: state.space });
-    setNotice(result.warning || "Rules saved.");
+    setNotice(result.warning || t("rules.saved"));
     await loadLibrary();
     selectCrate(id);
   } catch (error) {
@@ -1964,12 +2014,12 @@ async function saveRules(id: number, text: string) {
  * @returns {Promise<void>}
  */
 export async function createCrate() {
-  const name = prompt("New crate name");
+  const name = prompt(t("crates.newPrompt"));
   if (!name || !name.trim()) return;
   const parent = state.activeCrate === "all" ? state.rootId : state.activeCrate;
   try {
     const result = await postJSON("/api/crate", { action: "create", name: name.trim(), parent, space: state.space });
-    setNotice(result.warning || "Crate created.");
+    setNotice(result.warning || t("crates.created"));
     await loadLibrary();
     selectCrate(result.id as number);
   } catch (error) {
@@ -1989,17 +2039,32 @@ export async function createCrate() {
 export async function renameCrate() {
   const crate = state.crates.find((item) => item.id === state.activeCrate);
   if (!crate) return;
-  const name = prompt("Rename crate", crate.name);
+  const name = prompt(t("crates.renamePrompt"), crate.name);
   if (!name || !name.trim() || name.trim() === crate.name) return;
   try {
     const result = await postJSON("/api/crate", { action: "rename", id: crate.id, name: name.trim(), space: state.space });
-    setNotice(result.warning || "Crate renamed.");
+    setNotice(result.warning || t("crates.renamed"));
     await loadLibrary();
     selectCrate(crate.id);
   } catch (error) {
     if (failureOf(error).status === 409) lockDown(error);
     else setNotice(failureOf(error).message);
   }
+}
+
+/**
+ * Read a palette name typed at the color prompt.
+ *
+ * The name can be English or in the active language, in any case.
+ *
+ * @param {string} choice Text the person typed.
+ * @returns {number|undefined} The Serato color, or undefined for an unknown name.
+ */
+export function colorFromName(choice: string): number | undefined {
+  const wanted = choice.trim().toLocaleLowerCase();
+  const english = COLOR_NAMES[wanted];
+  if (english != null) return english;
+  return COLORS.find(([, key]) => t(key).toLocaleLowerCase() === wanted)?.[0];
 }
 
 /**
@@ -2013,11 +2078,12 @@ export async function renameCrate() {
 export async function colorCrate() {
   const crate = state.crates.find((item) => item.id === state.activeCrate);
   if (!crate) return;
-  const choice = prompt("Crate color: none, red, orange, yellow, green, blue, purple, pink");
+  const names = COLORS.map(([, key]) => t(key).toLocaleLowerCase());
+  const choice = prompt(t("crates.colorPrompt", { names: names.join(", ") }));
   if (choice == null) return;
-  const color = COLOR_NAMES[choice.trim().toLowerCase()];
+  const color = colorFromName(choice);
   if (color == null) {
-    setNotice("Use one of the palette names.");
+    setNotice(t("crates.colorUnknown"));
     return;
   }
   try {
@@ -2027,7 +2093,7 @@ export async function colorCrate() {
       color: color === 0xffffff ? null : color,
       space: state.space,
     });
-    setNotice(result.warning || "Crate color saved.");
+    setNotice(result.warning || t("crates.colorSaved"));
     await loadLibrary();
   } catch (error) {
     if (failureOf(error).status === 409) lockDown(error);
@@ -2047,11 +2113,11 @@ export async function colorCrate() {
 export async function deleteCrate() {
   const crate = state.crates.find((item) => item.id === state.activeCrate);
   if (!crate) return;
-  if (!confirm(`Delete “${crate.name}” and the crates inside it? The tracks stay in the library.`)) return;
+  if (!confirm(t("crates.confirmDelete", { name: crate.name }))) return;
   try {
     const result = await postJSON("/api/crate", { action: "delete", id: crate.id, space: state.space });
     state.activeCrate = "all";
-    setNotice(result.warning || "Crate deleted.");
+    setNotice(result.warning || t("crates.deleted"));
     await loadLibrary();
   } catch (error) {
     if (failureOf(error).status === 409) lockDown(error);
@@ -2071,12 +2137,12 @@ export async function deleteCrate() {
  */
 export async function importPlaylist(file: File) {
   const text = await file.text();
-  const name = file.name.replace(/\.m3u8?$/i, "") || "Imported playlist";
+  const name = file.name.replace(/\.m3u8?$/i, "") || t("import.defaultName");
   const parent = state.activeCrate === "all" ? state.rootId : state.activeCrate;
   try {
     const result = await postJSON("/api/import.m3u", { space: state.space, parent, name, text });
-    const missed = result.unmatched_count ? ` ${result.unmatched_count} lines did not match a library track.` : "";
-    setNotice(`${result.added} tracks added.${missed}${result.warning ? ` ${result.warning}` : ""}`);
+    const missed = result.unmatched_count ? ` ${t("import.unmatched", { count: Number(result.unmatched_count) })}` : "";
+    setNotice(`${t("import.added", { count: Number(result.added) || 0 })}${missed}${result.warning ? ` ${result.warning}` : ""}`);
     await loadLibrary();
     selectCrate(result.id as number);
   } catch (error) {
@@ -2104,7 +2170,7 @@ export function renderSessions() {
     button.setAttribute("aria-selected", String(session.id === state.historyId));
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = session.name || "Session";
+    name.textContent = session.name || t("history.session");
     const meta = document.createElement("span");
     meta.className = "meta";
     meta.textContent = String(session.played || 0);
@@ -2125,7 +2191,7 @@ export function renderSessions() {
 export async function loadHistory() {
   const response = await fetch("/api/history");
   const payload = await readJSONOr<HistoryPayload>(response, {});
-  if (!response.ok) throw new Error(payload.error || "Could not read history.");
+  if (!response.ok) throw new Error(serverMessage(payload, t("history.readFailed")));
   state.historySessions = payload.sessions || [];
   renderSessions();
 }
@@ -2146,7 +2212,7 @@ export async function openSession(id: number) {
   const response = await fetch(`/api/history?session=${id}`);
   const payload = await readJSONOr<HistoryPayload>(response, {});
   if (!response.ok) {
-    setNotice(payload.error || "Could not read that session.");
+    setNotice(serverMessage(payload, t("history.sessionFailed")));
     return;
   }
   state.entries = payload.entries || [];
@@ -2167,7 +2233,7 @@ export async function loadDuplicates() {
   state.duplicateGroups = [];
   const response = await fetch(`/api/duplicates?space=${encodeURIComponent(state.space)}`);
   const payload = await readJSONOr<DuplicatePayload>(response, {});
-  if (!response.ok) throw new Error(payload.error || "Could not read duplicates.");
+  if (!response.ok) throw new Error(serverMessage(payload, t("duplicates.readFailed")));
   const ids = new Set<number>();
   state.duplicateGroups = payload.groups || [];
   for (const group of state.duplicateGroups) for (const id of group.ids || []) ids.add(id);
@@ -2205,10 +2271,10 @@ export async function openInLibrary(assetId: number) {
  * @returns {Promise<void>} Resolves after the list is painted. Throws on a failed read.
  */
 export async function loadLibrary() {
-  el("count").textContent = "Loading the library";
+  el("count").textContent = t("library.loading");
   const response = await fetch(`/api/library?space=${encodeURIComponent(state.space)}`);
   const library = await readJSONOr<LibraryPayload>(response, {} as LibraryPayload);
-  if (!response.ok) throw new Error(library.error || `Could not read the library (${response.status})`);
+  if (!response.ok) throw new Error(serverMessage(library, t("library.readFailed", { status: String(response.status) })));
   const selected = state.selectedId;
   const active = state.activeCrate;
   state.tracks = library.tracks;
@@ -2272,7 +2338,7 @@ export function setMode(mode: string) {
  * @returns {void}
  */
 export function showFailure(error: unknown) {
-  el("count").textContent = "Library unavailable";
+  el("count").textContent = t("library.unavailable");
   const failure = document.createElement("p");
   failure.className = "detail-error";
   failure.textContent = failureOf(error).message;
@@ -2330,7 +2396,7 @@ export function crateNamesFor(assetId: number) {
  */
 export function failFiles(error: unknown) {
   state.filesLoading = false;
-  state.filesError = failureOf(error).message || "That folder could not be read.";
+  state.filesError = failureOf(error).message || t("error.folder_unreadable");
   renderFiles();
 }
 
@@ -2412,7 +2478,7 @@ export async function loadFolder(path: string, options: { keepMessage?: boolean;
   const response = await fetch(`/api/files${query}`);
   const payload = await readJSONOr<FilesPayload>(response, {});
   if (token !== filesRequest) return;
-  if (!response.ok) throw new Error(payload.error || "That folder could not be read.");
+  if (!response.ok) throw new Error(serverMessage(payload, t("error.folder_unreadable")));
   state.filesPath = payload.path || "";
   state.filesParent = typeof payload.parent === "string" && payload.parent ? payload.parent : null;
   state.filesEntries = Array.isArray(payload.entries) ? payload.entries : [];
@@ -2494,13 +2560,13 @@ export function renderFiles() {
   pickCancel.hidden = !state.filesPick;
   renderBreadcrumb();
   const elsewhere = el("files-elsewhere");
-  elsewhere.textContent = state.filesElsewhere ? "Music folders" : "Browse elsewhere…";
+  elsewhere.textContent = state.filesElsewhere ? t("files.roots") : t("files.browseElsewhere");
   el("files-up").disabled = !state.filesParent || state.filesLoading;
   const notes = [];
-  if (state.filesLoading) notes.push(state.filesAtRoots ? "Reading music folders." : "Reading this folder.");
+  if (state.filesLoading) notes.push(state.filesAtRoots ? t("files.readingRootsNote") : t("files.readingFolderNote"));
   if (state.filesError) notes.push(state.filesError);
   if (state.filesMessage) notes.push(state.filesMessage);
-  if (state.filesTruncated) notes.push(state.filesSearching ? copy.filesTruncated : "Some files are not listed.");
+  if (state.filesTruncated) notes.push(state.filesSearching ? t("files.searchTruncated") : t("files.truncated"));
   el("files-status").textContent = notes.join(" ");
   const scroll = el("files-list").scrollTop;
   paintFileWindow();
@@ -2569,9 +2635,9 @@ function renderBreadcrumb(): void {
  */
 function visibleCrumbs(): FileCrumb[] {
   if (state.filesBreadcrumb.length) return state.filesBreadcrumb;
-  if (state.filesAtRoots) return [{ name: "Music folders", path: "" }];
+  if (state.filesAtRoots) return [{ name: t("files.roots"), path: "" }];
   if (state.filesPath) return [{ name: state.filesPath, path: state.filesPath }];
-  return [{ name: "Music folders", path: "" }];
+  return [{ name: t("files.roots"), path: "" }];
 }
 
 /**
@@ -2623,14 +2689,14 @@ function paintFileWindow(): void {
   list.setAttribute("aria-busy", String(state.filesLoading));
   list.setAttribute(
     "aria-label",
-    state.filesSearching ? copy.filesSearchResults : state.filesAtRoots ? "Music folders" : "Folder contents",
+    state.filesSearching ? t("files.searchResults") : state.filesAtRoots ? t("files.roots") : t("files.contents"),
   );
   if (state.filesLoading && !rows.length) {
     const reading = state.filesSearching
-      ? copy.filesSearching
+      ? t("files.searching")
       : state.filesAtRoots
-        ? "Reading music folders."
-        : "Reading this folder.";
+        ? t("files.readingRootsNote")
+        : t("files.readingFolderNote");
     list.replaceChildren(fileNote(reading));
     list.tabIndex = 0;
     return;
@@ -2647,8 +2713,8 @@ function paintFileWindow(): void {
   }
   if (!rows.length) {
     const empty = state.filesSearching
-      ? fill(copy.filesNoMatches, { query: state.filesQuery })
-      : "This folder is empty.";
+      ? t("files.noMatches", { query: state.filesQuery })
+      : t("files.empty");
     list.replaceChildren(fileNote(empty));
     list.tabIndex = 0;
     return;
@@ -2722,15 +2788,15 @@ function rootsEmpty(): HTMLDivElement {
   const box = document.createElement("div");
   box.className = "files-empty-state";
   const heading = document.createElement("h2");
-  heading.textContent = "No music folders yet";
+  heading.textContent = t("files.noRoots");
   const copy = document.createElement("p");
-  copy.textContent = "Setup finds the folders Serato uses for your music.";
+  copy.textContent = t("files.noRootsBody");
   const button = document.createElement("button");
   tip(button, "filesRunSetup");
   button.type = "button";
   button.id = "files-run-setup";
   button.className = "files-primary";
-  button.textContent = "Run setup";
+  button.textContent = t("files.runSetup");
   button.addEventListener("click", () => bridge.openSetup());
   box.append(heading, copy, button);
   return box;
@@ -2868,16 +2934,16 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     }
     if (entry.missing) {
       button.setAttribute("aria-disabled", "true");
-      button.setAttribute("aria-label", `${entry.name}, Drive not connected`);
+      button.setAttribute("aria-label", t("files.driveMissingLabel", { name: entry.name }));
       const badge = document.createElement("span");
       badge.className = "files-badge";
-      badge.textContent = "Drive not connected";
+      badge.textContent = t("files.driveMissing");
       button.append(badge);
       button.addEventListener("click", () => {
         state.filesActive = index;
       });
     } else {
-      button.setAttribute("aria-label", `Open ${entry.name}`);
+      button.setAttribute("aria-label", t("files.open", { name: entry.name }));
       button.addEventListener("click", () => {
         state.filesActive = index;
         openBrowserRow(entry);
@@ -2894,7 +2960,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     label.dataset.filesIndex = String(index);
     label.id = `files-item-${index}`;
     label.tabIndex = index === state.filesActive ? 0 : -1;
-    label.textContent = `${entry.name} (shortcut)`;
+    label.textContent = t("files.shortcut", { name: entry.name });
     label.setAttribute("aria-label", `${entry.name} shortcut`);
     row.append(label);
     return row;
@@ -2928,7 +2994,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   if (entry.in_library) {
     const badge = document.createElement("span");
     badge.className = "files-badge";
-    badge.textContent = "In library";
+    badge.textContent = t("files.inLibrary");
     label.append(badge);
   }
   row.append(label);

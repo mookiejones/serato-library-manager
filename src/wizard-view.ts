@@ -6,12 +6,8 @@
  * changes. Text from the server is assigned with textContent.
  */
 
+import { onLocaleChange, serverMessage, t, type MessageKey } from "./i18n";
 import {
-  BLOCKED_MESSAGE,
-  CONSENT_BODY,
-  DONE_MESSAGE,
-  SNAPSHOT_BODY,
-  WELCOME_BODY,
   canGoBack,
   createWizard,
   primaryAction,
@@ -63,25 +59,29 @@ interface FolderRow {
   path: string;
 }
 
-const LABELS: Record<PrimaryAction, string> = {
-  "get-started": "Get started",
-  looking: "Looking…",
-  "use-library": "Use this library",
-  "check-again": "Check again",
-  "take-snapshot": "Take a safety snapshot",
-  "try-again": "Try again",
-  continue: "Continue",
-  "open-library": "Open my library",
-  none: "",
+const LABELS: Record<Exclude<PrimaryAction, "none">, MessageKey> = {
+  "get-started": "wizard.action.getStarted",
+  looking: "wizard.action.looking",
+  "use-library": "wizard.action.useLibrary",
+  "check-again": "wizard.action.checkAgain",
+  "take-snapshot": "wizard.action.takeSnapshot",
+  "try-again": "wizard.action.tryAgain",
+  continue: "wizard.action.continue",
+  "open-library": "wizard.action.openLibrary",
 };
 
-const HEADINGS: Record<WizardModel["step"], string> = {
-  welcome: "See your Serato library",
-  library: "Find your library",
-  snapshot: "Safety snapshot",
-  consent: "Share anonymous usage stats and crash reports?",
-  done: DONE_MESSAGE,
+const HEADINGS: Record<WizardModel["step"], MessageKey> = {
+  welcome: "wizard.heading.welcome",
+  library: "wizard.heading.library",
+  snapshot: "wizard.heading.snapshot",
+  consent: "wizard.heading.consent",
+  done: "wizard.done",
 };
+
+// Notes are stored as functions so a language change repaints them.
+type Note = () => string;
+const noteKey = (key: MessageKey): Note => () => t(key);
+const noteText = (value: string): Note => () => value;
 
 let wired = false;
 let starting = false;
@@ -93,9 +93,9 @@ let model: WizardModel = createWizard({
   seratoRunning: false,
 });
 let options: OpenOptions = {};
-let summary = "";
-let nextText = "";
-let statusNote = "";
+let summary: Note | null = null;
+let nextText: Note | null = null;
+let statusNote: Note | null = null;
 let folderOpen = false;
 let folderPath = "";
 let folderParent: string | null = null;
@@ -118,6 +118,9 @@ export function open(next: OpenOptions = {}): void {
 function wire(): void {
   if (wired) return;
   wired = true;
+  onLocaleChange(() => {
+    if (wizardDialog().open) paint(false);
+  });
   button("wizard-primary").addEventListener("click", () => {
     void onPrimary();
   });
@@ -160,15 +163,15 @@ async function begin(next: OpenOptions): Promise<void> {
   const token = generation;
   stopPoll();
   folderOpen = false;
-  statusNote = "";
+  statusNote = null;
   busy = false;
   const settings = await loadSettings();
   if (token !== generation) return;
   if (settings.wizard_complete && !next.force) return;
   const setup = await loadSetup();
   if (token !== generation) return;
-  summary = setup?.summary ?? "Couldn't look for your library.";
-  nextText = setup?.next ?? "Choose Check again.";
+  summary = setup ? noteText(setup.summary) : noteKey("wizard.lookFailed");
+  nextText = setup ? noteText(setup.next) : noteKey("wizard.chooseCheckAgain");
   if (setup) publishStatus(setup);
   const library: LibraryStatus = setup === null ? "error" : setup.found ? "found" : "missing";
   model = createWizard({
@@ -187,7 +190,7 @@ async function begin(next: OpenOptions): Promise<void> {
 function onBack(): void {
   if (!canGoBack(model) || busy) return;
   folderOpen = false;
-  statusNote = "";
+  statusNote = null;
   model = reduceWizard(model, { type: "back" });
   paint(true);
   ensurePoll();
@@ -207,7 +210,7 @@ async function onPrimary(): Promise<void> {
   const action = primaryAction(model);
   if (action === "get-started" || action === "use-library" || action === "continue") {
     folderOpen = false;
-    statusNote = "";
+    statusNote = null;
     model = reduceWizard(model, { type: "next" });
     paint(true);
     ensurePoll();
@@ -230,18 +233,18 @@ async function onPrimary(): Promise<void> {
 async function recheck(): Promise<void> {
   const token = generation;
   busy = true;
-  statusNote = "";
+  statusNote = null;
   paint(false);
   const setup = await loadSetup();
   if (token !== generation) return;
   busy = false;
   if (setup === null) {
-    summary = "Couldn't look for your library.";
-    nextText = "Choose Check again.";
+    summary = noteKey("wizard.lookFailed");
+    nextText = noteKey("wizard.chooseCheckAgain");
     model = reduceWizard(model, { type: "library", status: "error" });
   } else {
-    summary = setup.summary;
-    nextText = setup.next;
+    summary = noteText(setup.summary);
+    nextText = noteText(setup.next);
     publishStatus(setup);
     model = reduceWizard(model, { type: "serato", running: setup.seratoRunning });
     model = reduceWizard(model, { type: "library", status: setup.found ? "found" : "missing" });
@@ -253,7 +256,7 @@ async function takeSnapshot(): Promise<void> {
   if (snapshotBlocked(model)) return;
   const token = generation;
   busy = true;
-  statusNote = "";
+  statusNote = null;
   model = reduceWizard(model, { type: "snapshot", phase: "saving" });
   paint(false);
   try {
@@ -263,7 +266,7 @@ async function takeSnapshot(): Promise<void> {
   } catch {
     if (token !== generation) return;
     model = reduceWizard(model, { type: "snapshot", phase: "error" });
-    statusNote = "The safety copy could not be saved. Your library was not changed. Try again.";
+    statusNote = noteKey("wizard.snapshotFailed");
   } finally {
     if (token === generation) {
       busy = false;
@@ -276,7 +279,7 @@ async function chooseConsent(value: boolean): Promise<void> {
   if (busy || model.step !== "consent") return;
   const token = generation;
   busy = true;
-  statusNote = "Saving…";
+  statusNote = noteKey("wizard.saving");
   paint(false);
   try {
     const payload = await postJSON("/api/settings", { telemetry_consent: value }, 15000);
@@ -284,13 +287,13 @@ async function chooseConsent(value: boolean): Promise<void> {
     const settings = readSettings(payload);
     if (settings) options.onSettings?.(settings);
     busy = false;
-    statusNote = "";
+    statusNote = null;
     model = reduceWizard(model, { type: "consent", value });
     paint(true);
   } catch {
     if (token !== generation) return;
     busy = false;
-    statusNote = "Couldn't save that choice. Try again.";
+    statusNote = noteKey("wizard.consentFailed");
     paint(false);
   }
 }
@@ -298,7 +301,7 @@ async function chooseConsent(value: boolean): Promise<void> {
 async function finish(): Promise<void> {
   const token = generation;
   busy = true;
-  statusNote = "Opening…";
+  statusNote = noteKey("wizard.opening");
   paint(false);
   try {
     const payload = await postJSON("/api/settings", { wizard_complete: true }, 15000);
@@ -309,7 +312,7 @@ async function finish(): Promise<void> {
     closeDialog();
   } catch (error) {
     if (token !== generation) return;
-    statusNote = error instanceof Error ? error.message : "Couldn't save that you finished setup. Try again.";
+    statusNote = error instanceof Error ? noteText(error.message) : noteKey("wizard.finishFailed");
     busy = false;
     paint(false);
   }
@@ -335,7 +338,7 @@ async function browse(path: string): Promise<void> {
     if (token !== generation) return;
     const listing = readBrowse(payload);
     if (!listing) {
-      statusNote = "That folder could not be read.";
+      statusNote = noteKey("error.folder_unreadable");
       paint(false);
       return;
     }
@@ -347,7 +350,7 @@ async function browse(path: string): Promise<void> {
     paint(false);
   } catch {
     if (token !== generation) return;
-    statusNote = "That folder could not be read.";
+    statusNote = noteKey("error.folder_unreadable");
     paint(false);
   }
 }
@@ -362,23 +365,19 @@ async function useFolder(): Promise<void> {
     if (token !== generation) return;
     const setup = readSetup(payload);
     if (!setup) {
-      statusNote = "That folder could not be read.";
+      statusNote = noteKey("error.folder_unreadable");
       return;
     }
-    summary = setup.summary;
-    nextText = setup.next;
+    summary = noteText(setup.summary);
+    nextText = noteText(setup.next);
     publishStatus(setup);
     model = reduceWizard(model, { type: "serato", running: setup.seratoRunning });
     model = reduceWizard(model, { type: "library", status: setup.found ? "found" : "missing" });
-    if (setup.found) {
-      folderOpen = false;
-      statusNote = "";
-    } else {
-      statusNote = "";
-    }
+    if (setup.found) folderOpen = false;
+    statusNote = null;
   } catch (error) {
     if (token !== generation) return;
-    statusNote = error instanceof Error ? error.message : "That folder could not be read.";
+    statusNote = error instanceof Error ? noteText(error.message) : noteKey("error.folder_unreadable");
   } finally {
     if (token === generation) {
       busy = false;
@@ -394,7 +393,7 @@ function fillFolders(folders: readonly FolderRow[]): void {
   if (folders.length === 0) {
     const empty = document.createElement("p");
     empty.className = "wizard-folder-empty";
-    empty.textContent = "This folder has no folders inside it.";
+    empty.textContent = t("wizard.noSubfolders");
     list.append(empty);
     return;
   }
@@ -414,18 +413,19 @@ function fillFolders(folders: readonly FolderRow[]): void {
 
 function paint(moveFocus: boolean): void {
   const position = stepPosition(model);
-  text("wizard-step-label").textContent = `Step ${position.index} of ${position.count}`;
+  text("wizard-step-label").textContent = t("wizard.stepOf", { index: position.index, count: position.count });
   paintSegments(position.index, position.count);
   paintArt();
-  text("wizard-title").textContent = HEADINGS[model.step];
+  text("wizard-title").textContent = t(HEADINGS[model.step]);
   const body = bodyText();
   const bodyNode = text("wizard-body");
   bodyNode.textContent = body;
   bodyNode.hidden = body.length === 0;
   const hint = text("wizard-next");
-  const showHint = model.step === "library" && model.context.library !== "found" && nextText.length > 0;
+  const hintText = nextText ? nextText() : "";
+  const showHint = model.step === "library" && model.context.library !== "found" && hintText.length > 0;
   hint.hidden = !showHint;
-  hint.textContent = showHint ? nextText : "";
+  hint.textContent = showHint ? hintText : "";
   const status = statusFor();
   const statusNode = text("wizard-status");
   statusNode.textContent = status.text;
@@ -443,7 +443,9 @@ function paint(moveFocus: boolean): void {
   const primary = button("wizard-primary");
   const action = primaryAction(model);
   primary.hidden = action === "none";
-  primary.textContent = model.context.snapshot === "saving" ? "Saving a safety copy…" : LABELS[action];
+  primary.textContent = model.context.snapshot === "saving"
+    ? t("wizard.savingCopy")
+    : action === "none" ? "" : t(LABELS[action]);
   primary.disabled = busy || !primaryEnabled(model);
   button("wizard-no").disabled = busy;
   button("wizard-yes").disabled = busy;
@@ -457,14 +459,14 @@ function paint(moveFocus: boolean): void {
 function bodyText(): string {
   switch (model.step) {
     case "welcome":
-      return WELCOME_BODY;
+      return t("wizard.welcomeBody");
     case "library":
-      if (model.context.library === "pending") return "Looking for your Serato library.";
-      return summary || "Looking for your Serato library.";
+      if (model.context.library === "pending") return t("wizard.looking");
+      return (summary ? summary() : "") || t("wizard.looking");
     case "snapshot":
-      return SNAPSHOT_BODY;
+      return t("wizard.snapshotBody");
     case "consent":
-      return CONSENT_BODY;
+      return t("consent.body");
     case "done":
       return "";
     default:
@@ -473,14 +475,14 @@ function bodyText(): string {
 }
 
 function statusFor(): { text: string; kind: "" | "blocked" | "saved" } {
-  if (snapshotBlocked(model)) return { text: BLOCKED_MESSAGE, kind: "blocked" };
+  if (snapshotBlocked(model)) return { text: t("wizard.blocked"), kind: "blocked" };
   if (model.step === "snapshot" && model.context.snapshot === "saved") {
-    return { text: "Safety copy saved.", kind: "saved" };
+    return { text: t("wizard.copySaved"), kind: "saved" };
   }
   if (model.step === "snapshot" && model.context.snapshot === "saving") {
-    return { text: "Saving a safety copy of your library.", kind: "" };
+    return { text: t("wizard.savingLibraryCopy"), kind: "" };
   }
-  if (statusNote) return { text: statusNote, kind: "" };
+  if (statusNote) return { text: statusNote(), kind: "" };
   return { text: "", kind: "" };
 }
 
@@ -655,9 +657,10 @@ async function postJSON(url: string, body: Record<string, string | boolean>, tim
 function plainError(payload: unknown): string {
   const raw = isRecord(payload) && typeof payload.error === "string" ? payload.error : "";
   if (!raw || raw.includes("/") || raw.includes("\\") || raw.toLowerCase().includes("sqlite")) {
-    return "Something went wrong. Try again.";
+    return t("wizard.genericError");
   }
-  return raw;
+  const code = isRecord(payload) && typeof payload.code === "string" ? payload.code : undefined;
+  return serverMessage({ error: raw, code }, raw);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

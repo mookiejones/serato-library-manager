@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Track } from "./api-types";
 import { el } from "./dom";
+import { setLocale } from "./i18n";
 import {
   chordLabel,
   chordMatches,
@@ -16,6 +17,7 @@ import {
   SHORTCUTS,
   type ShortcutChord,
   type ShortcutId,
+  repaintCheatSheet,
   wireShortcuts,
 } from "./shortcuts";
 import { state } from "./state";
@@ -433,6 +435,19 @@ describe("keyboard shortcuts", () => {
     expect(text).toContain("Ctrl/Cmd+1");
     press({ key: "Escape" });
     expect(el("shortcuts-dialog").open).toBe(false);
+  });
+
+  it("translates the open cheat sheet", () => {
+    el("open-shortcuts").click();
+    setLocale("es");
+    try {
+      repaintCheatSheet();
+      expect(el("shortcuts-title").textContent).toBe("Atajos de teclado");
+      expect(el("shortcuts-body").textContent).toContain("Enfocar la búsqueda");
+      expect(el("shortcuts-body").textContent).not.toContain("Focus search");
+    } finally {
+      setLocale("en");
+    }
   });
 
   it("does nothing for Space and the seek keys when no player is registered", () => {

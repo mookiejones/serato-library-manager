@@ -31,7 +31,18 @@ SETTINGS_NAME = "settings.json"
 LIBRARY_CHOICE_NAME = "library.json"
 _LIBRARY_CHOICE_LIMIT = 65_536
 # Keys this file is allowed to store. Anything else is dropped on load.
-SETTINGS_KEYS = ("install_id", "telemetry_consent", "window", "wizard_complete", "rekordbox", "layout")
+SETTINGS_KEYS = (
+    "install_id",
+    "telemetry_consent",
+    "window",
+    "wizard_complete",
+    "rekordbox",
+    "layout",
+    "language",
+)
+# Page languages a person can pick in Settings. None follows the OS.
+# Keep in sync with LANGUAGES in src/i18n.ts.
+LANGUAGES = ("en", "es")
 LAYOUT_FIELDS = ("track_list_width",)
 # The page clamps the track list to the sheet it sits in. These bounds only
 # keep a hand-edited file from storing a width no screen could show.
@@ -161,6 +172,8 @@ class Settings:
             including a file written before this key existed.
         track_list_width: Width of the track list beside the detail pane,
             in CSS pixels. None is the default split.
+        language: Page language code from ``LANGUAGES``. None follows the
+            operating system language.
     """
 
     install_id: str | None
@@ -169,6 +182,7 @@ class Settings:
     window: WindowGeometry | None = None
     wizard_complete: bool = False
     track_list_width: int | None = None
+    language: str | None = None
 
     def as_json(self) -> dict[str, object]:
         """Return the settings object for the file.
@@ -207,6 +221,10 @@ class Settings:
             }
         if self.track_list_width is not None:
             body["layout"] = {"track_list_width": self.track_list_width}
+        if self.language is not None:
+            if self.language not in LANGUAGES:
+                raise ValueError("language is not a known page language.")
+            body["language"] = self.language
         return body
 
 
@@ -465,6 +483,13 @@ def _parse(payload: object) -> Settings:
             wizard_complete = raw_wizard
         else:
             logger.warning("Config key 'wizard_complete' has wrong type — ignored")
+    language: str | None = None
+    if "language" in payload:
+        raw_language = payload.get("language")
+        if isinstance(raw_language, str) and raw_language in LANGUAGES:
+            language = raw_language
+        elif raw_language is not None:
+            logger.warning("Config key 'language' has wrong type — ignored")
     if "rekordbox" not in payload:
         rekordbox = default_rekordbox()
     else:
@@ -476,6 +501,7 @@ def _parse(payload: object) -> Settings:
         wizard_complete=wizard_complete,
         rekordbox=rekordbox,
         track_list_width=track_list_width,
+        language=language,
     )
 
 def _parse_bool(value: object, dotted: str, default: bool) -> bool:
@@ -670,6 +696,7 @@ def set_telemetry_consent(value: bool) -> Settings:
             wizard_complete=current.wizard_complete is True,
             rekordbox=current.rekordbox,
             track_list_width=current.track_list_width,
+            language=current.language,
         )
         save_settings(updated)
         return updated
@@ -710,6 +737,7 @@ def save_window_geometry(geometry: WindowGeometry) -> Settings:
             wizard_complete=current.wizard_complete is True,
             rekordbox=current.rekordbox,
             track_list_width=current.track_list_width,
+            language=current.language,
         )
         save_settings(updated)
         return updated
@@ -746,6 +774,7 @@ def set_wizard_complete(value: bool) -> Settings:
                 wizard_complete=False,
                 rekordbox=current.rekordbox,
                 track_list_width=current.track_list_width,
+                language=current.language,
             )
         updated = Settings(
             install_id=current.install_id,
@@ -754,6 +783,7 @@ def set_wizard_complete(value: bool) -> Settings:
             wizard_complete=value,
             rekordbox=current.rekordbox,
             track_list_width=current.track_list_width,
+            language=current.language,
         )
         save_settings(updated)
         return updated
@@ -812,6 +842,7 @@ def update_rekordbox(
                 key_notation=box.key_notation if key_notation is None else key_notation,
             ),
             track_list_width=current.track_list_width,
+            language=current.language,
         )
         save_settings(updated)
         return updated
@@ -850,6 +881,45 @@ def set_track_list_width(value: int | None) -> Settings:
             wizard_complete=current.wizard_complete is True,
             rekordbox=current.rekordbox,
             track_list_width=value,
+            language=current.language,
+        )
+        save_settings(updated)
+        return updated
+
+
+def set_language(value: str | None) -> Settings:
+    """Store the page language, or clear it so the page follows the OS.
+
+    Args:
+        value: A code from ``LANGUAGES``, or None.
+
+    Returns:
+        The settings that were written.
+
+    Raises:
+        ValueError: If ``value`` is not None and not in ``LANGUAGES``.
+        OSError: If the settings file cannot be written.
+
+    Every other field is kept. A partial sharing pair is dropped, as in
+    :func:`set_track_list_width`.
+    """
+    if value is not None and (not isinstance(value, str) or value not in LANGUAGES):
+        raise ValueError("language is not a known page language.")
+    with _settings_lock:
+        current = load_settings()
+        install_id = current.install_id
+        consent = current.telemetry_consent
+        if not isinstance(consent, bool) or install_id is None:
+            install_id = None
+            consent = None
+        updated = Settings(
+            install_id=install_id,
+            telemetry_consent=consent,
+            window=current.window,
+            wizard_complete=current.wizard_complete is True,
+            rekordbox=current.rekordbox,
+            track_list_width=current.track_list_width,
+            language=value,
         )
         save_settings(updated)
         return updated

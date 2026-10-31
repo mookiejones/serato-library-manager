@@ -9,6 +9,7 @@ import { failureOf, postJSON, readJSON } from "./api";
 import type { FrameDiff, PlanName, RestorePlan, SnapshotList } from "./api-types";
 import { el } from "./dom";
 import { state } from "./state";
+import { codedText, formatList, messageParams, serverMessage, t } from "./i18n";
 import { tip } from "./tips";
 
 let reloadLibrary: () => Promise<void> = async () => {};
@@ -33,10 +34,12 @@ export async function loadSnapshots() {
   renderSnapshots();
   const response = await fetch("/api/snapshots");
   const payload = await readJSON<SnapshotList>(response);
-  if (!response.ok) throw new Error(payload.error || "The snapshots could not be read.");
+  if (!response.ok) throw new Error(serverMessage(payload, t("snapshots.unreadable")));
   state.snapshots = payload.snapshots || [];
   state.snapshotUndo = payload.pending_undo || null;
   state.writeBlock = payload.write_block || "";
+  state.writeBlockCode = payload.write_block_code || "";
+  state.writeBlockParams = messageParams(payload.write_block_params) ?? null;
   state.seratoRunning = Boolean(payload.serato_running);
   state.snapshotLoading = false;
   renderSnapshots();
@@ -50,7 +53,7 @@ export async function loadSnapshots() {
  */
 export function failSnapshots(error: unknown) {
   state.snapshotLoading = false;
-  state.snapshotError = failureOf(error).message || "The snapshots could not be read.";
+  state.snapshotError = failureOf(error).message || t("snapshots.unreadable");
   renderSnapshots();
 }
 
@@ -62,7 +65,7 @@ export function failSnapshots(error: unknown) {
  *
  * @returns {void}
  */
-function renderSnapshots() {
+export function renderSnapshots() {
   const status = el("snapshots-status");
   const block = el("snapshots-block");
   const undo = el("snapshots-undo");
@@ -70,22 +73,22 @@ function renderSnapshots() {
   list.setAttribute("aria-busy", String(state.snapshotLoading));
   if (state.writeBlock) {
     block.hidden = false;
-    block.textContent = state.writeBlock;
+    block.textContent = codedText(state.writeBlock, state.writeBlockCode, state.writeBlockParams);
   } else {
     block.hidden = true;
     block.textContent = "";
   }
   if (state.snapshotUndo && state.snapshotUndo.restore_id) {
     undo.hidden = false;
-    const source = state.snapshotUndo.source === "Lexicon" ? "Lexicon" : "Something outside this app";
-    el("snapshots-undo-text").textContent =
-      `${source} changed the Serato folder. A snapshot was saved after that change. Undo puts back the previous snapshot.`;
+    el("snapshots-undo-text").textContent = state.snapshotUndo.source === "Lexicon"
+      ? t("snapshots.outsideChangeLexicon")
+      : t("snapshots.outsideChange");
   } else {
     undo.hidden = true;
   }
   list.replaceChildren();
   if (state.snapshotLoading) {
-    status.textContent = "Reading snapshots";
+    status.textContent = t("snapshots.reading");
     return;
   }
   if (state.snapshotError) {
@@ -93,15 +96,15 @@ function renderSnapshots() {
     const retry = document.createElement("button");
     tip(retry, "snapshotsRetry");
     retry.type = "button";
-    retry.textContent = "Try again";
+    retry.textContent = t("common.tryAgain");
     retry.addEventListener("click", () => loadSnapshots().catch((error) => failSnapshots(error)));
     list.append(retry);
     return;
   }
-  status.textContent = state.snapshotMessage;
+  status.textContent = state.snapshotMessage ? t(state.snapshotMessage) : "";
   if (!state.snapshots.length) {
     const empty = document.createElement("p");
-    empty.textContent = "No snapshots yet. Take a snapshot to keep a point you can restore. Snapshots are kept, and this page does not expire them.";
+    empty.textContent = t("snapshots.empty");
     list.append(empty);
     return;
   }
@@ -110,19 +113,19 @@ function renderSnapshots() {
     card.className = "snapshot-card";
     card.setAttribute("role", "listitem");
     const title = document.createElement("p");
-    title.textContent = `${item.created || "Unknown time"} · ${item.trigger || "snapshot"}`;
+    title.textContent = `${item.created || t("snapshots.unknownTime")} · ${item.trigger || t("snapshots.trigger")}`;
     const detail = document.createElement("p");
     const version = item.serato_version && item.serato_version !== "unknown"
-      ? `Serato ${item.serato_version} (build ${item.serato_build})`
-      : "Serato version unknown";
+      ? t("snapshots.seratoVersion", { version: item.serato_version, build: String(item.serato_build ?? "") })
+      : t("snapshots.seratoUnknown");
     const drives = (item.unavailable_drives || []).length
-      ? ` Unavailable: ${(item.unavailable_drives || []).join(", ")}.`
+      ? ` ${t("snapshots.unavailableDrives", { drives: formatList(item.unavailable_drives || []) })}`
       : "";
     detail.textContent = `${version}. ${item.reason || ""}${drives}`;
     const restore = document.createElement("button");
     tip(restore, "snapshotRestore");
     restore.type = "button";
-    restore.textContent = "Review restore";
+    restore.textContent = t("snapshots.reviewRestore");
     restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));
     card.append(title, detail, restore);
     list.append(card);
@@ -144,7 +147,7 @@ export async function openSnapshotPlan(snapshotId: string) {
   const block = el("snapshot-block");
   const confirm = el("snapshot-confirm");
   planBox.replaceChildren();
-  block.textContent = "Reading what would change";
+  block.textContent = t("snapshots.readingPlan");
   confirm.disabled = true;
   setSnapshotDialogStatus("");
   el("snapshot-dialog").showModal();
@@ -159,32 +162,48 @@ export async function openSnapshotPlan(snapshotId: string) {
  *   plan.tracks, plan.cues, plan.grids, plan.dry_run, and plan.restore_blocked.
  * @returns {void}
  */
+let lastPlan: RestorePlan | null = null;
+
+/**
+ * Paint the open restore dialog again in the active language.
+ *
+ * @returns {void}
+ */
+export function repaintSnapshotPlan() {
+  if (lastPlan && el("snapshot-dialog").open) paintSnapshotPlan(lastPlan);
+}
+
 function paintSnapshotPlan(plan: RestorePlan) {
+  lastPlan = plan;
   const planBox = el("snapshot-plan");
   const block = el("snapshot-block");
   const confirm = el("snapshot-confirm");
   planBox.replaceChildren();
   const crates = plan.crates || {};
   const tracks = plan.tracks || {};
-  appendPlanLine(planBox, "Crates added", crates.added);
-  appendPlanLine(planBox, "Crates removed", crates.removed);
-  appendPlanLine(planBox, "Crates changed", crates.changed);
-  appendPlanLine(planBox, "Crates on an unavailable drive", crates.unavailable);
-  appendPlanLine(planBox, "Tracks added", tracks.added);
-  appendPlanLine(planBox, "Tracks removed", tracks.removed);
-  appendPlanLine(planBox, "Tracks on an unavailable drive", tracks.unavailable);
-  appendFrameDiffs(planBox, "Cue changes", plan.cues);
-  appendFrameDiffs(planBox, "Grid changes", plan.grids);
+  appendPlanLine(planBox, t("plan.cratesAdded"), crates.added);
+  appendPlanLine(planBox, t("plan.cratesRemoved"), crates.removed);
+  appendPlanLine(planBox, t("plan.cratesChanged"), crates.changed);
+  appendPlanLine(planBox, t("plan.cratesUnavailable"), crates.unavailable);
+  appendPlanLine(planBox, t("plan.tracksAdded"), tracks.added);
+  appendPlanLine(planBox, t("plan.tracksRemoved"), tracks.removed);
+  appendPlanLine(planBox, t("plan.tracksUnavailable"), tracks.unavailable);
+  appendFrameDiffs(planBox, t("plan.cueChanges"), plan.cues);
+  appendFrameDiffs(planBox, t("plan.gridChanges"), plan.grids);
   const deleted = plan.deleted || {};
-  appendPlanLine(planBox, "Deleted crates", deleted.crates);
-  appendPlanLine(planBox, "Deleted tracks", deleted.tracks);
-  appendPlanLine(planBox, "Deleted cues", deleted.cues);
-  appendPlanLine(planBox, "Deleted grids", deleted.grids);
+  appendPlanLine(planBox, t("plan.deletedCrates"), deleted.crates);
+  appendPlanLine(planBox, t("plan.deletedTracks"), deleted.tracks);
+  appendPlanLine(planBox, t("plan.deletedCues"), deleted.cues);
+  appendPlanLine(planBox, t("plan.deletedGrids"), deleted.grids);
   if (plan.restore_blocked) {
-    block.textContent = plan.restore_blocked;
+    block.textContent = codedText(
+      plan.restore_blocked,
+      plan.restore_blocked_code,
+      messageParams(plan.restore_blocked_params),
+    );
     confirm.disabled = true;
   } else {
-    block.textContent = plan.dry_run ? "Nothing has been changed." : "";
+    block.textContent = plan.dry_run ? t("plan.nothingChanged") : "";
     confirm.disabled = false;
   }
 }
@@ -201,11 +220,12 @@ function appendPlanLine(parent: HTMLElement, label: string, rows: PlanName[] | u
   const line = document.createElement("p");
   const items = rows || [];
   if (!items.length) {
-    line.textContent = `${label}: none`;
+    line.textContent = t("plan.none", { label });
   } else {
-    const names = items.slice(0, 8).map((item) => item.name || item.path || item.drive_label || "item");
-    const extra = items.length > names.length ? `, and ${items.length - names.length} more` : "";
-    line.textContent = `${label}: ${items.length}. ${names.join(", ")}${extra}`;
+    const names = items.slice(0, 8).map((item) => item.name || item.path || item.drive_label || t("plan.item"));
+    const extra = items.length > names.length ? t("plan.andMore", { count: items.length - names.length }) : "";
+    const listed = `${names.join(", ")}${extra}`;
+    line.textContent = t("plan.listed", { label, count: items.length, names: listed });
   }
   parent.append(line);
 }
@@ -222,11 +242,11 @@ function appendFrameDiffs(parent: HTMLElement, label: string, rows: FrameDiff[] 
   const items = rows || [];
   const line = document.createElement("p");
   if (!items.length) {
-    line.textContent = `${label}: none`;
+    line.textContent = t("plan.none", { label });
     parent.append(line);
     return;
   }
-  line.textContent = `${label}: ${items.length} file${items.length === 1 ? "" : "s"}`;
+  line.textContent = t("plan.files", { label, count: items.length });
   parent.append(line);
   for (const item of items.slice(0, 12)) {
     const row = document.createElement("p");
@@ -264,14 +284,14 @@ export function setSnapshotDialogStatus(message: string) {
 export async function takeSnapshot() {
   const button = el("snapshots-take");
   button.disabled = true;
-  button.textContent = "Saving snapshot…";
+  button.textContent = t("snapshots.saving");
   try {
     await postJSON("/api/snapshots", { action: "create" });
-    state.snapshotMessage = "Snapshot saved.";
+    state.snapshotMessage = "snapshots.saved";
     await loadSnapshots();
   } finally {
     button.disabled = false;
-    button.textContent = "Take a snapshot";
+    button.textContent = t("snapshots.take");
   }
 }
 
@@ -283,7 +303,7 @@ export async function takeSnapshot() {
 export async function confirmSnapshotRestore() {
   const confirm = el("snapshot-confirm");
   confirm.disabled = true;
-  confirm.textContent = "Restoring…";
+  confirm.textContent = t("snapshots.restoring");
   setSnapshotDialogStatus("");
   try {
     const undoing = state.snapshotUndo && state.snapshotUndo.restore_id === state.snapshotPlanId;
@@ -292,14 +312,14 @@ export async function confirmSnapshotRestore() {
       : { action: "restore", id: state.snapshotPlanId, confirm: true };
     await postJSON("/api/snapshots", body);
     el("snapshot-dialog").close();
-    state.snapshotMessage = "Restore finished. The previous library was saved first, so this can be undone from the list.";
+    state.snapshotMessage = "snapshots.restored";
     await loadSnapshots();
     await reloadLibrary();
   } catch (error) {
     setSnapshotDialogStatus(failureOf(error).message);
     confirm.disabled = false;
   } finally {
-    confirm.textContent = "Restore";
+    confirm.textContent = t("snapshots.restore");
   }
 }
 

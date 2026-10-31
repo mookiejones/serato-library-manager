@@ -8,7 +8,7 @@
  * picture, so a screen reader still has the text straight away.
  */
 
-import { TIP_SHORTCUTS, tips, type TipKey } from "./tips";
+import { TIP_SHORTCUTS, tipText, type TipKey } from "./tips";
 
 /** Milliseconds before a tooltip appears, so a passing pointer shows none. */
 export const SHOW_DELAY_MS = 500;
@@ -46,7 +46,7 @@ function fill(node: HTMLElement, control: HTMLElement): void {
   const keys = [shortcut ?? []].flat().map(keysFor).filter(Boolean).join(" or ");
   const lines: HTMLSpanElement[] = [];
   if (control.dataset.tipDetail) lines.push(line("tooltip-detail", control.dataset.tipDetail));
-  lines.push(line("tooltip-text", tips[key]));
+  lines.push(line("tooltip-text", tipText(key)));
   if (keys) lines.push(line("tooltip-keys", keys));
   node.replaceChildren(...lines);
 }

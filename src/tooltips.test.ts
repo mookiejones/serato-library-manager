@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import en from "../locales/en.json";
+import es from "../locales/es.json";
+import { setLocale } from "./i18n";
 import { SHORTCUTS, shortcutKeys } from "./shortcuts";
 import { installPage } from "./test-page";
-import { TIP_SHORTCUTS, tip, tips, type TipKey } from "./tips";
+import { TIP_SHORTCUTS, tip, tipText, type TipKey } from "./tips";
 import { controlsMissingTip, unknownTips, untippedControls } from "./tooltip-audit";
 import { SHOW_DELAY_MS, wireTooltips } from "./tooltips";
 
@@ -109,10 +112,17 @@ describe("controlsMissingTip", () => {
 
 describe("tip text", () => {
   it("is plain sentences", () => {
-    for (const [key, text] of Object.entries(tips)) {
+    for (const [key, text] of Object.entries(en).filter(([name]) => name.startsWith("tip."))) {
       expect(text, key).toMatch(/^[A-Z].*\.$/);
-      expect(text.length, key).toBeLessThanOrEqual(90);
+      expect((text as string).length, key).toBeLessThanOrEqual(90);
     }
+  });
+
+  it("follows the active language", () => {
+    setLocale("es");
+    expect(tipText("reload")).toBe(es["tip.reload"]);
+    setLocale("en");
+    expect(tipText("reload")).toBe(en["tip.reload"]);
   });
 
   it("names only shortcuts in the shortcut table", () => {
@@ -171,7 +181,7 @@ describe("showing a tooltip", () => {
     expect(tooltip().hidden).toBe(true);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
     expect(tooltip().hidden).toBe(false);
-    expect(tooltip().textContent).toBe(tips.reload);
+    expect(tooltip().textContent).toBe(tipText("reload"));
     expect(tooltip().getAttribute("role")).toBe("tooltip");
   });
 
@@ -187,7 +197,7 @@ describe("showing a tooltip", () => {
     const control = button("search");
     hover(control);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
-    expect(tooltip().textContent).toBe(`${tips.search}Ctrl/Cmd+F or /`);
+    expect(tooltip().textContent).toBe(`${tipText("search")}Ctrl/Cmd+F or /`);
   });
 
   it("leaves out the keys when the table has no such shortcut", () => {
@@ -195,14 +205,14 @@ describe("showing a tooltip", () => {
     const control = button("search");
     hover(control);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
-    expect(tooltip().textContent).toBe(tips.search);
+    expect(tooltip().textContent).toBe(tipText("search"));
   });
 
   it("joins two shortcuts for one control", () => {
     const control = button("playerSeek");
     hover(control);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
-    expect(tooltip().textContent).toBe(`${tips.playerSeek}Left arrow or Right arrow`);
+    expect(tooltip().textContent).toBe(`${tipText("playerSeek")}Left arrow or Right arrow`);
   });
 
   it("puts the detail ahead of the tip", () => {
@@ -211,7 +221,7 @@ describe("showing a tooltip", () => {
     document.body.append(control);
     hover(control);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
-    expect(tooltip().textContent).toBe(`/Music/Sets${tips.filesSelect}`);
+    expect(tooltip().textContent).toBe(`/Music/Sets${tipText("filesSelect")}`);
   });
 
   it("shows on keyboard focus and describes the control at once", () => {
@@ -219,7 +229,7 @@ describe("showing a tooltip", () => {
     control.matches = (selector: string) => selector === ":focus-visible";
     control.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     expect(control.getAttribute("aria-describedby")).toBe("control-tooltip");
-    expect(tooltip().textContent).toBe(tips.reload);
+    expect(tooltip().textContent).toBe(tipText("reload"));
     expect(tooltip().hidden).toBe(true);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
     expect(tooltip().hidden).toBe(false);
@@ -281,7 +291,7 @@ describe("showing a tooltip", () => {
     document.body.append(label);
     hover(text);
     vi.advanceTimersByTime(SHOW_DELAY_MS);
-    expect(tooltip().textContent).toBe(tips.rekordboxMemory);
+    expect(tooltip().textContent).toBe(tipText("rekordboxMemory"));
   });
 
   it("hides when the pointer reaches something without a tip", () => {

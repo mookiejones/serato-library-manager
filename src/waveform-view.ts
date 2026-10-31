@@ -49,6 +49,8 @@ export interface WaveformController {
   destroy(): void;
   showComputed(parsed: ParsedWaveform): void;
   showUnavailable(): void;
+  /** Refresh titles and notes after the language changes. */
+  relabel(): void;
   pixelsPerSecond(): number;
 }
 
@@ -250,6 +252,15 @@ class WaveformView implements WaveformController {
     this.trackId = this.trackId ?? 1;
     this.host.hidden = false;
     this.applyComputed(parsed);
+  }
+
+  /** Refresh titles and notes in the active language. Playback is not touched. */
+  relabel(): void {
+    this.reading.textContent = playerStrings.waveformReading;
+    if (!this.note.hidden) this.note.textContent = playerStrings.waveformUnavailable;
+    this.overviewHit.setAttribute("aria-label", playerStrings.overview);
+    this.zoomIn.setAttribute("aria-label", playerStrings.zoomIn);
+    this.zoomOut.setAttribute("aria-label", playerStrings.zoomOut);
   }
 
   /**

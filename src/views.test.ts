@@ -134,9 +134,14 @@ describe("library views", () => {
     expect(session?.getAttribute("aria-selected")).toBe("true");
     const columns = [...document.querySelectorAll<HTMLButtonElement>(".columns button")].map((button) => button.textContent);
     expect(columns).toEqual(["Title", "Artist", "Deck", "Played", "Time"]);
+    expect(document.querySelector(".columns")?.classList.contains("for-history")).toBe(true);
+    expect(document.getElementById("list")?.classList.contains("for-history")).toBe(true);
     expect(titles()).toEqual(["Alpha"]);
     expect(document.querySelector("#list .row")?.textContent).toContain("Yes");
     expect(document.querySelector("#count")?.textContent).toBe("1 play");
+    state.mode = "crates";
+    renderList();
+    expect(document.querySelector(".columns")?.classList.contains("for-history")).toBe(false);
   });
 
   it("shows missing tracks and the missing note", () => {
