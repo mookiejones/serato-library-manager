@@ -25,7 +25,6 @@ export const playerStrings = {
   get zoomIn(): string { return t("player.zoomIn"); },
   get zoomOut(): string { return t("player.zoomOut"); },
   get overview(): string { return t("player.overview"); },
-  get overviewSeek(): string { return t("player.overviewSeek"); },
   get waveformReading(): string { return t("player.waveformReading"); },
   get waveformUnavailable(): string { return t("player.waveformUnavailable"); },
 };

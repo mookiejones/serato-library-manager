@@ -180,7 +180,7 @@ class LanguageSettingTests(unittest.TestCase):
         files = tuple(sorted(path.stem for path in LOCALES.glob("*.json")))
         self.assertEqual(files, tuple(sorted(app_config.LANGUAGES)))
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-        picker = re.search(r'<select id="language-select">(.*?)</select>', html, re.S)
+        picker = re.search(r'<select [^>]*id="language-select"[^>]*>(.*?)</select>', html, re.S)
         assert picker is not None
         values = tuple(re.findall(r'<option value="([^"]*)"', picker.group(1)))
         self.assertEqual(values, ("", *app_config.LANGUAGES))

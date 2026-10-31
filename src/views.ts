@@ -32,6 +32,7 @@ import { play } from "./player";
 import { playerStrings } from "./player-strings";
 import { paintRows } from "./virtual-scroll";
 import { codedText, formatNumber, messageParams, serverMessage, t, type MessageKey } from "./i18n";
+import { tip, type TipKey } from "./tips";
 
 /**
  * Related-track request counter.
@@ -319,6 +320,7 @@ function crateRow(crate: {
   if (crate.childCount) {
     const open = state.crateQuery ? true : state.expanded.has(crate.id);
     const twist = document.createElement("button");
+    tip(twist, open ? "crateCollapse" : "crateExpand");
     twist.type = "button";
     twist.className = "twist";
     twist.tabIndex = -1;
@@ -334,6 +336,7 @@ function crateRow(crate: {
   }
 
   const button = document.createElement("button");
+  tip(button, "crateRow");
   button.type = "button";
   button.className = "crate";
   button.dataset.id = String(crate.id);
@@ -473,10 +476,12 @@ function renderRules() {
   const editor = document.createElement("div");
   editor.className = "rule-edit";
   const area = document.createElement("textarea");
+  tip(area, "smartRules");
   area.value = JSON.stringify(crate.rules, null, 2);
   area.disabled = !state.writable;
   area.setAttribute("aria-label", t("rules.label"));
   const save = document.createElement("button");
+  tip(save, "smartRulesSave");
   save.type = "button";
   save.className = "text-button";
   save.textContent = t("rules.save");
@@ -780,6 +785,7 @@ export function selectEntry(id: number) {
   }
   if (entry.asset_id) {
     const open = document.createElement("button");
+    tip(open, "openInLibrary");
     open.type = "button";
     open.className = "text-button";
     open.textContent = t("history.openInLibrary");
@@ -802,13 +808,14 @@ export function selectEntry(id: number) {
  * @param {boolean} [wide=false] True when the control spans the pane.
  * @returns {HTMLLabelElement} The labeled control.
  */
-function fieldInput(name: string, label: string, value: string | number | null | undefined, wide: boolean = false) {
+function fieldInput(name: string, label: string, value: string | number | null | undefined, tipKey: TipKey, wide: boolean = false) {
   const wrap = document.createElement("label");
   if (wide) wrap.className = "wide";
   wrap.append(document.createTextNode(label));
   const input = name === "comments"
     ? document.createElement("textarea")
     : document.createElement("input");
+  tip(input, tipKey);
   input.name = name;
   input.value = String(value ?? "");
   if (name === "bpm") input.inputMode = "decimal";
@@ -850,6 +857,7 @@ function renderDetail(track: Track) {
   }
 
   const playButton = document.createElement("button");
+  tip(playButton, "rowPlay");
   playButton.type = "button";
   playButton.className = "detail-play";
   const playTitle = track.title || track.name || playerStrings.untitled;
@@ -894,28 +902,29 @@ function renderDetail(track: Track) {
   const form = document.createElement("form");
   form.className = "editor";
   const edit = track.edit || {};
-  const editorFields: Array<[string, MessageKey, boolean]> = [
-    ["name", "column.title", true],
-    ["artist", "column.artist", false],
-    ["album", "field.album", false],
-    ["genre", "field.genre", false],
-    ["year", "field.year", false],
-    ["composer", "field.composer", false],
-    ["remixer", "field.remixer", false],
-    ["label", "field.label", false],
-    ["grouping", "field.grouping", false],
-    ["key", "column.key", false],
-    ["bpm", "column.bpm", false],
-    ["emoji", "field.emoji", false],
-    ["comments", "field.comments", true],
+  const editorFields: Array<[string, MessageKey, TipKey, boolean]> = [
+    ["name", "column.title", "trackTitle", true],
+    ["artist", "column.artist", "trackArtist", false],
+    ["album", "field.album", "trackAlbum", false],
+    ["genre", "field.genre", "trackGenre", false],
+    ["year", "field.year", "trackYear", false],
+    ["composer", "field.composer", "trackComposer", false],
+    ["remixer", "field.remixer", "trackRemixer", false],
+    ["label", "field.label", "trackLabel", false],
+    ["grouping", "field.grouping", "trackGrouping", false],
+    ["key", "column.key", "trackKey", false],
+    ["bpm", "column.bpm", "trackBpm", false],
+    ["emoji", "field.emoji", "trackEmoji", false],
+    ["comments", "field.comments", "trackComments", true],
   ];
-  for (const [name, label, wide] of editorFields) {
-    form.append(fieldInput(name, t(label), String(edit[name] ?? ""), wide));
+  for (const [name, label, tipKey, wide] of editorFields) {
+    form.append(fieldInput(name, t(label), String(edit[name] ?? ""), tipKey, wide));
   }
 
   const colorLabel = document.createElement("label");
   colorLabel.append(document.createTextNode(t("field.color")));
   const colorSelect = document.createElement("select");
+  tip(colorSelect, "trackColor");
   colorSelect.name = "color";
   const currentColor = Number(edit.color ?? 0xffffff);
   const palette: Array<[number, string]> = COLORS.map(([value, key]) => [value, t(key)]);
@@ -933,6 +942,7 @@ function renderDetail(track: Track) {
   const ratingLabel = document.createElement("label");
   ratingLabel.append(document.createTextNode(t("field.rating")));
   const ratingSelect = document.createElement("select");
+  tip(ratingSelect, "trackRating");
   ratingSelect.name = "rating";
   const ratings: Array<[string, string]> = [
     ["", t("rating.none")],
@@ -954,6 +964,7 @@ function renderDetail(track: Track) {
   const lock = document.createElement("label");
   lock.className = "check";
   const lockInput = document.createElement("input");
+  tip(lockInput, "trackGridLock");
   lockInput.type = "checkbox";
   lockInput.name = "is_beatgrid_locked";
   lockInput.checked = Boolean(edit.is_beatgrid_locked);
@@ -961,6 +972,7 @@ function renderDetail(track: Track) {
   form.append(lock);
 
   const save = document.createElement("button");
+  tip(save, "trackSave");
   save.type = "submit";
   save.className = "text-button wide";
   save.textContent = t("detail.saveTrack");
@@ -975,22 +987,26 @@ function renderDetail(track: Track) {
   const actions = document.createElement("div");
   actions.className = "actions";
   const reveal = document.createElement("button");
+  tip(reveal, "trackReveal");
   reveal.type = "button";
   const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
   reveal.textContent = t("detail.reveal", { manager });
   reveal.disabled = !track.file_on_disk;
   reveal.addEventListener("click", () => revealTrack(track.id));
   const prepare = document.createElement("button");
+  tip(prepare, track.in_prepare ? "prepareRemove" : "prepareSend");
   prepare.type = "button";
   prepare.textContent = track.in_prepare ? t("detail.removePrepare") : t("detail.sendPrepare");
   prepare.disabled = !writable;
   prepare.addEventListener("click", () => prepareTrack(track.id, !track.in_prepare));
   const relocate = document.createElement("button");
+  tip(relocate, "trackRelocate");
   relocate.type = "button";
   relocate.textContent = t("detail.relocate");
   relocate.disabled = !writable;
   relocate.addEventListener("click", () => relocateTrack(track));
   const remove = document.createElement("button");
+  tip(remove, "trackRemove");
   remove.type = "button";
   remove.textContent = t("detail.removeFromLibrary");
   remove.disabled = !writable;
@@ -998,6 +1014,7 @@ function renderDetail(track: Track) {
   actions.append(reveal, prepare, relocate, remove);
   if (state.mode === "duplicates" && selectedDuplicateGroup()) {
     const merge = document.createElement("button");
+    tip(merge, "mergeCopies");
     merge.type = "button";
     merge.textContent = t("merge.title");
     merge.disabled = !writable;
@@ -1022,6 +1039,7 @@ function renderDetail(track: Track) {
     const open = group.name !== "Search copies";
     if (!open) {
       const toggle = document.createElement("button");
+      tip(toggle, "searchCopies");
       toggle.type = "button";
       toggle.className = "text-button";
       toggle.textContent = t("detail.searchCopies", { count: group.fields.length });
@@ -1193,6 +1211,7 @@ function copySection(copies: CopyRow[]) {
     const row = document.createElement("div");
     row.className = "copy-row";
     const button = document.createElement("button");
+    tip(button, "duplicateCopy");
     button.type = "button";
     button.className = "text-button";
     button.textContent = copy.file || t("track.numbered", { id: String(copy.id) });
@@ -1309,6 +1328,7 @@ function renderRelated(track: Track, section: HTMLElement, writable: boolean, pa
   if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
 
   const crate = document.createElement("button");
+  tip(crate, "relatedCrate");
   crate.type = "button";
   crate.className = "text-button";
   crate.dataset.relatedCrate = "true";
@@ -1346,6 +1366,7 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
     const label = other.title || t("track.untitled");
     if (other.asset_id != null && other.in_library) {
       const open = document.createElement("button");
+      tip(open, "relatedOpen");
       open.type = "button";
       open.className = "text-button";
       open.textContent = label;
@@ -1374,6 +1395,7 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
       main.append(note);
     }
     const remove = document.createElement("button");
+    tip(remove, "relatedRemove");
     remove.type = "button";
     remove.className = "text-button";
     remove.textContent = t("common.remove");
@@ -1402,6 +1424,7 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
   const label = document.createElement("label");
   label.append(document.createTextNode(t("related.find")));
   const input = document.createElement("input");
+  tip(input, "relatedSearch");
   input.type = "search";
   input.autocomplete = "off";
   input.placeholder = t("related.findPlaceholder");
@@ -1447,6 +1470,7 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
     for (const hit of hits) {
       const item = document.createElement("li");
       const choose = document.createElement("button");
+      tip(choose, "relatedChoose");
       choose.type = "button";
       choose.className = "text-button";
       choose.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : (hit.name || t("track.untitled"));
@@ -1482,6 +1506,7 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   const noteLabel = document.createElement("label");
   noteLabel.append(document.createTextNode(t("related.note")));
   const note = document.createElement("input");
+  tip(note, "relatedNote");
   note.type = "text";
   note.maxLength = 500;
   note.placeholder = t("related.notePlaceholder");
@@ -1489,6 +1514,7 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   const ratingLabel = document.createElement("label");
   ratingLabel.append(document.createTextNode(t("related.linkRating")));
   const rating = document.createElement("select");
+  tip(rating, "relatedRating");
   for (const [value, text] of [["", t("rating.none")], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]] as Array<[string, string]>) {
     const option = document.createElement("option");
     option.value = value;
@@ -1499,10 +1525,12 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   const mutualLabel = document.createElement("label");
   mutualLabel.className = "check";
   const mutual = document.createElement("input");
+  tip(mutual, "relatedMutual");
   mutual.type = "checkbox";
   mutual.checked = true;
   mutualLabel.append(mutual, document.createTextNode(t("related.twoWayLink")));
   const save = document.createElement("button");
+  tip(save, "relatedSave");
   save.type = "button";
   save.className = "text-button";
   save.textContent = t("related.saveLink");
@@ -1546,6 +1574,7 @@ function relatedSuggestList(track: Track, section: HTMLElement, suggested: Relat
     reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
     main.append(name, reasons);
     const save = document.createElement("button");
+    tip(save, "relatedSuggestionSave");
     save.type = "button";
     save.className = "text-button";
     save.textContent = t("common.save");
@@ -1673,6 +1702,7 @@ function membershipSection(track: Track, writable: boolean) {
     const label = document.createElement("label");
     label.className = "member";
     const input = document.createElement("input");
+    tip(input, "crateMember");
     input.type = "checkbox";
     input.checked = chosen.has(crate.id);
     input.disabled = !writable;
@@ -2133,6 +2163,7 @@ export function renderSessions() {
   el("session-list").replaceChildren();
   for (const session of state.historySessions) {
     const button = document.createElement("button");
+    tip(button, "historySession");
     button.type = "button";
     button.className = "crate";
     button.setAttribute("role", "option");
@@ -2570,6 +2601,7 @@ function renderBreadcrumb(): void {
     const last = index === crumbs.length - 1;
     if (!last && crumb.path) {
       const button = document.createElement("button");
+      tip(button, "filesCrumb");
       button.type = "button";
       button.className = "files-crumb";
       button.textContent = crumb.name;
@@ -2760,6 +2792,7 @@ function rootsEmpty(): HTMLDivElement {
   const copy = document.createElement("p");
   copy.textContent = t("files.noRootsBody");
   const button = document.createElement("button");
+  tip(button, "filesRunSetup");
   button.type = "button";
   button.id = "files-run-setup";
   button.className = "files-primary";
@@ -2870,6 +2903,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
   if (openKind) {
     const button = document.createElement("button");
+    tip(button, entry.missing ? "filesDriveMissing" : "filesOpen", entry.detail ? `${entry.name} ${entry.detail}` : entry.name);
     button.type = "button";
     button.className = "files-open";
     button.dataset.filesIndex = String(index);
@@ -2898,7 +2932,6 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
         button.append(detail);
       }
     }
-    button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
     if (entry.missing) {
       button.setAttribute("aria-disabled", "true");
       button.setAttribute("aria-label", t("files.driveMissingLabel", { name: entry.name }));
@@ -2921,6 +2954,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   }
   if (entry.kind !== "file") {
     const label = document.createElement("button");
+    tip(label, "filesShortcut", entry.name);
     label.type = "button";
     label.className = "files-kind";
     label.dataset.filesIndex = String(index);
@@ -2934,6 +2968,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const label = document.createElement("label");
   label.className = "files-file";
   const box = document.createElement("input");
+  tip(box, "filesSelect", entry.path || entry.name);
   box.type = "checkbox";
   box.dataset.filesIndex = String(index);
   box.id = `files-item-${index}`;
@@ -2949,13 +2984,11 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const name = document.createElement("span");
   name.className = "files-name";
   name.textContent = entry.name;
-  name.title = entry.path || entry.name;
   label.append(box, name);
   if (entry.detail) {
     const detail = document.createElement("span");
     detail.className = "files-match-detail";
     detail.textContent = entry.detail;
-    detail.title = entry.detail;
     label.append(detail);
   }
   if (entry.in_library) {

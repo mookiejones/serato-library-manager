@@ -24,7 +24,8 @@ import {
   setSnapshotDialogStatus,
   takeSnapshot,
 } from "./restore";
-import { registerPlayerControls, wireShortcuts } from "./shortcuts";
+import { registerPlayerControls, shortcutKeys, wireShortcuts } from "./shortcuts";
+import { wireTooltips } from "./tooltips";
 import { state } from "./state";
 import { loadVersion, wireVersion } from "./version";
 import { loadLibrary, showFailure, wireLibrary } from "./views";
@@ -70,6 +71,7 @@ registerPlayerControls(playerControls);
 wireLibrary();
 wireVirtualScroll();
 wireShortcuts();
+wireTooltips(shortcutKeys);
 wireDialogs();
 wireSnapshots();
 wireLayout();

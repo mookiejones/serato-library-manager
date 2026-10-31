@@ -246,7 +246,6 @@
       other: "{count} lines did not match a library track."
     },
     "layout.resize": "Resize the track list",
-    "layout.resizeHint": "Drag to resize. Double-click to reset.",
     "layout.widthNotSaved": "Couldn't save the pane width. It goes back to the last saved width next time.",
     "library.loading": "Loading the library",
     "library.readFailed": "Could not read the library ({status})",
@@ -347,7 +346,6 @@
     "player.notInLibrary": "Not in the library or file missing",
     "player.nothingPlaying": "Nothing playing",
     "player.overview": "Track overview",
-    "player.overviewSeek": "Click or drag to seek",
     "player.pause": "Pause",
     "player.play": "Play",
     "player.previous": "Previous",
@@ -381,7 +379,6 @@
     },
     "rekordbox.dialogTitle": "Download rekordbox.xml?",
     "rekordbox.download": "Download",
-    "rekordbox.downloadTitle": "Download rekordbox.xml",
     "rekordbox.failed": "The Rekordbox export failed.",
     "rekordbox.hotLoops": "Hot loops",
     "rekordbox.hotLoopsHelp": "Uses a free hot-cue pad",
@@ -507,6 +504,143 @@
     "space.video": "Video",
     "status.checking": "Checking Serato",
     "status.library": "Library",
+    "tip.consentAccept": "Send anonymous usage counts and crash reports.",
+    "tip.consentDecline": "Do not send usage counts or crash reports.",
+    "tip.copyLogs": "Copy the app's logs so you can paste them.",
+    "tip.copyVersion": "Copy the version number.",
+    "tip.crateCollapse": "Hide the crates inside this one.",
+    "tip.crateColor": "Change the color of this crate.",
+    "tip.crateDelete": "Delete this crate. Its music files stay on disk.",
+    "tip.crateExpand": "Show the crates inside this one.",
+    "tip.crateMember": "Tick to keep this track in this crate.",
+    "tip.crateNew": "Make a new crate.",
+    "tip.crateRename": "Change the name of this crate.",
+    "tip.crateRow": "Show the tracks in this crate.",
+    "tip.crateSearch": "Type a name to narrow the crate list.",
+    "tip.crateSortAdded": "List the newest crates first.",
+    "tip.crateSortName": "List crates from A to Z.",
+    "tip.crateSortOrder": "List crates in your Serato order.",
+    "tip.dialogCancel": "Close this box. Nothing changes.",
+    "tip.dialogClose": "Close this box.",
+    "tip.duplicateCopy": "Show the details of this copy.",
+    "tip.exportM3u": "Download this list as a playlist file.",
+    "tip.exportRekordbox": "Download a rekordbox.xml file of this library.",
+    "tip.filesConfirm": "Make this change.",
+    "tip.filesCrumb": "Go to this folder.",
+    "tip.filesDelete": "Move the chosen files to the Trash.",
+    "tip.filesDriveMissing": "This drive is not connected. Connect it and try again.",
+    "tip.filesElsewhere": "Look in a folder outside your music folders.",
+    "tip.filesMove": "Move the chosen files to another folder.",
+    "tip.filesMoveFolder": "Move this whole folder.",
+    "tip.filesMoveHere": "Move the files into this folder.",
+    "tip.filesName": "Type the new name.",
+    "tip.filesOpen": "Open this folder.",
+    "tip.filesPickCancel": "Stop the move. Nothing changes.",
+    "tip.filesRefresh": "Read this folder again.",
+    "tip.filesRename": "Change the name of the chosen file.",
+    "tip.filesReplace": "Swap the chosen file for another. Its cues and crates stay.",
+    "tip.filesReplacement": "Type the full path of the new file.",
+    "tip.filesReview": "See what will change. Nothing changes yet.",
+    "tip.filesRunSetup": "Run setup to find your library.",
+    "tip.filesSearch": "Type a name to find a file in this folder.",
+    "tip.filesSelect": "Tick to choose this file.",
+    "tip.filesShortcut": "This is a shortcut to another place on disk.",
+    "tip.filesUp": "Go up to the folder that holds this one.",
+    "tip.historySession": "Show the tracks played in this session.",
+    "tip.importM3u": "Make a new crate from a playlist file.",
+    "tip.logFallback": "The app's logs. Select the text to copy it.",
+    "tip.mergeConfirm": "Merge the copies into the one you chose.",
+    "tip.mergeCopies": "Keep one copy of this track and remove the others.",
+    "tip.mergeKeep": "Choose this copy to keep.",
+    "tip.mergeTrash": "Tick to also move the other files to the Trash.",
+    "tip.openInLibrary": "Open this stem's track in the library.",
+    "tip.openLogs": "Open the folder that holds the app's logs.",
+    "tip.openSettings": "Open settings for sharing, logs, and setup.",
+    "tip.openShortcuts": "List the keyboard shortcuts.",
+    "tip.playerCue": "Jump to this cue point.",
+    "tip.playerNext": "Go to the next track.",
+    "tip.playerPrevious": "Go to the track before this one.",
+    "tip.playerSeek": "Drag to move through the track.",
+    "tip.playerToggle": "Play or pause the track.",
+    "tip.playerVolume": "Change how loud the track plays.",
+    "tip.prepareRemove": "Take this track off the Prepare list.",
+    "tip.prepareSend": "Add this track to the Prepare list.",
+    "tip.quickOpenQuery": "Type part of a track or file name.",
+    "tip.quickOpenResult": "Open this track or file.",
+    "tip.quickOpenRetry": "Search the files on disk again.",
+    "tip.rekordboxDownload": "Download the rekordbox.xml file.",
+    "tip.rekordboxHotLoops": "Add saved loops to the Rekordbox file. Each uses a free hot-cue pad.",
+    "tip.rekordboxKey": "Choose how keys are written in the Rekordbox file.",
+    "tip.rekordboxMemory": "Include memory cues in the Rekordbox file.",
+    "tip.relatedChoose": "Choose this track to link.",
+    "tip.relatedCrate": "Update the Serato crate that holds these related tracks.",
+    "tip.relatedMutual": "Tick to show the link on both tracks.",
+    "tip.relatedNote": "Add a note about how these tracks go together.",
+    "tip.relatedOpen": "Show this related track.",
+    "tip.relatedRating": "Rate how well these tracks go together.",
+    "tip.relatedRemove": "Remove this link. Both tracks stay in the library.",
+    "tip.relatedSave": "Save this link.",
+    "tip.relatedSearch": "Type a title or artist to find a track to link.",
+    "tip.relatedSuggestionSave": "Save this suggestion as a link.",
+    "tip.reload": "Read the library again to pick up new changes.",
+    "tip.rerunWizard": "Go through first-time setup again.",
+    "tip.rowPlay": "Play this track.",
+    "tip.search": "Type a title or artist to narrow the list.",
+    "tip.searchCopies": "Show or hide the fields from the other copies.",
+    "tip.settingsLanguage": "Choose the language for this app.",
+    "tip.smartRules": "Edit the rules that choose this crate's tracks.",
+    "tip.smartRulesSave": "Save the rules for this smart crate.",
+    "tip.snapshotConfirm": "Put your library back to this snapshot.",
+    "tip.snapshotRestore": "See what restoring this snapshot would change. Nothing changes yet.",
+    "tip.snapshotsRefresh": "Read the list of snapshots again.",
+    "tip.snapshotsRetry": "Try reading the snapshots again.",
+    "tip.snapshotsTake": "Save a copy of your library now.",
+    "tip.snapshotsUndo": "See what undoing the outside change would do. Nothing changes yet.",
+    "tip.sortColumn": "Sort the list by this column. Click again to reverse it.",
+    "tip.space": "Choose which part of your library to show.",
+    "tip.splitter": "Drag to resize the track list. Double-click to reset it.",
+    "tip.telemetryToggle": "Tick to send anonymous usage counts and crash reports.",
+    "tip.trackAlbum": "The album name.",
+    "tip.trackArtist": "The artist's name.",
+    "tip.trackBpm": "The speed in beats per minute.",
+    "tip.trackColor": "Choose the color that marks this track.",
+    "tip.trackComments": "Your own notes about this track.",
+    "tip.trackComposer": "The person who wrote the track.",
+    "tip.trackEmoji": "An emoji to mark this track.",
+    "tip.trackGenre": "The style of music.",
+    "tip.trackGridLock": "Tick to stop the beatgrid from being changed.",
+    "tip.trackGrouping": "Your own group name for this track.",
+    "tip.trackKey": "The musical key.",
+    "tip.trackLabel": "The record label.",
+    "tip.trackRating": "Give this track a star rating.",
+    "tip.trackRelocate": "Point this track at its file in a new place.",
+    "tip.trackRemixer": "The person who remixed the track.",
+    "tip.trackRemove": "Remove this track from the library. The file stays on disk.",
+    "tip.trackReveal": "Show this track's file on your computer.",
+    "tip.trackRow": "Show the details of this track.",
+    "tip.trackSave": "Save your changes to this track.",
+    "tip.trackTitle": "The track's title.",
+    "tip.trackYear": "The year the track came out.",
+    "tip.viewCrates": "Show your crates and their tracks.",
+    "tip.viewDuplicates": "Show tracks that are in the library more than once.",
+    "tip.viewFiles": "Show the music files on this computer.",
+    "tip.viewHistory": "Show the sessions you played.",
+    "tip.viewMissing": "Show tracks whose files cannot be found.",
+    "tip.viewSnapshots": "Show saved copies of your library.",
+    "tip.viewStems": "Show tracks that have stems.",
+    "tip.waveformOverview": "Click or drag to move through the track.",
+    "tip.waveformZoomIn": "Show less of the track in more detail.",
+    "tip.waveformZoomOut": "Show more of the track in less detail.",
+    "tip.wizardBack": "Go back one step.",
+    "tip.wizardCancel": "Close setup. It runs again next time.",
+    "tip.wizardFolder": "Open this folder.",
+    "tip.wizardFolderClose": "Close the folder list.",
+    "tip.wizardFolderUp": "Go up to the folder that holds this one.",
+    "tip.wizardFolderUse": "Use the folder you are looking at.",
+    "tip.wizardNo": "Do not send usage counts or crash reports.",
+    "tip.wizardPrimary": "Go on to the next step.",
+    "tip.wizardSecondary": "Find your library folder yourself.",
+    "tip.wizardYes": "Send anonymous usage counts and crash reports.",
     "track.missingBadge": "missing",
     "track.numbered": "Track {id}",
     "track.stemsBadge": "stems",
@@ -814,7 +948,6 @@
       other: "{count} líneas no coincidieron con ninguna pista de la biblioteca."
     },
     "layout.resize": "Cambiar el tamaño de la lista de pistas",
-    "layout.resizeHint": "Arrastra para cambiar el tamaño. Doble clic para restablecerlo.",
     "layout.widthNotSaved": "No se pudo guardar el ancho del panel. La próxima vez vuelve al último ancho guardado.",
     "library.loading": "Cargando la biblioteca",
     "library.readFailed": "No se pudo leer la biblioteca ({status})",
@@ -915,7 +1048,6 @@
     "player.notInLibrary": "No está en la biblioteca o falta el archivo",
     "player.nothingPlaying": "Nada en reproducción",
     "player.overview": "Vista general de la pista",
-    "player.overviewSeek": "Haz clic o arrastra para buscar",
     "player.pause": "Pausa",
     "player.play": "Reproducir",
     "player.previous": "Anterior",
@@ -949,7 +1081,6 @@
     },
     "rekordbox.dialogTitle": "¿Descargar rekordbox.xml?",
     "rekordbox.download": "Descargar",
-    "rekordbox.downloadTitle": "Descargar rekordbox.xml",
     "rekordbox.failed": "La exportación a Rekordbox falló.",
     "rekordbox.hotLoops": "Bucles de hot cue",
     "rekordbox.hotLoopsHelp": "Usa un pad de hot cue libre",
@@ -1075,6 +1206,143 @@
     "space.video": "Vídeo",
     "status.checking": "Comprobando Serato",
     "status.library": "Biblioteca",
+    "tip.consentAccept": "Envía recuentos de uso anónimos e informes de fallos.",
+    "tip.consentDecline": "No envía recuentos de uso ni informes de fallos.",
+    "tip.copyLogs": "Copia los registros de la app para poder pegarlos.",
+    "tip.copyVersion": "Copia el número de versión.",
+    "tip.crateCollapse": "Oculta las cajas que hay dentro de esta.",
+    "tip.crateColor": "Cambia el color de esta caja.",
+    "tip.crateDelete": "Elimina esta caja. Sus archivos de música siguen en el disco.",
+    "tip.crateExpand": "Muestra las cajas que hay dentro de esta.",
+    "tip.crateMember": "Marca la casilla para mantener esta pista en esta caja.",
+    "tip.crateNew": "Crea una caja nueva.",
+    "tip.crateRename": "Cambia el nombre de esta caja.",
+    "tip.crateRow": "Muestra las pistas de esta caja.",
+    "tip.crateSearch": "Escribe un nombre para acotar la lista de cajas.",
+    "tip.crateSortAdded": "Muestra primero las cajas más nuevas.",
+    "tip.crateSortName": "Ordena las cajas de la A a la Z.",
+    "tip.crateSortOrder": "Ordena las cajas como en Serato.",
+    "tip.dialogCancel": "Cierra este cuadro. No cambia nada.",
+    "tip.dialogClose": "Cierra este cuadro.",
+    "tip.duplicateCopy": "Muestra los detalles de esta copia.",
+    "tip.exportM3u": "Descarga esta lista como archivo de lista de reproducción.",
+    "tip.exportRekordbox": "Descarga un archivo rekordbox.xml de esta biblioteca.",
+    "tip.filesConfirm": "Haz este cambio.",
+    "tip.filesCrumb": "Ve a esta carpeta.",
+    "tip.filesDelete": "Mueve los archivos elegidos a la Papelera.",
+    "tip.filesDriveMissing": "Esta unidad no está conectada. Conéctala e inténtalo de nuevo.",
+    "tip.filesElsewhere": "Busca en una carpeta fuera de tus carpetas de música.",
+    "tip.filesMove": "Mueve los archivos elegidos a otra carpeta.",
+    "tip.filesMoveFolder": "Mueve toda esta carpeta.",
+    "tip.filesMoveHere": "Mueve los archivos a esta carpeta.",
+    "tip.filesName": "Escribe el nombre nuevo.",
+    "tip.filesOpen": "Abre esta carpeta.",
+    "tip.filesPickCancel": "Detén el movimiento. No cambia nada.",
+    "tip.filesRefresh": "Vuelve a leer esta carpeta.",
+    "tip.filesRename": "Cambia el nombre del archivo elegido.",
+    "tip.filesReplace": "Cambia el archivo elegido por otro. Sus marcas y cajas se conservan.",
+    "tip.filesReplacement": "Escribe la ruta completa del archivo nuevo.",
+    "tip.filesReview": "Mira qué va a cambiar. Aún no cambia nada.",
+    "tip.filesRunSetup": "Ejecuta la instalación para encontrar tu biblioteca.",
+    "tip.filesSearch": "Escribe un nombre para buscar un archivo en esta carpeta.",
+    "tip.filesSelect": "Marca la casilla para elegir este archivo.",
+    "tip.filesShortcut": "Es un acceso directo a otro lugar del disco.",
+    "tip.filesUp": "Sube a la carpeta que contiene esta.",
+    "tip.historySession": "Muestra las pistas que sonaron en esta sesión.",
+    "tip.importM3u": "Crea una caja nueva a partir de un archivo de lista de reproducción.",
+    "tip.logFallback": "Los registros de la app. Selecciona el texto para copiarlo.",
+    "tip.mergeConfirm": "Fusiona las copias en la que has elegido.",
+    "tip.mergeCopies": "Conserva una copia de esta pista y quita las demás.",
+    "tip.mergeKeep": "Elige esta copia para conservarla.",
+    "tip.mergeTrash": "Marca la casilla para mover también los otros archivos a la Papelera.",
+    "tip.openInLibrary": "Abre la pista de este stem en la biblioteca.",
+    "tip.openLogs": "Abre la carpeta con los registros de la app.",
+    "tip.openSettings": "Abre los ajustes de uso compartido, registros e instalación.",
+    "tip.openShortcuts": "Muestra los atajos de teclado.",
+    "tip.playerCue": "Salta a esta marca.",
+    "tip.playerNext": "Ve a la pista siguiente.",
+    "tip.playerPrevious": "Ve a la pista anterior.",
+    "tip.playerSeek": "Arrastra para moverte por la pista.",
+    "tip.playerToggle": "Reproduce o pausa la pista.",
+    "tip.playerVolume": "Cambia el volumen de la pista.",
+    "tip.prepareRemove": "Quita esta pista de la lista Preparar.",
+    "tip.prepareSend": "Añade esta pista a la lista Preparar.",
+    "tip.quickOpenQuery": "Escribe parte del nombre de una pista o un archivo.",
+    "tip.quickOpenResult": "Abre esta pista o este archivo.",
+    "tip.quickOpenRetry": "Vuelve a buscar los archivos en el disco.",
+    "tip.rekordboxDownload": "Descarga el archivo rekordbox.xml.",
+    "tip.rekordboxHotLoops": "Añade los bucles guardados al archivo de Rekordbox. Cada uno usa un pad libre.",
+    "tip.rekordboxKey": "Elige cómo se escriben las tonalidades en el archivo de Rekordbox.",
+    "tip.rekordboxMemory": "Incluye las marcas de memoria en el archivo de Rekordbox.",
+    "tip.relatedChoose": "Elige esta pista para enlazarla.",
+    "tip.relatedCrate": "Actualiza la caja de Serato que contiene estas pistas relacionadas.",
+    "tip.relatedMutual": "Marca la casilla para mostrar el enlace en las dos pistas.",
+    "tip.relatedNote": "Añade una nota sobre cómo combinan estas pistas.",
+    "tip.relatedOpen": "Muestra esta pista relacionada.",
+    "tip.relatedRating": "Valora lo bien que combinan estas pistas.",
+    "tip.relatedRemove": "Quita este enlace. Las dos pistas siguen en la biblioteca.",
+    "tip.relatedSave": "Guarda este enlace.",
+    "tip.relatedSearch": "Escribe un título o un artista para buscar una pista que enlazar.",
+    "tip.relatedSuggestionSave": "Guarda esta sugerencia como enlace.",
+    "tip.reload": "Vuelve a leer la biblioteca para recoger los cambios nuevos.",
+    "tip.rerunWizard": "Vuelve a hacer la instalación inicial.",
+    "tip.rowPlay": "Reproduce esta pista.",
+    "tip.search": "Escribe un título o un artista para acotar la lista.",
+    "tip.searchCopies": "Muestra u oculta los campos de las otras copias.",
+    "tip.settingsLanguage": "Elige el idioma de esta app.",
+    "tip.smartRules": "Edita las reglas que eligen las pistas de esta caja.",
+    "tip.smartRulesSave": "Guarda las reglas de esta caja inteligente.",
+    "tip.snapshotConfirm": "Devuelve tu biblioteca a esta instantánea.",
+    "tip.snapshotRestore": "Mira qué cambiaría restaurar esta instantánea. Aún no cambia nada.",
+    "tip.snapshotsRefresh": "Vuelve a leer la lista de instantáneas.",
+    "tip.snapshotsRetry": "Intenta leer las instantáneas de nuevo.",
+    "tip.snapshotsTake": "Guarda ahora una copia de tu biblioteca.",
+    "tip.snapshotsUndo": "Mira qué haría deshacer el cambio externo. Aún no cambia nada.",
+    "tip.sortColumn": "Ordena la lista por esta columna. Vuelve a hacer clic para invertirla.",
+    "tip.space": "Elige qué parte de tu biblioteca quieres mostrar.",
+    "tip.splitter": "Arrastra para cambiar el tamaño de la lista. Haz doble clic para restablecerlo.",
+    "tip.telemetryToggle": "Marca la casilla para enviar recuentos de uso anónimos e informes de fallos.",
+    "tip.trackAlbum": "El nombre del álbum.",
+    "tip.trackArtist": "El nombre del artista.",
+    "tip.trackBpm": "La velocidad en pulsaciones por minuto.",
+    "tip.trackColor": "Elige el color que marca esta pista.",
+    "tip.trackComments": "Tus propias notas sobre esta pista.",
+    "tip.trackComposer": "La persona que escribió la pista.",
+    "tip.trackEmoji": "Un emoji para marcar esta pista.",
+    "tip.trackGenre": "El estilo de música.",
+    "tip.trackGridLock": "Marca la casilla para que no se pueda cambiar el beatgrid.",
+    "tip.trackGrouping": "Tu propio nombre de grupo para esta pista.",
+    "tip.trackKey": "La tonalidad musical.",
+    "tip.trackLabel": "El sello discográfico.",
+    "tip.trackRating": "Da a esta pista una valoración en estrellas.",
+    "tip.trackRelocate": "Indica dónde está ahora el archivo de esta pista.",
+    "tip.trackRemixer": "La persona que hizo el remix de la pista.",
+    "tip.trackRemove": "Quita esta pista de la biblioteca. El archivo sigue en el disco.",
+    "tip.trackReveal": "Muestra el archivo de esta pista en tu equipo.",
+    "tip.trackRow": "Muestra los detalles de esta pista.",
+    "tip.trackSave": "Guarda tus cambios en esta pista.",
+    "tip.trackTitle": "El título de la pista.",
+    "tip.trackYear": "El año en que salió la pista.",
+    "tip.viewCrates": "Muestra tus cajas y sus pistas.",
+    "tip.viewDuplicates": "Muestra las pistas que están más de una vez en la biblioteca.",
+    "tip.viewFiles": "Muestra los archivos de música de este equipo.",
+    "tip.viewHistory": "Muestra las sesiones que has pinchado.",
+    "tip.viewMissing": "Muestra las pistas cuyos archivos no se encuentran.",
+    "tip.viewSnapshots": "Muestra las copias guardadas de tu biblioteca.",
+    "tip.viewStems": "Muestra las pistas que tienen stems.",
+    "tip.waveformOverview": "Haz clic o arrastra para moverte por la pista.",
+    "tip.waveformZoomIn": "Muestra menos de la pista con más detalle.",
+    "tip.waveformZoomOut": "Muestra más de la pista con menos detalle.",
+    "tip.wizardBack": "Vuelve un paso atrás.",
+    "tip.wizardCancel": "Cierra la instalación. Volverá a abrirse la próxima vez.",
+    "tip.wizardFolder": "Abre esta carpeta.",
+    "tip.wizardFolderClose": "Cierra la lista de carpetas.",
+    "tip.wizardFolderUp": "Sube a la carpeta que contiene esta.",
+    "tip.wizardFolderUse": "Usa la carpeta que estás viendo.",
+    "tip.wizardNo": "No envía recuentos de uso ni informes de fallos.",
+    "tip.wizardPrimary": "Pasa al siguiente paso.",
+    "tip.wizardSecondary": "Busca tú mismo la carpeta de tu biblioteca.",
+    "tip.wizardYes": "Envía recuentos de uso anónimos e informes de fallos.",
     "track.missingBadge": "no encontrada",
     "track.numbered": "Pista {id}",
     "track.stemsBadge": "stems",
@@ -1390,20 +1658,20 @@
   function mountSplitter(options) {
     const { handle, container, first, property, minFirst, minSecond, onCommit } = options;
     const step = options.step ?? 16;
-    let current = null;
+    let current2 = null;
     const available = () => container.clientWidth - handle.offsetWidth;
     const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
-    const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
+    const shown = () => current2 == null ? first.getBoundingClientRect().width : fitted(current2);
     function paint3() {
-      if (current == null) container.style.removeProperty(property);
-      else container.style.setProperty(property, `${fitted(current)}px`);
+      if (current2 == null) container.style.removeProperty(property);
+      else container.style.setProperty(property, `${fitted(current2)}px`);
       const room = available();
       handle.setAttribute("aria-valuemin", String(minFirst));
       handle.setAttribute("aria-valuemax", String(Math.max(minFirst, Math.round(room - minSecond))));
       handle.setAttribute("aria-valuenow", String(Math.round(shown())));
     }
     function move(width) {
-      current = fitted(width);
+      current2 = fitted(width);
       paint3();
     }
     handle.addEventListener("pointerdown", (event) => {
@@ -1425,7 +1693,7 @@
         handle.removeEventListener("pointercancel", onEnd);
         delete handle.dataset.dragging;
         document.body.classList.remove("is-resizing");
-        if (moved) onCommit(current);
+        if (moved) onCommit(current2);
       };
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", onEnd);
@@ -1440,22 +1708,22 @@
       else if (event.key === "End") next2 = available() - minSecond;
       else return;
       event.preventDefault();
-      const before = current;
+      const before = current2;
       move(next2);
-      if (current !== before) onCommit(current);
+      if (current2 !== before) onCommit(current2);
     });
     handle.addEventListener("dblclick", () => {
-      current = null;
+      current2 = null;
       paint3();
       onCommit(null);
     });
     paint3();
     return {
       set(width) {
-        current = width == null ? null : Math.round(width);
+        current2 = width == null ? null : Math.round(width);
         paint3();
       },
-      width: () => current,
+      width: () => current2,
       refit: paint3
     };
   }
@@ -1605,6 +1873,34 @@
     return a.id - b.id;
   }
 
+  // src/tips.ts
+  function tipText(key) {
+    return t(`tip.${key}`);
+  }
+  var TIP_SHORTCUTS = {
+    search: "focus-search",
+    crateSearch: "focus-search",
+    filesSearch: "focus-search",
+    openShortcuts: "cheat-sheet",
+    viewCrates: "view-crates",
+    viewFiles: "view-files",
+    viewHistory: "view-history",
+    viewSnapshots: "view-snapshots",
+    trackRow: "list-open",
+    filesOpen: "list-open",
+    quickOpenResult: "list-open",
+    dialogClose: "dismiss",
+    dialogCancel: "dismiss",
+    rowPlay: "play-pause",
+    playerToggle: "play-pause",
+    playerSeek: ["seek-back", "seek-forward"],
+    waveformOverview: ["seek-back", "seek-forward"]
+  };
+  function tip(control, key, detail) {
+    control.dataset.tip = key;
+    if (detail) control.dataset.tipDetail = detail;
+  }
+
   // src/restore.ts
   var reloadLibrary = async () => {
   };
@@ -1659,6 +1955,7 @@
     if (state.snapshotError) {
       status.textContent = state.snapshotError;
       const retry = document.createElement("button");
+      tip(retry, "snapshotsRetry");
       retry.type = "button";
       retry.textContent = t("common.tryAgain");
       retry.addEventListener("click", () => loadSnapshots().catch((error2) => failSnapshots(error2)));
@@ -1683,6 +1980,7 @@
       const drives = (item.unavailable_drives || []).length ? ` ${t("snapshots.unavailableDrives", { drives: formatList(item.unavailable_drives || []) })}` : "";
       detail.textContent = `${version}. ${item.reason || ""}${drives}`;
       const restore = document.createElement("button");
+      tip(restore, "snapshotRestore");
       restore.type = "button";
       restore.textContent = t("snapshots.reviewRestore");
       restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error2) => setSnapshotDialogStatus(failureOf(error2).message)));
@@ -1742,28 +2040,28 @@
     }
   }
   function appendPlanLine(parent, label, rows2) {
-    const line = document.createElement("p");
+    const line2 = document.createElement("p");
     const items = rows2 || [];
     if (!items.length) {
-      line.textContent = t("plan.none", { label });
+      line2.textContent = t("plan.none", { label });
     } else {
       const names = items.slice(0, 8).map((item) => item.name || item.path || item.drive_label || t("plan.item"));
       const extra = items.length > names.length ? t("plan.andMore", { count: items.length - names.length }) : "";
       const listed = `${names.join(", ")}${extra}`;
-      line.textContent = t("plan.listed", { label, count: items.length, names: listed });
+      line2.textContent = t("plan.listed", { label, count: items.length, names: listed });
     }
-    parent.append(line);
+    parent.append(line2);
   }
   function appendFrameDiffs(parent, label, rows2) {
     const items = rows2 || [];
-    const line = document.createElement("p");
+    const line2 = document.createElement("p");
     if (!items.length) {
-      line.textContent = t("plan.none", { label });
-      parent.append(line);
+      line2.textContent = t("plan.none", { label });
+      parent.append(line2);
       return;
     }
-    line.textContent = t("plan.files", { label, count: items.length });
-    parent.append(line);
+    line2.textContent = t("plan.files", { label, count: items.length });
+    parent.append(line2);
     for (const item of items.slice(0, 12)) {
       const row = document.createElement("p");
       row.textContent = fileName(item.path || "");
@@ -1863,9 +2161,6 @@
     },
     get overview() {
       return t("player.overview");
-    },
-    get overviewSeek() {
-      return t("player.overviewSeek");
     },
     get waveformReading() {
       return t("player.waveformReading");
@@ -2016,8 +2311,8 @@
     const ratio = Math.min(1, Math.max(0, x / width));
     return ratio * durationSeconds;
   }
-  function zoomPixelsPerSecond(current, direction) {
-    const base = Number.isFinite(current) && current > 0 ? current : ZOOM_DEFAULT_PPS;
+  function zoomPixelsPerSecond(current2, direction) {
+    const base = Number.isFinite(current2) && current2 > 0 ? current2 : ZOOM_DEFAULT_PPS;
     const next2 = base * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR);
     if (next2 >= ZOOM_MAX_PPS) return ZOOM_MAX_PPS;
     if (next2 <= ZOOM_MIN_PPS) return ZOOM_MIN_PPS;
@@ -2060,11 +2355,11 @@
     if (!rows2 || rows2.length === 0) return [];
     const found = [];
     for (const row of rows2) {
-      const start = finiteNumber(row.start_ms);
+      const start2 = finiteNumber(row.start_ms);
       const end = finiteNumber(row.end_ms);
-      if (start === null || end === null || end <= start || start < 0) continue;
+      if (start2 === null || end === null || end <= start2 || start2 < 0) continue;
       found.push({
-        startSeconds: start / 1e3,
+        startSeconds: start2 / 1e3,
         endSeconds: end / 1e3,
         color: typeof row.color === "string" ? row.color : ""
       });
@@ -2178,15 +2473,15 @@
     const columns = source.kind === "computed" ? source.count : source.columns.length;
     if (columns < 1 || width < 1 || height < 1) return pixels;
     for (let x = 0; x < width; x += 1) {
-      const start = Math.floor(x / width * columns);
-      const end = Math.max(start + 1, Math.floor((x + 1) / width * columns));
+      const start2 = Math.floor(x / width * columns);
+      const end = Math.max(start2 + 1, Math.floor((x + 1) / width * columns));
       let lowPeak = 0;
       let lowRms = 0;
       let midPeak = 0;
       let midRms = 0;
       let highPeak = 0;
       let highRms = 0;
-      for (let index = start; index < end && index < columns; index += 1) {
+      for (let index = start2; index < end && index < columns; index += 1) {
         if (source.kind === "computed") {
           const offset = index * 6;
           lowPeak = Math.max(lowPeak, source.points[offset] ?? 0);
@@ -2289,10 +2584,10 @@
   function drawLoops(pixels, width, height, dpr, playheadSeconds, pixelsPerSecond, cssWidth, loops, xOf) {
     for (const loop of loops) {
       const color = colorFromHex(loop.color) ?? DEFAULT_MARKER_COLOR;
-      const start = xOf ? xOf(loop.startSeconds) : timeToX(loop.startSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
+      const start2 = xOf ? xOf(loop.startSeconds) : timeToX(loop.startSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
       const end = xOf ? xOf(loop.endSeconds) : timeToX(loop.endSeconds, playheadSeconds, pixelsPerSecond, cssWidth) * dpr;
-      const left = Math.min(start, end);
-      const right = Math.max(start, end);
+      const left = Math.min(start2, end);
+      const right = Math.max(start2, end);
       fillSpan(pixels, width, height, Math.floor(left), Math.ceil(right), 0, height, color, 0.35);
       const edge = Math.max(1, Math.round(dpr));
       fillSpan(pixels, width, height, Math.round(left), Math.round(left) + edge, 0, height, color, 1);
@@ -2452,15 +2747,15 @@
       this.overviewHit.setAttribute("role", "slider");
       this.overviewHit.setAttribute("aria-label", playerStrings.overview);
       this.overviewHit.setAttribute("aria-orientation", "horizontal");
-      this.overviewHit.title = playerStrings.overviewSeek;
+      tip(this.overviewHit, "waveformOverview");
       this.overviewCanvas = document.createElement("canvas");
       this.overviewCanvas.setAttribute("aria-hidden", "true");
       this.overviewHit.append(this.overviewCanvas);
       main.append(this.detailWrap, this.note, this.overviewHit);
       const zoom = document.createElement("div");
       zoom.className = "waveform-zoom";
-      this.zoomIn = button(playerStrings.zoomIn, "+");
-      this.zoomOut = button(playerStrings.zoomOut, "−");
+      this.zoomIn = button(playerStrings.zoomIn, "+", "waveformZoomIn");
+      this.zoomOut = button(playerStrings.zoomOut, "−", "waveformZoomOut");
       this.zoomIn.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, 1)));
       this.zoomOut.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, -1)));
       zoom.append(this.zoomIn, this.zoomOut);
@@ -2540,10 +2835,7 @@
       this.reading.textContent = playerStrings.waveformReading;
       if (!this.note.hidden) this.note.textContent = playerStrings.waveformUnavailable;
       this.overviewHit.setAttribute("aria-label", playerStrings.overview);
-      this.overviewHit.title = playerStrings.overviewSeek;
-      this.zoomIn.title = playerStrings.zoomIn;
       this.zoomIn.setAttribute("aria-label", playerStrings.zoomIn);
-      this.zoomOut.title = playerStrings.zoomOut;
       this.zoomOut.setAttribute("aria-label", playerStrings.zoomOut);
     }
     /**
@@ -2802,8 +3094,8 @@
      * @returns The buffer to draw into.
      */
     canvasImage(context, which, width, height) {
-      const current = which === "detail" ? this.detailImage : this.overviewImage;
-      if (current && current.width === width && current.height === height) return current;
+      const current2 = which === "detail" ? this.detailImage : this.overviewImage;
+      if (current2 && current2.width === width && current2.height === height) return current2;
       const image = context.createImageData(width, height);
       if (which === "detail") this.detailImage = image;
       else this.overviewImage = image;
@@ -2851,12 +3143,12 @@
       return this.parsed.durationMs / 1e3;
     }
   };
-  function button(label, text) {
+  function button(label, text, key) {
     const element = document.createElement("button");
     element.type = "button";
     element.className = "waveform-zoom-button";
     element.textContent = text;
-    element.title = label;
+    tip(element, key);
     element.setAttribute("aria-label", label);
     return element;
   }
@@ -2929,14 +3221,14 @@
     if (!rows2 || rows2.length === 0) return [];
     const found = [];
     for (const cue of rows2) {
-      const start = Number(cue.start_ms);
-      if (!Number.isFinite(start) || start < 0) continue;
+      const start2 = Number(cue.start_ms);
+      if (!Number.isFinite(start2) || start2 < 0) continue;
       const index = Number(cue.index);
       const named = typeof cue.name === "string" ? cue.name.trim() : "";
       const fallback = Number.isInteger(index) ? index + 1 : found.length + 1;
       const color = typeof cue.color === "string" && CUE_COLOR.test(cue.color) ? cue.color : "";
       found.push({
-        seconds: start / 1e3,
+        seconds: start2 / 1e3,
         color,
         label: named || `${playerStrings.cue} ${fallback}`
       });
@@ -3208,15 +3500,18 @@
     statusNode.setAttribute("role", "status");
     meta.append(titleNode, artistNode, statusNode);
     previousNode = document.createElement("button");
+    tip(previousNode, "playerPrevious");
     previousNode.type = "button";
     previousNode.className = "player-toggle";
     previousNode.textContent = playerStrings.previous;
     previousNode.addEventListener("click", () => previous());
     toggleNode = document.createElement("button");
+    tip(toggleNode, "playerToggle");
     toggleNode.type = "button";
     toggleNode.className = "player-toggle player-play";
     toggleNode.addEventListener("click", () => togglePlayPause());
     nextNode = document.createElement("button");
+    tip(nextNode, "playerNext");
     nextNode.type = "button";
     nextNode.className = "player-toggle";
     nextNode.textContent = playerStrings.next;
@@ -3237,6 +3532,7 @@
     const track = document.createElement("div");
     track.className = "player-seek-track";
     seekNode = document.createElement("input");
+    tip(seekNode, "playerSeek");
     seekNode.type = "range";
     seekNode.className = "player-range";
     seekNode.min = "0";
@@ -3275,6 +3571,7 @@
     volumeTextNode.textContent = playerStrings.volume;
     const volumeText = volumeTextNode;
     const volumeInput = document.createElement("input");
+    tip(volumeInput, "playerVolume");
     volumeInput.type = "range";
     volumeInput.min = "0";
     volumeInput.max = "1";
@@ -3384,7 +3681,7 @@
       button2.style.left = `${percent}%`;
       if (cue.color) button2.style.setProperty("--cue", cue.color);
       const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
-      button2.title = label;
+      tip(button2, "playerCue", label);
       button2.setAttribute("aria-label", label);
       button2.addEventListener("click", () => {
         seek(cue.seconds);
@@ -3405,10 +3702,10 @@
   function paintRows() {
     const view = state.view || [];
     const height = el("list").clientHeight || 600;
-    const start = Math.max(0, Math.floor(el("list").scrollTop / ROW) - 6);
+    const start2 = Math.max(0, Math.floor(el("list").scrollTop / ROW) - 6);
     const end = Math.min(view.length, Math.ceil((el("list").scrollTop + height) / ROW) + 6);
     spacer.style.height = `${view.length * ROW}px`;
-    rows.style.transform = `translateY(${start * ROW}px)`;
+    rows.style.transform = `translateY(${start2 * ROW}px)`;
     rows.replaceChildren();
     if (!view.length) {
       const empty = document.createElement("p");
@@ -3417,21 +3714,23 @@
       rows.append(empty);
       return;
     }
-    for (let index = start; index < end; index += 1) {
+    for (let index = start2; index < end; index += 1) {
       const track = view[index];
       const button2 = document.createElement("div");
+      tip(button2, "trackRow");
       button2.className = "row";
       button2.setAttribute("role", "option");
       button2.setAttribute("aria-selected", String(track.id === state.selectedId));
       button2.dataset.id = String(track.id);
       const titleCell = document.createElement("span");
       titleCell.className = "cell";
-      const line = document.createElement("span");
-      line.className = "title-line";
+      const line2 = document.createElement("span");
+      line2.className = "title-line";
       if (!track.entry) {
         const playingNow = getPlayerState();
         const playingThis = playingNow.trackId === track.id && playingNow.playing;
         const playButton = document.createElement("button");
+        tip(playButton, "rowPlay");
         playButton.type = "button";
         playButton.className = "row-play";
         const labelName = track.name || playerStrings.untitled;
@@ -3448,37 +3747,37 @@
           el("list").focus({ preventScroll: true });
         });
         playButton.addEventListener("dblclick", (event) => event.stopPropagation());
-        line.append(playButton);
+        line2.append(playButton);
       }
       const hex = colorHex(track.color);
       if (hex) {
         const swatch = document.createElement("span");
         swatch.className = "swatch";
         swatch.style.background = hex;
-        line.append(swatch);
+        line2.append(swatch);
       }
       if (track.emoji) {
         const emoji = document.createElement("span");
         emoji.textContent = track.emoji;
-        line.append(emoji);
+        line2.append(emoji);
       }
       const title2 = document.createElement("span");
       title2.className = "title";
       title2.textContent = track.name || t("track.untitled");
-      line.append(title2);
+      line2.append(title2);
       if (track.missing) {
         const missing = document.createElement("span");
         missing.className = "missing-word";
         missing.textContent = t("track.missingBadge");
-        line.append(missing);
+        line2.append(missing);
       }
       if (track.stems) {
         const stems = document.createElement("span");
         stems.className = "missing-word";
         stems.textContent = t("track.stemsBadge");
-        line.append(stems);
+        line2.append(stems);
       }
-      titleCell.append(line);
+      titleCell.append(line2);
       const artist2 = document.createElement("span");
       artist2.className = "cell";
       artist2.textContent = track.artist ?? "";
@@ -3514,10 +3813,10 @@
   }
   function openTrackList() {
     const view = state.view || [];
-    const current = view.find((track) => track.id === state.selectedId) ?? view[0];
-    if (!current) return;
-    if (current.entry) bridge.selectEntry(current.id);
-    else void bridge.selectTrack(current.id);
+    const current2 = view.find((track) => track.id === state.selectedId) ?? view[0];
+    if (!current2) return;
+    if (current2.entry) bridge.selectEntry(current2.id);
+    else void bridge.selectTrack(current2.id);
   }
   function moveSelection(delta) {
     const view = state.view || [];
@@ -3604,12 +3903,12 @@
     const keep = /* @__PURE__ */ new Set();
     for (const crate of state.crates) {
       if (!terms.every((term) => crate.name.toLocaleLowerCase().includes(term))) continue;
-      let current = crate;
+      let current2 = crate;
       const guard = /* @__PURE__ */ new Set();
-      while (current && !guard.has(current.id)) {
-        guard.add(current.id);
-        keep.add(current.id);
-        current = byId.get(current.parent);
+      while (current2 && !guard.has(current2.id)) {
+        guard.add(current2.id);
+        keep.add(current2.id);
+        current2 = byId.get(current2.parent);
       }
     }
     return keep;
@@ -3722,6 +4021,7 @@
     if (crate.childCount) {
       const open = state.crateQuery ? true : state.expanded.has(crate.id);
       const twist = document.createElement("button");
+      tip(twist, open ? "crateCollapse" : "crateExpand");
       twist.type = "button";
       twist.className = "twist";
       twist.tabIndex = -1;
@@ -3736,6 +4036,7 @@
       row.append(gap);
     }
     const button2 = document.createElement("button");
+    tip(button2, "crateRow");
     button2.type = "button";
     button2.className = "crate";
     button2.dataset.id = String(crate.id);
@@ -3774,9 +4075,9 @@
   function placeCrateFocus(previousId) {
     const items = [...el("crate-list").querySelectorAll(".crate")];
     if (!items.length) return null;
-    const current = items.find((item) => item.dataset.id === previousId) || items[0];
-    for (const item of items) item.tabIndex = item === current ? 0 : -1;
-    return current;
+    const current2 = items.find((item) => item.dataset.id === previousId) || items[0];
+    for (const item of items) item.tabIndex = item === current2 ? 0 : -1;
+    return current2;
   }
   function renderCrates() {
     const scroll = el("crate-list").scrollTop;
@@ -3824,8 +4125,8 @@
     document.querySelector(".rule-edit")?.remove();
     const crate = state.crates.find((item) => item.id === state.activeCrate);
     if (!crate || !crate.rules || state.mode !== "crates") return;
-    const line = document.createElement("p");
-    line.className = "rules";
+    const line2 = document.createElement("p");
+    line2.className = "rules";
     if (Array.isArray(crate.rules.rules)) {
       const lead = document.createElement("strong");
       lead.textContent = t("rules.matches");
@@ -3835,15 +4136,17 @@
         return `${attribute} ${operation} “${rule.value ?? ""}”`;
       });
       const join = crate.rules.conjunction === "OR" ? t("rules.or") : t("rules.and");
-      line.append(lead, document.createTextNode(` ${parts.join(` ${join} `) || t("rules.none")}`));
+      line2.append(lead, document.createTextNode(` ${parts.join(` ${join} `) || t("rules.none")}`));
     }
     const editor = document.createElement("div");
     editor.className = "rule-edit";
     const area = document.createElement("textarea");
+    tip(area, "smartRules");
     area.value = JSON.stringify(crate.rules, null, 2);
     area.disabled = !state.writable;
     area.setAttribute("aria-label", t("rules.label"));
     const save2 = document.createElement("button");
+    tip(save2, "smartRulesSave");
     save2.type = "button";
     save2.className = "text-button";
     save2.textContent = t("rules.save");
@@ -3852,7 +4155,7 @@
     editor.append(area, save2);
     const bar = document.querySelector(".browser-bar");
     bar.after(editor);
-    bar.after(line);
+    bar.after(line2);
   }
   function markHistoryColumns() {
     const history = state.mode === "history";
@@ -4052,6 +4355,7 @@
     }
     if (entry.asset_id) {
       const open = document.createElement("button");
+      tip(open, "openInLibrary");
       open.type = "button";
       open.className = "text-button";
       open.textContent = t("history.openInLibrary");
@@ -4060,11 +4364,12 @@
     }
     el("detail").replaceChildren(body);
   }
-  function fieldInput(name, label, value, wide = false) {
+  function fieldInput(name, label, value, tipKey, wide = false) {
     const wrap = document.createElement("label");
     if (wide) wrap.className = "wide";
     wrap.append(document.createTextNode(label));
     const input = name === "comments" ? document.createElement("textarea") : document.createElement("input");
+    tip(input, tipKey);
     input.name = name;
     input.value = String(value ?? "");
     if (name === "bpm") input.inputMode = "decimal";
@@ -4092,6 +4397,7 @@
       body.append(artist2);
     }
     const playButton = document.createElement("button");
+    tip(playButton, "rowPlay");
     playButton.type = "button";
     playButton.className = "detail-play";
     const playTitle = track.title || track.name || playerStrings.untitled;
@@ -4134,26 +4440,27 @@
     form.className = "editor";
     const edit = track.edit || {};
     const editorFields = [
-      ["name", "column.title", true],
-      ["artist", "column.artist", false],
-      ["album", "field.album", false],
-      ["genre", "field.genre", false],
-      ["year", "field.year", false],
-      ["composer", "field.composer", false],
-      ["remixer", "field.remixer", false],
-      ["label", "field.label", false],
-      ["grouping", "field.grouping", false],
-      ["key", "column.key", false],
-      ["bpm", "column.bpm", false],
-      ["emoji", "field.emoji", false],
-      ["comments", "field.comments", true]
+      ["name", "column.title", "trackTitle", true],
+      ["artist", "column.artist", "trackArtist", false],
+      ["album", "field.album", "trackAlbum", false],
+      ["genre", "field.genre", "trackGenre", false],
+      ["year", "field.year", "trackYear", false],
+      ["composer", "field.composer", "trackComposer", false],
+      ["remixer", "field.remixer", "trackRemixer", false],
+      ["label", "field.label", "trackLabel", false],
+      ["grouping", "field.grouping", "trackGrouping", false],
+      ["key", "column.key", "trackKey", false],
+      ["bpm", "column.bpm", "trackBpm", false],
+      ["emoji", "field.emoji", "trackEmoji", false],
+      ["comments", "field.comments", "trackComments", true]
     ];
-    for (const [name, label, wide] of editorFields) {
-      form.append(fieldInput(name, t(label), String(edit[name] ?? ""), wide));
+    for (const [name, label, tipKey, wide] of editorFields) {
+      form.append(fieldInput(name, t(label), String(edit[name] ?? ""), tipKey, wide));
     }
     const colorLabel = document.createElement("label");
     colorLabel.append(document.createTextNode(t("field.color")));
     const colorSelect = document.createElement("select");
+    tip(colorSelect, "trackColor");
     colorSelect.name = "color";
     const currentColor = Number(edit.color ?? 16777215);
     const palette = COLORS.map(([value, key]) => [value, t(key)]);
@@ -4170,6 +4477,7 @@
     const ratingLabel = document.createElement("label");
     ratingLabel.append(document.createTextNode(t("field.rating")));
     const ratingSelect = document.createElement("select");
+    tip(ratingSelect, "trackRating");
     ratingSelect.name = "rating";
     const ratings = [
       ["", t("rating.none")],
@@ -4190,12 +4498,14 @@
     const lock = document.createElement("label");
     lock.className = "check";
     const lockInput = document.createElement("input");
+    tip(lockInput, "trackGridLock");
     lockInput.type = "checkbox";
     lockInput.name = "is_beatgrid_locked";
     lockInput.checked = Boolean(edit.is_beatgrid_locked);
     lock.append(lockInput, document.createTextNode(t("field.beatgridLocked")));
     form.append(lock);
     const save2 = document.createElement("button");
+    tip(save2, "trackSave");
     save2.type = "submit";
     save2.className = "text-button wide";
     save2.textContent = t("detail.saveTrack");
@@ -4208,30 +4518,35 @@
     body.append(form);
     const actions = document.createElement("div");
     actions.className = "actions";
-    const reveal = document.createElement("button");
-    reveal.type = "button";
+    const reveal2 = document.createElement("button");
+    tip(reveal2, "trackReveal");
+    reveal2.type = "button";
     const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
-    reveal.textContent = t("detail.reveal", { manager });
-    reveal.disabled = !track.file_on_disk;
-    reveal.addEventListener("click", () => revealTrack(track.id));
+    reveal2.textContent = t("detail.reveal", { manager });
+    reveal2.disabled = !track.file_on_disk;
+    reveal2.addEventListener("click", () => revealTrack(track.id));
     const prepare = document.createElement("button");
+    tip(prepare, track.in_prepare ? "prepareRemove" : "prepareSend");
     prepare.type = "button";
     prepare.textContent = track.in_prepare ? t("detail.removePrepare") : t("detail.sendPrepare");
     prepare.disabled = !writable;
     prepare.addEventListener("click", () => prepareTrack(track.id, !track.in_prepare));
     const relocate = document.createElement("button");
+    tip(relocate, "trackRelocate");
     relocate.type = "button";
     relocate.textContent = t("detail.relocate");
     relocate.disabled = !writable;
     relocate.addEventListener("click", () => relocateTrack(track));
     const remove = document.createElement("button");
+    tip(remove, "trackRemove");
     remove.type = "button";
     remove.textContent = t("detail.removeFromLibrary");
     remove.disabled = !writable;
     remove.addEventListener("click", () => removeTrack(track.id));
-    actions.append(reveal, prepare, relocate, remove);
+    actions.append(reveal2, prepare, relocate, remove);
     if (state.mode === "duplicates" && selectedDuplicateGroup()) {
       const merge = document.createElement("button");
+      tip(merge, "mergeCopies");
       merge.type = "button";
       merge.textContent = t("merge.title");
       merge.disabled = !writable;
@@ -4254,6 +4569,7 @@
       const open = group.name !== "Search copies";
       if (!open) {
         const toggle = document.createElement("button");
+        tip(toggle, "searchCopies");
         toggle.type = "button";
         toggle.className = "text-button";
         toggle.textContent = t("detail.searchCopies", { count: group.fields.length });
@@ -4384,6 +4700,7 @@
       const row = document.createElement("div");
       row.className = "copy-row";
       const button2 = document.createElement("button");
+      tip(button2, "duplicateCopy");
       button2.type = "button";
       button2.className = "text-button";
       button2.textContent = copy.file || t("track.numbered", { id: String(copy.id) });
@@ -4453,6 +4770,7 @@
     section.append(suggestHeading);
     if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
     const crate = document.createElement("button");
+    tip(crate, "relatedCrate");
     crate.type = "button";
     crate.className = "text-button";
     crate.dataset.relatedCrate = "true";
@@ -4476,6 +4794,7 @@
       const label = other.title || t("track.untitled");
       if (other.asset_id != null && other.in_library) {
         const open = document.createElement("button");
+        tip(open, "relatedOpen");
         open.type = "button";
         open.className = "text-button";
         open.textContent = label;
@@ -4504,6 +4823,7 @@
         main.append(note);
       }
       const remove = document.createElement("button");
+      tip(remove, "relatedRemove");
       remove.type = "button";
       remove.className = "text-button";
       remove.textContent = t("common.remove");
@@ -4520,6 +4840,7 @@
     const label = document.createElement("label");
     label.append(document.createTextNode(t("related.find")));
     const input = document.createElement("input");
+    tip(input, "relatedSearch");
     input.type = "search";
     input.autocomplete = "off";
     input.placeholder = t("related.findPlaceholder");
@@ -4554,6 +4875,7 @@
       for (const hit of hits2) {
         const item = document.createElement("li");
         const choose = document.createElement("button");
+        tip(choose, "relatedChoose");
         choose.type = "button";
         choose.className = "text-button";
         choose.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : hit.name || t("track.untitled");
@@ -4575,6 +4897,7 @@
     const noteLabel = document.createElement("label");
     noteLabel.append(document.createTextNode(t("related.note")));
     const note = document.createElement("input");
+    tip(note, "relatedNote");
     note.type = "text";
     note.maxLength = 500;
     note.placeholder = t("related.notePlaceholder");
@@ -4582,6 +4905,7 @@
     const ratingLabel = document.createElement("label");
     ratingLabel.append(document.createTextNode(t("related.linkRating")));
     const rating = document.createElement("select");
+    tip(rating, "relatedRating");
     for (const [value, text] of [["", t("rating.none")], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]]) {
       const option = document.createElement("option");
       option.value = value;
@@ -4592,10 +4916,12 @@
     const mutualLabel = document.createElement("label");
     mutualLabel.className = "check";
     const mutual = document.createElement("input");
+    tip(mutual, "relatedMutual");
     mutual.type = "checkbox";
     mutual.checked = true;
     mutualLabel.append(mutual, document.createTextNode(t("related.twoWayLink")));
     const save2 = document.createElement("button");
+    tip(save2, "relatedSave");
     save2.type = "button";
     save2.className = "text-button";
     save2.textContent = t("related.saveLink");
@@ -4627,6 +4953,7 @@
       reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
       main.append(name, reasons);
       const save2 = document.createElement("button");
+      tip(save2, "relatedSuggestionSave");
       save2.type = "button";
       save2.className = "text-button";
       save2.textContent = t("common.save");
@@ -4705,6 +5032,7 @@
       const label = document.createElement("label");
       label.className = "member";
       const input = document.createElement("input");
+      tip(input, "crateMember");
       input.type = "checkbox";
       input.checked = chosen.has(crate.id);
       input.disabled = !writable;
@@ -4716,10 +5044,10 @@
     }
     const smart = state.crates.filter((crate) => crate.smart && chosen.has(crate.id));
     if (smart.length) {
-      const line = document.createElement("p");
-      line.className = "detail-kicker";
-      line.textContent = t("crates.smartList", { names: smart.map((crate) => crate.name).join(", ") });
-      section.append(line);
+      const line2 = document.createElement("p");
+      line2.className = "detail-kicker";
+      line2.textContent = t("crates.smartList", { names: smart.map((crate) => crate.name).join(", ") });
+      section.append(line2);
     }
     section.append(holder);
     return section;
@@ -4964,6 +5292,7 @@
     el("session-list").replaceChildren();
     for (const session of state.historySessions) {
       const button2 = document.createElement("button");
+      tip(button2, "historySession");
       button2.type = "button";
       button2.className = "crate";
       button2.setAttribute("role", "option");
@@ -5238,6 +5567,7 @@
       const last = index === crumbs.length - 1;
       if (!last && crumb.path) {
         const button2 = document.createElement("button");
+        tip(button2, "filesCrumb");
         button2.type = "button";
         button2.className = "files-crumb";
         button2.textContent = crumb.name;
@@ -5246,11 +5576,11 @@
         });
         item.append(button2);
       } else {
-        const current = document.createElement("span");
-        current.className = "files-crumb";
-        current.setAttribute("aria-current", "page");
-        current.textContent = crumb.name;
-        item.append(current);
+        const current2 = document.createElement("span");
+        current2.className = "files-crumb";
+        current2.setAttribute("aria-current", "page");
+        current2.textContent = crumb.name;
+        item.append(current2);
       }
       if (!last) {
         const sep = document.createElement("span");
@@ -5329,19 +5659,19 @@
     const view = list.clientHeight || 600;
     const maxScroll = Math.max(0, rows2.length * rowHeight - view);
     const scrollTop = Math.min(Math.max(0, list.scrollTop), maxScroll);
-    const start = Math.max(0, Math.floor(scrollTop / rowHeight) - FILE_OVERSCAN);
+    const start2 = Math.max(0, Math.floor(scrollTop / rowHeight) - FILE_OVERSCAN);
     const end = Math.min(rows2.length, Math.ceil((scrollTop + view) / rowHeight) + FILE_OVERSCAN);
     const spacer2 = fileSpacer(list);
     const windowEl = spacer2.querySelector(".files-window");
     if (!windowEl) return;
     spacer2.style.height = `${rows2.length * rowHeight}px`;
-    windowEl.style.transform = `translateY(${start * rowHeight}px)`;
+    windowEl.style.transform = `translateY(${start2 * rowHeight}px)`;
     windowEl.replaceChildren();
-    for (let index = start; index < end; index += 1) {
+    for (let index = start2; index < end; index += 1) {
       const entry = rows2[index];
       if (entry) windowEl.append(fileRow(entry, index));
     }
-    if (state.filesActive >= start && state.filesActive < end) {
+    if (state.filesActive >= start2 && state.filesActive < end) {
       list.setAttribute("aria-activedescendant", `files-item-${state.filesActive}`);
     } else list.removeAttribute("aria-activedescendant");
   }
@@ -5373,6 +5703,7 @@
     const copy = document.createElement("p");
     copy.textContent = t("files.noRootsBody");
     const button2 = document.createElement("button");
+    tip(button2, "filesRunSetup");
     button2.type = "button";
     button2.id = "files-run-setup";
     button2.className = "files-primary";
@@ -5444,6 +5775,7 @@
     const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
     if (openKind) {
       const button2 = document.createElement("button");
+      tip(button2, entry.missing ? "filesDriveMissing" : "filesOpen", entry.detail ? `${entry.name} ${entry.detail}` : entry.name);
       button2.type = "button";
       button2.className = "files-open";
       button2.dataset.filesIndex = String(index);
@@ -5472,7 +5804,6 @@
           button2.append(detail);
         }
       }
-      button2.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
       if (entry.missing) {
         button2.setAttribute("aria-disabled", "true");
         button2.setAttribute("aria-label", t("files.driveMissingLabel", { name: entry.name }));
@@ -5495,6 +5826,7 @@
     }
     if (entry.kind !== "file") {
       const label2 = document.createElement("button");
+      tip(label2, "filesShortcut", entry.name);
       label2.type = "button";
       label2.className = "files-kind";
       label2.dataset.filesIndex = String(index);
@@ -5508,6 +5840,7 @@
     const label = document.createElement("label");
     label.className = "files-file";
     const box = document.createElement("input");
+    tip(box, "filesSelect", entry.path || entry.name);
     box.type = "checkbox";
     box.dataset.filesIndex = String(index);
     box.id = `files-item-${index}`;
@@ -5523,13 +5856,11 @@
     const name = document.createElement("span");
     name.className = "files-name";
     name.textContent = entry.name;
-    name.title = entry.path || entry.name;
     label.append(box, name);
     if (entry.detail) {
       const detail = document.createElement("span");
       detail.className = "files-match-detail";
       detail.textContent = entry.detail;
-      detail.title = entry.detail;
       label.append(detail);
     }
     if (entry.in_library) {
@@ -5806,9 +6137,9 @@
   function fillRekordboxReport(lines) {
     const list = el("rekordbox-report");
     list.replaceChildren();
-    for (const line of lines) {
+    for (const line2 of lines) {
       const item = document.createElement("li");
-      item.textContent = line;
+      item.textContent = line2;
       list.append(item);
     }
   }
@@ -5846,9 +6177,9 @@
     list.className = "merge-preview";
     const added = preview.crates_added || [];
     const item = (text) => {
-      const line = document.createElement("li");
-      line.textContent = text;
-      list.append(line);
+      const line2 = document.createElement("li");
+      line2.textContent = text;
+      list.append(line2);
     };
     if (added.length) {
       const names = added.map((crate) => crate.space && crate.space !== state.space ? `${crate.name} (${crate.space})` : crate.name);
@@ -5949,6 +6280,7 @@
       label.className = "merge-choice";
       label.htmlFor = `merge-keep-${id}`;
       const input = document.createElement("input");
+      tip(input, "mergeKeep");
       input.type = "radio";
       input.name = "merge-keep";
       input.id = `merge-keep-${id}`;
@@ -6732,6 +7064,7 @@
     hits.forEach((hit, index) => {
       const item = document.createElement("li");
       const button2 = document.createElement("button");
+      tip(button2, "quickOpenResult", hit.detail);
       button2.type = "button";
       button2.className = "quick-open-option";
       button2.id = `quick-open-option-${index}`;
@@ -6749,7 +7082,6 @@
       const detail = document.createElement("span");
       detail.className = "quick-open-detail";
       detail.textContent = hit.detail;
-      detail.title = hit.detail;
       button2.append(kind, title2, detail);
       button2.addEventListener("click", () => {
         active = index;
@@ -6759,8 +7091,8 @@
       list.append(item);
     });
     const field = el("quick-open-query");
-    const current = hits[active];
-    if (current) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
+    const current2 = hits[active];
+    if (current2) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
     else field.removeAttribute("aria-activedescendant");
     const chosen = list.querySelector(".is-active");
     if (chosen && typeof chosen.scrollIntoView === "function") chosen.scrollIntoView({ block: "nearest" });
@@ -6934,6 +7266,10 @@
     if (named) return named;
     const key = chord.key.length === 1 ? chord.key.toUpperCase() : chord.key;
     return chord.mod ? `Ctrl/Cmd+${key}` : key;
+  }
+  function shortcutKeys(id) {
+    const shortcut = SHORTCUTS.find((item) => item.id === id);
+    return shortcut ? shortcut.keys.map(chordLabel).join(" or ") : null;
   }
   function isTypingTarget(target) {
     if (!(target instanceof HTMLElement)) return false;
@@ -7344,6 +7680,119 @@
     stop = onLocaleChange(repaintAll);
   }
 
+  // src/tooltips.ts
+  var SHOW_DELAY_MS = 500;
+  var TOOLTIP_ID = "control-tooltip";
+  var GAP_PX = 6;
+  var EDGE_PX = 8;
+  var keysFor = () => null;
+  var current = null;
+  var timer2;
+  function tooltipNode() {
+    const found = document.getElementById(TOOLTIP_ID);
+    if (found) return found;
+    const node = document.createElement("div");
+    node.id = TOOLTIP_ID;
+    node.className = "tooltip";
+    node.setAttribute("role", "tooltip");
+    node.hidden = true;
+    document.body.append(node);
+    return node;
+  }
+  function line(className, text) {
+    const node = document.createElement("span");
+    node.className = className;
+    node.textContent = text;
+    return node;
+  }
+  function fill2(node, control) {
+    const key = control.dataset.tip;
+    const shortcut = TIP_SHORTCUTS[key];
+    const keys = [shortcut ?? []].flat().map(keysFor).filter(Boolean).join(" or ");
+    const lines = [];
+    if (control.dataset.tipDetail) lines.push(line("tooltip-detail", control.dataset.tipDetail));
+    lines.push(line("tooltip-text", tipText(key)));
+    if (keys) lines.push(line("tooltip-keys", keys));
+    node.replaceChildren(...lines);
+  }
+  function describe(control) {
+    const ids = (control.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+    control.setAttribute("aria-describedby", [...ids, TOOLTIP_ID].join(" "));
+  }
+  function undescribe(control) {
+    const ids = (control.getAttribute("aria-describedby") ?? "").split(" ").filter((id) => id && id !== TOOLTIP_ID);
+    if (ids.length) control.setAttribute("aria-describedby", ids.join(" "));
+    else control.removeAttribute("aria-describedby");
+  }
+  function place(node, control) {
+    const target = control.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    const fitsBelow = target.bottom + GAP_PX + box.height <= window.innerHeight - EDGE_PX;
+    const top = fitsBelow ? target.bottom + GAP_PX : target.top - GAP_PX - box.height;
+    const maxLeft = window.innerWidth - box.width - EDGE_PX;
+    const left = Math.max(EDGE_PX, Math.min(target.left, maxLeft));
+    node.style.top = `${Math.max(EDGE_PX, top)}px`;
+    node.style.left = `${left}px`;
+  }
+  function reveal(control) {
+    if (!control.isConnected) {
+      hide();
+      return;
+    }
+    const node = tooltipNode();
+    const host = control.closest("dialog") ?? document.body;
+    if (node.parentElement !== host) host.append(node);
+    node.hidden = false;
+    place(node, control);
+  }
+  function hide() {
+    clearTimeout(timer2);
+    if (current) undescribe(current);
+    current = null;
+    tooltipNode().hidden = true;
+  }
+  function start(control) {
+    if (control === current) return;
+    hide();
+    current = control;
+    fill2(tooltipNode(), control);
+    describe(control);
+    timer2 = setTimeout(() => reveal(control), SHOW_DELAY_MS);
+  }
+  function controlFor(node) {
+    if (!(node instanceof Element)) return null;
+    const tipped = node.closest("[data-tip]");
+    if (tipped) return tipped;
+    const control = node.closest("label")?.control;
+    return control instanceof HTMLElement && control.dataset.tip ? control : null;
+  }
+  function onOver(event) {
+    const control = controlFor(event.target);
+    if (control) start(control);
+    else hide();
+  }
+  function onOut(event) {
+    const next2 = event.relatedTarget;
+    if (controlFor(next2) !== current) hide();
+  }
+  function onFocus(event) {
+    const control = controlFor(event.target);
+    if (control?.matches(":focus-visible")) start(control);
+  }
+  function wireTooltips(lookup) {
+    keysFor = lookup;
+    hide();
+    document.addEventListener("mouseover", onOver);
+    document.addEventListener("mouseout", onOut);
+    document.addEventListener("focusin", onFocus);
+    document.addEventListener("focusout", hide);
+    document.addEventListener("keydown", hide);
+    document.addEventListener("pointerdown", hide);
+    document.addEventListener("click", hide);
+    document.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+  }
+
   // src/app.ts
   function wireSnapshots() {
     el("snapshots-refresh").addEventListener("click", () => {
@@ -7371,6 +7820,7 @@
   wireLibrary();
   wireVirtualScroll();
   wireShortcuts();
+  wireTooltips(shortcutKeys);
   wireDialogs();
   wireSnapshots();
   wireLayout();
