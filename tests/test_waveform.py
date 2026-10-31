@@ -1811,7 +1811,7 @@ def _prepare_audio(kind: str, folder: Path) -> Path | None:
 
     Generation is preferred when this machine has an encoder. A failure, or
     a machine with no encoder, uses the synthetic file under
-    ``tests/fixtures/waveform``. Those files are one-second 1 kHz sines.
+    ``tests/waveform_sines``. Those files are one-second 1 kHz sines.
 
     Args:
         kind: ``aac``, ``alac``, or ``adts``.
@@ -1838,7 +1838,7 @@ def _prepare_audio(kind: str, folder: Path) -> Path | None:
             if dest.exists():
                 dest.unlink()
     if not dest.is_file() or dest.stat().st_size == 0:
-        baked = FIXTURES / "waveform" / baked_name
+        baked = ROOT / "tests" / "waveform_sines" / baked_name
         if not baked.is_file():
             return None
         dest.write_bytes(baked.read_bytes())
@@ -1867,7 +1867,7 @@ class NativeFileTests(unittest.TestCase):
     """Decode AAC or ALAC with the OS decoder.
 
     The file is generated when an encoder exists. Otherwise the baked
-    one-second 1 kHz sine in ``tests/fixtures/waveform`` is copied into a
+    one-second 1 kHz sine in ``tests/waveform_sines`` is copied into a
     temp directory. ffmpeg is hidden for the decode, so a pass is the
     native reader. Linux skips this class.
     """
