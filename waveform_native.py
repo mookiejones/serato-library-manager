@@ -529,6 +529,8 @@ def _configure_dlls(ole: ctypes.CDLL, plat: ctypes.CDLL, readwrite: ctypes.CDLL)
     plat.MFCreateSample.restype = ctypes.c_long
     plat.MFCreateAttributes.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32]
     plat.MFCreateAttributes.restype = ctypes.c_long
+    plat.MFInitMediaTypeFromWaveFormatEx.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32]
+    plat.MFInitMediaTypeFromWaveFormatEx.restype = ctypes.c_long
     readwrite.MFCreateSourceReaderFromURL.argtypes = [
         ctypes.c_wchar_p,
         ctypes.c_void_p,
@@ -1837,8 +1839,80 @@ def _add_stream(writer: int, media: int) -> int:
     return int(index.value)
 
 
+class _WaveFormatEx(ctypes.Structure):
+    """PCM WAVEFORMATEX used to initialize an encoder input type."""
+
+    _fields_ = [
+        ("wFormatTag", ctypes.c_uint16),
+        ("nChannels", ctypes.c_uint16),
+        ("nSamplesPerSec", ctypes.c_uint32),
+        ("nAvgBytesPerSec", ctypes.c_uint32),
+        ("nBlockAlign", ctypes.c_uint16),
+        ("nBitsPerSample", ctypes.c_uint16),
+        ("cbSize", ctypes.c_uint16),
+    ]
+
+
+def _pcm_from_wave(channels: int, rate: int) -> int:
+    """Create a PCM media type from a WAVEFORMATEX.
+
+    Args:
+        channels: Channel count.
+        rate: Sample rate in Hz.
+
+    Returns:
+        An ``IMFMediaType`` pointer the caller must release.
+
+    Raises:
+        waveform.DecodeError: Media Foundation refused the format.
+    """
+    media = _create_media_type()
+    fmt = _WaveFormatEx()
+    fmt.wFormatTag = 1
+    fmt.nChannels = channels
+    fmt.nSamplesPerSec = rate
+    fmt.nBitsPerSample = 16
+    fmt.nBlockAlign = channels * 2
+    fmt.nAvgBytesPerSec = rate * fmt.nBlockAlign
+    fmt.cbSize = 0
+    try:
+        _check(
+            int(_mfplat().MFInitMediaTypeFromWaveFormatEx(media, ctypes.byref(fmt), ctypes.sizeof(fmt))),
+            "MFInitMediaTypeFromWaveFormatEx",
+        )
+    except Exception:
+        _release(media)
+        raise
+    return media
+
+
+def _offer_input(writer: int, index: int, media: int) -> int:
+    """Try one PCM type as the encoder input.
+
+    Args:
+        writer: ``IMFSinkWriter`` pointer.
+        index: Stream index.
+        media: Input media type. Released by the caller.
+
+    Returns:
+        The HRESULT from ``SetInputMediaType``.
+    """
+    return _invoke(
+        writer,
+        _WRITER_SET_INPUT,
+        ctypes.c_long,
+        [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p],
+        index,
+        media,
+        None,
+    )
+
+
 def _set_encoder_input(writer: int, index: int, rate: int) -> None:
-    """Set the PCM input type, retrying without a channel mask.
+    """Set the PCM input type the AAC encoder will accept.
+
+    A WAVEFORMATEX media type is tried first. Attribute types, with and
+    without a stereo channel mask, are the fallback.
 
     Args:
         writer: ``IMFSinkWriter`` pointer.
@@ -1846,26 +1920,29 @@ def _set_encoder_input(writer: int, index: int, rate: int) -> None:
         rate: Sample rate in Hz.
 
     Raises:
-        waveform.DecodeError: Both input types were refused.
+        waveform.DecodeError: Every input type was refused.
     """
-    last = 0
-    for mask in (3, None):
+    attempts: list[int] = []
+    wave_type = 0
+    try:
+        wave_type = _pcm_from_wave(2, rate)
+        attempts.append(_offer_input(writer, index, wave_type))
+    except Exception:
+        pass
+    finally:
+        if wave_type:
+            _release(wave_type)
+    if attempts and attempts[-1] >= 0:
+        return
+    for mask in (None, 3):
         media = _pcm_type(2, rate, channel_mask=mask)
         try:
-            last = _invoke(
-                writer,
-                _WRITER_SET_INPUT,
-                ctypes.c_long,
-                [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p],
-                index,
-                media,
-                None,
-            )
+            attempts.append(_offer_input(writer, index, media))
         finally:
             _release(media)
-        if last >= 0:
+        if attempts[-1] >= 0:
             return
-    _check(last, "SetInputMediaType")
+    _check(attempts[-1], "SetInputMediaType")
 
 
 def _write_aac(pcm: bytes, rate: int, dest: Path) -> None:

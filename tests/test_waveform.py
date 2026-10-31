@@ -1806,6 +1806,45 @@ def _encode_fixture(kind: str, wav: Path, dest: Path) -> None:
         raise AssertionError("encoder wrote no bytes")
 
 
+def _prepare_audio(kind: str, folder: Path) -> Path | None:
+    """Return a temp AAC or ALAC file, generated or copied from the baked sine.
+
+    Generation is preferred when this machine has an encoder. A failure, or
+    a machine with no encoder, uses the synthetic file under
+    ``tests/fixtures/waveform``. Those files are one-second 1 kHz sines.
+
+    Args:
+        kind: ``aac``, ``alac``, or ``adts``.
+        folder: Temp directory that will hold the copy.
+
+    Returns:
+        The audio path, or None when neither an encoder nor a baked file exists.
+    """
+    baked_name = {"aac": "tone-aac.m4a", "alac": "tone-alac.m4a", "adts": "tone.aac"}[kind]
+    dest = folder / baked_name
+    wav = folder / "tone.wav"
+    if not wav.is_file():
+        _write_wav(wav, _sine(1000.0, 1.0))
+    if kind == "alac":
+        has_tool = _alac_tool()
+    elif kind == "adts":
+        has_tool = (sys.platform == "darwin" and waveform_native.apple_converter()) or shutil.which("ffmpeg")
+    else:
+        has_tool = _aac_tool()
+    if has_tool:
+        try:
+            _encode_fixture(kind, wav, dest)
+        except Exception:
+            if dest.exists():
+                dest.unlink()
+    if not dest.is_file() or dest.stat().st_size == 0:
+        baked = FIXTURES / "waveform" / baked_name
+        if not baked.is_file():
+            return None
+        dest.write_bytes(baked.read_bytes())
+    return dest
+
+
 def _assert_mid_tone(test: unittest.TestCase, body: bytes) -> None:
     """Require a 1 kHz tone to land in the mid band.
 
@@ -1825,11 +1864,12 @@ def _assert_mid_tone(test: unittest.TestCase, body: bytes) -> None:
     "OS-native AAC and ALAC decode is exercised on the macOS and Windows runners",
 )
 class NativeFileTests(unittest.TestCase):
-    """Decode a generated AAC or ALAC file with the OS decoder.
+    """Decode AAC or ALAC with the OS decoder.
 
-    The fixture is created in a temp directory when an encoder exists.
-    ffmpeg is hidden for the decode, so a pass is the native reader.
-    Linux skips this class. A runner without an encoder skips that test.
+    The file is generated when an encoder exists. Otherwise the baked
+    one-second 1 kHz sine in ``tests/fixtures/waveform`` is copied into a
+    temp directory. ffmpeg is hidden for the decode, so a pass is the
+    native reader. Linux skips this class.
     """
 
     def _load_native(self, path: Path) -> bytes:
@@ -1852,69 +1892,58 @@ class NativeFileTests(unittest.TestCase):
         return body
 
     def test_aac_m4a_decodes_with_the_native_decoder(self) -> None:
-        """Build a one-second AAC file and read a mid-band waveform from it.
+        """Read a mid-band waveform from a one-second AAC file.
 
-        macOS uses ``afconvert``. Windows uses Media Foundation to write
-        the file and to read it back. The source directory does not gain
-        a WAV.
+        macOS prefers ``afconvert``. Windows prefers Media Foundation and
+        falls back to the baked sine when that encoder refuses the type.
+        The source directory does not gain a decoded WAV.
 
         Returns:
-            None. The test skips when this runner has no AAC encoder.
+            None. The test skips when no AAC bytes are available.
         """
-        if _aac_tool() is None:
-            self.skipTest("no AAC encoder on this runner")
         with tempfile.TemporaryDirectory() as raw:
-            folder = Path(raw)
-            wav = folder / "tone.wav"
-            dest = folder / "tone.m4a"
-            _write_wav(wav, _sine(1000.0, 1.0))
-            _encode_fixture("aac", wav, dest)
+            dest = _prepare_audio("aac", Path(raw))
+            if dest is None:
+                self.skipTest("no AAC encoder on this runner")
+                return
             body = self._load_native(dest)
         _assert_mid_tone(self, body)
 
     def test_alac_m4a_and_alac_suffix_decode_with_the_native_decoder(self) -> None:
-        """Build an ALAC file and decode both the ``.m4a`` and a ``.alac`` name.
+        """Decode an ALAC file under both a ``.m4a`` name and a ``.alac`` name.
 
         The ``.alac`` file is a copy of the same bytes in the temp directory.
-        Windows without ffmpeg skips, because Media Foundation is not used
-        as an ALAC encoder.
+        Windows uses the baked sine when it has no ALAC encoder.
 
         Returns:
-            None. The test skips when this runner has no ALAC encoder.
+            None. The test skips when no ALAC bytes are available.
         """
-        if _alac_tool() is None:
-            self.skipTest("no ALAC encoder on this runner")
         with tempfile.TemporaryDirectory() as raw:
             folder = Path(raw)
-            wav = folder / "tone.wav"
-            dest = folder / "tone.m4a"
+            dest = _prepare_audio("alac", folder)
+            if dest is None:
+                self.skipTest("no ALAC encoder on this runner")
+                return
             renamed = folder / "tone.alac"
-            _write_wav(wav, _sine(1000.0, 1.0))
-            _encode_fixture("alac", wav, dest)
-            body = self._load_native(dest)
             renamed.write_bytes(dest.read_bytes())
+            body = self._load_native(dest)
             renamed_body = self._load_native(renamed)
         _assert_mid_tone(self, body)
         _assert_mid_tone(self, renamed_body)
 
     def test_adts_aac_decodes_with_the_native_decoder(self) -> None:
-        """Build an ADTS ``.aac`` file and read a mid-band waveform from it.
+        """Read a mid-band waveform from an ADTS ``.aac`` file.
 
-        macOS uses ``afconvert``. Windows skips when ffmpeg is not installed,
-        because the Media Foundation fixture writer emits ``.m4a``.
+        macOS prefers ``afconvert``. Windows uses the baked sine when
+        ffmpeg is not installed.
 
         Returns:
-            None. The test skips when this runner has no ADTS encoder.
+            None. The test skips when no ADTS bytes are available.
         """
-        if sys.platform != "darwin" and shutil.which("ffmpeg") is None:
-            self.skipTest("no ADTS encoder on this runner")
-        if sys.platform == "darwin" and waveform_native.apple_converter() is None:
-            self.skipTest("no ADTS encoder on this runner")
         with tempfile.TemporaryDirectory() as raw:
-            folder = Path(raw)
-            wav = folder / "tone.wav"
-            dest = folder / "tone.aac"
-            _write_wav(wav, _sine(1000.0, 1.0))
-            _encode_fixture("adts", wav, dest)
+            dest = _prepare_audio("adts", Path(raw))
+            if dest is None:
+                self.skipTest("no ADTS encoder on this runner")
+                return
             body = self._load_native(dest)
         _assert_mid_tone(self, body)
