@@ -14,7 +14,7 @@ Under that is the whole track. The part you have already played is darker. Click
 
 While the waveform is still being read, the overview uses the Serato Overview stored in the file, then switches to the computed one. If the file has no waveform, the bar says **Waveform unavailable for this format**. The track still plays.
 
-**Play** and **Pause** are one button. Its name changes with the state.
+**Play** and **Pause** are one button. Its name changes with the state. Hover a player control, or tab to it, and a note names the action. **Space**, **Left**, and **Right** are written there when they apply. **+** and **−** and the overview do the same.
 
 **Space** plays or pauses. When nothing is playing, it starts the selected track. It does nothing while you are typing in a field. **Left** moves 5 seconds back. **Right** moves 5 seconds forward. Those are the only playback keys in the shortcut table. With the seek bar focused, **Shift** with **Left** or **Right** moves 30 seconds.
 

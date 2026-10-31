@@ -565,7 +565,167 @@
     "wizard.stepOf": "Step {index} of {count}",
     "wizard.useFolder": "Use this folder",
     "wizard.welcomeBody": "This app shows the library Serato already keeps on this computer. It will not change anything without asking.",
-    "wizard.yes": "Yes, share"
+    "wizard.yes": "Yes, share",
+    "tooltip.allTracks": "Show every track in this space. Ctrl/Cmd+1.",
+    "tooltip.beatgridLock": "Lock the beatgrid so Serato does not move it.",
+    "tooltip.chooseRelated": "Choose {name} as the track to link.",
+    "tooltip.collapseCrate": "Hide the crates nested under {name}.",
+    "tooltip.consentAccept": "Share anonymous stats and crash reports.",
+    "tooltip.consentDecline": "Don't share anonymous stats.",
+    "tooltip.copyLogs": "Copy the log text.",
+    "tooltip.copyVersion": "Copy the app version.",
+    "tooltip.crateColor": "Set the color of the selected crate.",
+    "tooltip.crateDelete": "Delete the selected crate. The tracks stay in the library.",
+    "tooltip.crateNew": "Create a new crate.",
+    "tooltip.crateRename": "Rename the selected crate.",
+    "tooltip.crateSearch": "Find a crate by name. Esc clears the search.",
+    "tooltip.cue": "Move the playhead to {label}.",
+    "tooltip.editField": "Edit {label}. Nothing is saved until you save the track.",
+    "tooltip.expandCrate": "Show the crates nested under {name}.",
+    "tooltip.exportM3u": "Download this list as a playlist file.",
+    "tooltip.exportRekordbox": "Download a playlist file Rekordbox can open. You confirm before it downloads.",
+    "tooltip.fileShortcut": "{name} is a shortcut. It cannot be opened from here.",
+    "tooltip.filesCancel": "Cancel. Nothing is changed. Esc.",
+    "tooltip.filesConfirm": "Save this file change.",
+    "tooltip.filesDelete": "Move the selected files to the Trash.",
+    "tooltip.filesElsewhere": "Browse a folder that is not one of the music folders.",
+    "tooltip.filesList": "Folder list. Up arrow and Down arrow move between rows. Enter opens the row.",
+    "tooltip.filesMove": "Move the selected files to another folder.",
+    "tooltip.filesMoveFolder": "Move this folder.",
+    "tooltip.filesMoveHere": "Move the files into this folder.",
+    "tooltip.filesMoveTrash": "Move the selected files to the Trash. You can restore them from there.",
+    "tooltip.filesMusicFolders": "Go back to the music folders.",
+    "tooltip.filesName": "Type the new file name.",
+    "tooltip.filesPickCancel": "Cancel choosing a folder.",
+    "tooltip.filesRefresh": "Refresh this folder from disk.",
+    "tooltip.filesRename": "Rename the selected file.",
+    "tooltip.filesReplace": "Replace the selected file and keep its cue points.",
+    "tooltip.filesReplacement": "Type the path of the replacement file.",
+    "tooltip.filesReview": "Review this change before it is saved.",
+    "tooltip.filesSearch": "Search file names. Ctrl/Cmd+F or /. Esc clears the search.",
+    "tooltip.filesUp": "Go up to the parent folder.",
+    "tooltip.findRelated": "Find a track to link by title or artist.",
+    "tooltip.hideSearchCopies": "Hide the fields that were compared.",
+    "tooltip.hotLoops": "Copy loops onto a free hot-cue pad in the Rekordbox file.",
+    "tooltip.importFile": "Choose a playlist file to import.",
+    "tooltip.importM3u": "Add tracks from a playlist file into a new crate.",
+    "tooltip.keepCopy": "Keep this copy: {name}. The others leave the library.",
+    "tooltip.linkMutual": "Also link that track back to this one.",
+    "tooltip.linkNote": "Add a note for this link.",
+    "tooltip.language": "Choose the language for this window. Same as the system follows this computer.",
+    "tooltip.linkRating": "Rate this link from 1 to 5.",
+    "tooltip.logFallback": "Log text, when it could not be copied.",
+    "tooltip.membership": "Add this track to {name}, or take it out.",
+    "tooltip.memoryCues": "Include memory cues in the Rekordbox file.",
+    "tooltip.mergeCancel": "Cancel. Nothing is merged. Esc.",
+    "tooltip.mergeConfirm": "Merge the copies into the one you keep.",
+    "tooltip.mergeConfirmTrash": "Merge the copies and move the other audio files to the Trash.",
+    "tooltip.mergeDuplicates": "Merge the selected copies into the one you keep.",
+    "tooltip.mergeTrash": "Move the other audio files to the Trash. You can restore them from there.",
+    "tooltip.merging": "Merging the copies.",
+    "tooltip.missingDrive": "Connect the drive that holds {name} before opening it.",
+    "tooltip.next": "Play the next track in this list.",
+    "tooltip.openCopy": "Open this other copy, {name}.",
+    "tooltip.openCrate": "Show the tracks in the crate {name}.",
+    "tooltip.openCrumb": "Open the folder {name}.",
+    "tooltip.openFile": "Open the folder {name}. Enter opens the highlighted row.",
+    "tooltip.openInLibrary": "Open this history row in the library.",
+    "tooltip.openLogs": "Open the folder that holds the log.",
+    "tooltip.openRelated": "Open the linked track {name}.",
+    "tooltip.overview": "Overview of the whole track. Click or drag to seek. Left arrow goes back 5 seconds. Right arrow goes forward 5 seconds.",
+    "tooltip.playRow": "Start {name}. Space plays or pauses.",
+    "tooltip.prepareAdd": "Send this track to Prepare.",
+    "tooltip.prepareRemove": "Take this track out of Prepare.",
+    "tooltip.previous": "Play the previous track in this list.",
+    "tooltip.quickOpen": "Find a track or a file by name. Ctrl/Cmd+K. Esc closes this box.",
+    "tooltip.quickOpenClose": "Close find. Esc.",
+    "tooltip.quickOpenHit": "Open {kind} {title}. Enter.",
+    "tooltip.quickOpenHitDetail": "Open {kind} {title}. {detail}. Enter.",
+    "tooltip.quickOpenRetry": "Search files again.",
+    "tooltip.rekordboxCancel": "Cancel. The file is not downloaded. Esc.",
+    "tooltip.rekordboxDownload": "Download the Rekordbox file.",
+    "tooltip.rekordboxKey": "Choose how keys are written in the Rekordbox file.",
+    "tooltip.reload": "Reload the library from Serato.",
+    "tooltip.relocate": "Point this track at a different audio file.",
+    "tooltip.removeRelated": "Remove the saved link to {name}. The audio file stays on disk.",
+    "tooltip.removeTrack": "Remove this track from the library. The audio file stays on disk.",
+    "tooltip.rerunWizard": "Run setup again.",
+    "tooltip.reveal": "Show this file in {name}. The library is not changed.",
+    "tooltip.reviewRestore": "Review what restoring this snapshot would change.",
+    "tooltip.runSetup": "Run setup to find music folders.",
+    "tooltip.saveLink": "Save this link.",
+    "tooltip.saveRules": "Save these smart crate rules.",
+    "tooltip.saveSuggestion": "Save a two-way link to {name}. Serato is not changed until you update the crate.",
+    "tooltip.saveTrack": "Save these track details.",
+    "tooltip.search": "Search tracks by title or artist. Ctrl/Cmd+F or /. Esc clears the search.",
+    "tooltip.seek": "Move through the track. Left arrow goes back 5 seconds. Right arrow goes forward 5 seconds. Shift with an arrow jumps 30 seconds.",
+    "tooltip.selectFile": "Select {name} for rename, move, or delete.",
+    "tooltip.selectFilePath": "Select {name} at {path} for rename, move, or delete.",
+    "tooltip.selectRow": "Select {name}. Enter opens this row.",
+    "tooltip.session": "Show the tracks played in the session {name}.",
+    "tooltip.settings": "Open settings.",
+    "tooltip.settingsClose": "Close settings. Esc.",
+    "tooltip.shortcuts": "Show keyboard shortcuts. ?.",
+    "tooltip.shortcutsClose": "Close the shortcut list. Esc.",
+    "tooltip.showSearchCopies": "Show the fields that were compared.",
+    "tooltip.smartRules": "Edit the smart crate rules. Nothing is saved until you press Save rules.",
+    "tooltip.snapshotCancel": "Cancel. Nothing is restored. Esc.",
+    "tooltip.snapshotConfirm": "Restore this snapshot. A new snapshot is saved first.",
+    "tooltip.snapshotsList": "Snapshot list. Up arrow and Down arrow move between rows. Enter reviews the snapshot.",
+    "tooltip.snapshotsRefresh": "Refresh the snapshot list.",
+    "tooltip.snapshotsRetry": "Try reading the snapshots again.",
+    "tooltip.snapshotsTake": "Save a snapshot of the library.",
+    "tooltip.snapshotsUndo": "Review undoing the last outside change.",
+    "tooltip.sortAdded": "Sort crates by the date they were added.",
+    "tooltip.sortArtist": "Sort tracks by artist.",
+    "tooltip.sortBpm": "Sort tracks by tempo.",
+    "tooltip.sortBy": "Sort by {label}.",
+    "tooltip.sortCrateName": "Sort crates by name.",
+    "tooltip.sortDeck": "Sort history by deck.",
+    "tooltip.sortKey": "Sort tracks by key.",
+    "tooltip.sortLength": "Sort tracks by length.",
+    "tooltip.sortOrder": "Sort crates in the saved order.",
+    "tooltip.sortPlayed": "Sort history by whether the track was played.",
+    "tooltip.sortStart": "Sort history by the time it started.",
+    "tooltip.sortTitle": "Sort tracks by title.",
+    "tooltip.space": "Choose Library, Video, Apple Music, or Prepare.",
+    "tooltip.splitter": "Drag to resize the track list. Double-click to put it back. Arrow keys resize it.",
+    "tooltip.telemetry": "Turn anonymous stats and crash reports on or off.",
+    "tooltip.trackColor": "Choose a color for this track.",
+    "tooltip.trackList": "Track list. Up arrow and Down arrow move between rows. Enter opens the row. Space plays or pauses.",
+    "tooltip.trackRating": "Choose a rating for this track.",
+    "tooltip.transport": "{action}. Space plays or pauses.",
+    "tooltip.transportNamed": "{action} {name}. Space plays or pauses.",
+    "tooltip.updateRelated": "Create or refresh the Related crate in Serato. Serato has to be quit.",
+    "tooltip.viewCrates": "Show crates. Ctrl/Cmd+2.",
+    "tooltip.viewDuplicates": "Show tracks that look like copies of each other.",
+    "tooltip.viewFiles": "Show files on disk. Ctrl/Cmd+3.",
+    "tooltip.viewHistory": "Show history. Ctrl/Cmd+4.",
+    "tooltip.viewMissing": "Show tracks whose files are missing.",
+    "tooltip.viewSnapshots": "Show snapshots. Ctrl/Cmd+5.",
+    "tooltip.viewStems": "Show tracks that have stems.",
+    "tooltip.volume": "Change how loud playback is.",
+    "tooltip.wizard.checkAgain": "Look for the Serato library again.",
+    "tooltip.wizard.continue": "Continue to the next step.",
+    "tooltip.wizard.getStarted": "Start setup.",
+    "tooltip.wizard.looking": "Looking for the Serato library.",
+    "tooltip.wizard.none": "Continue setup.",
+    "tooltip.wizard.openLibrary": "Finish setup and open the library.",
+    "tooltip.wizard.saving": "Saving a safety copy of the library.",
+    "tooltip.wizard.takeSnapshot": "Save a safety copy of the library.",
+    "tooltip.wizard.tryAgain": "Try saving the safety copy again.",
+    "tooltip.wizard.useLibrary": "Use the library that was found.",
+    "tooltip.wizardBack": "Go back one setup step.",
+    "tooltip.wizardCancel": "Cancel setup. The library is not changed. Esc.",
+    "tooltip.wizardFolder": "Open the folder {name}.",
+    "tooltip.wizardFolderClose": "Close the folder list. Esc.",
+    "tooltip.wizardFolderUp": "Go up to the parent folder.",
+    "tooltip.wizardFolderUse": "Use this folder as the library.",
+    "tooltip.wizardNo": "Don't share anonymous stats.",
+    "tooltip.wizardSecondary": "Choose a folder that already has a Serato library.",
+    "tooltip.wizardYes": "Share anonymous stats and crash reports.",
+    "tooltip.zoomIn": "Show a shorter stretch of the waveform around the playhead.",
+    "tooltip.zoomOut": "Show a longer stretch of the waveform around the playhead."
   };
 
   // locales/es.json
@@ -1133,7 +1293,167 @@
     "wizard.stepOf": "Paso {index} de {count}",
     "wizard.useFolder": "Usar esta carpeta",
     "wizard.welcomeBody": "Esta app muestra la biblioteca que Serato ya guarda en este equipo. No cambiará nada sin preguntar.",
-    "wizard.yes": "Sí, compartir"
+    "wizard.yes": "Sí, compartir",
+    "tooltip.allTracks": "Muestra todas las pistas de este espacio. Ctrl/Cmd+1.",
+    "tooltip.beatgridLock": "Bloquea la rejilla de tiempo para que Serato no la mueva.",
+    "tooltip.chooseRelated": "Elige {name} como pista para enlazar.",
+    "tooltip.collapseCrate": "Oculta las cajas que están dentro de {name}.",
+    "tooltip.consentAccept": "Comparte estadísticas anónimas e informes de fallos.",
+    "tooltip.consentDecline": "No compartas estadísticas anónimas.",
+    "tooltip.copyLogs": "Copia el texto del registro.",
+    "tooltip.copyVersion": "Copia la versión de la aplicación.",
+    "tooltip.crateColor": "Elige el color de la caja seleccionada.",
+    "tooltip.crateDelete": "Elimina la caja seleccionada. Las pistas siguen en la biblioteca.",
+    "tooltip.crateNew": "Crea una caja nueva.",
+    "tooltip.crateRename": "Cambia el nombre de la caja seleccionada.",
+    "tooltip.crateSearch": "Busca una caja por nombre. Esc borra la búsqueda.",
+    "tooltip.cue": "Lleva el cursor de reproducción a {label}.",
+    "tooltip.editField": "Edita {label}. No se guarda nada hasta que guardes la pista.",
+    "tooltip.expandCrate": "Muestra las cajas que están dentro de {name}.",
+    "tooltip.exportM3u": "Descarga esta lista como un archivo de lista de reproducción.",
+    "tooltip.exportRekordbox": "Descarga un archivo de lista que Rekordbox puede abrir. Confirmas antes de la descarga.",
+    "tooltip.fileShortcut": "{name} es un acceso directo. No se puede abrir desde aquí.",
+    "tooltip.filesCancel": "Cancela. No se cambia nada. Esc.",
+    "tooltip.filesConfirm": "Guarda este cambio de archivo.",
+    "tooltip.filesDelete": "Mueve los archivos seleccionados a la papelera.",
+    "tooltip.filesElsewhere": "Examina una carpeta que no es una de las carpetas de música.",
+    "tooltip.filesList": "Lista de carpetas. Arriba y Abajo cambian de fila. Intro abre la fila.",
+    "tooltip.filesMove": "Mueve los archivos seleccionados a otra carpeta.",
+    "tooltip.filesMoveFolder": "Mueve esta carpeta.",
+    "tooltip.filesMoveHere": "Mueve los archivos a esta carpeta.",
+    "tooltip.filesMoveTrash": "Mueve los archivos seleccionados a la papelera. Puedes restaurarlos desde allí.",
+    "tooltip.filesMusicFolders": "Vuelve a las carpetas de música.",
+    "tooltip.filesName": "Escribe el nombre nuevo del archivo.",
+    "tooltip.filesPickCancel": "Cancela la elección de carpeta.",
+    "tooltip.filesRefresh": "Actualiza esta carpeta desde el disco.",
+    "tooltip.filesRename": "Cambia el nombre del archivo seleccionado.",
+    "tooltip.filesReplace": "Sustituye el archivo seleccionado y conserva sus puntos de cue.",
+    "tooltip.filesReplacement": "Escribe la ruta del archivo de sustitución.",
+    "tooltip.filesReview": "Revisa este cambio antes de guardarlo.",
+    "tooltip.filesSearch": "Busca nombres de archivo. Ctrl/Cmd+F o /. Esc borra la búsqueda.",
+    "tooltip.filesUp": "Sube a la carpeta superior.",
+    "tooltip.findRelated": "Busca una pista para enlazar por título o artista.",
+    "tooltip.hideSearchCopies": "Oculta los campos que se compararon.",
+    "tooltip.hotLoops": "Copia los bucles a un pad de cue libre en el archivo de Rekordbox.",
+    "tooltip.importFile": "Elige un archivo de lista de reproducción para importar.",
+    "tooltip.importM3u": "Añade pistas de un archivo de lista a una caja nueva.",
+    "tooltip.keepCopy": "Conserva esta copia: {name}. Las demás salen de la biblioteca.",
+    "tooltip.linkMutual": "Enlaza también esa pista de vuelta a esta.",
+    "tooltip.linkNote": "Añade una nota a este enlace.",
+    "tooltip.language": "Elige el idioma de esta ventana. Igual que el sistema sigue el idioma de este ordenador.",
+    "tooltip.linkRating": "Valora este enlace de 1 a 5.",
+    "tooltip.logFallback": "Texto del registro, cuando no se pudo copiar.",
+    "tooltip.membership": "Añade esta pista a {name}, o quítala.",
+    "tooltip.memoryCues": "Incluye los cues de memoria en el archivo de Rekordbox.",
+    "tooltip.mergeCancel": "Cancela. No se fusiona nada. Esc.",
+    "tooltip.mergeConfirm": "Fusiona las copias en la que conservas.",
+    "tooltip.mergeConfirmTrash": "Fusiona las copias y mueve los otros archivos de audio a la papelera.",
+    "tooltip.mergeDuplicates": "Fusiona las copias seleccionadas en la que conservas.",
+    "tooltip.mergeTrash": "Mueve los otros archivos de audio a la papelera. Puedes restaurarlos desde allí.",
+    "tooltip.merging": "Fusionando las copias.",
+    "tooltip.missingDrive": "Conecta el disco que contiene {name} antes de abrirlo.",
+    "tooltip.next": "Reproduce la pista siguiente de esta lista.",
+    "tooltip.openCopy": "Abre esta otra copia, {name}.",
+    "tooltip.openCrate": "Muestra las pistas de la caja {name}.",
+    "tooltip.openCrumb": "Abre la carpeta {name}.",
+    "tooltip.openFile": "Abre la carpeta {name}. Intro abre la fila resaltada.",
+    "tooltip.openInLibrary": "Abre esta fila del historial en la biblioteca.",
+    "tooltip.openLogs": "Abre la carpeta que contiene el registro.",
+    "tooltip.openRelated": "Abre la pista enlazada {name}.",
+    "tooltip.overview": "Vista de toda la pista. Haz clic o arrastra para buscar. Izquierda retrocede 5 segundos. Derecha avanza 5 segundos.",
+    "tooltip.playRow": "Empieza {name}. Espacio reproduce o pausa.",
+    "tooltip.prepareAdd": "Envía esta pista a Preparar.",
+    "tooltip.prepareRemove": "Quita esta pista de Preparar.",
+    "tooltip.previous": "Reproduce la pista anterior de esta lista.",
+    "tooltip.quickOpen": "Busca una pista o un archivo por nombre. Ctrl/Cmd+K. Esc cierra este cuadro.",
+    "tooltip.quickOpenClose": "Cierra la búsqueda. Esc.",
+    "tooltip.quickOpenHit": "Abre {kind} {title}. Intro.",
+    "tooltip.quickOpenHitDetail": "Abre {kind} {title}. {detail}. Intro.",
+    "tooltip.quickOpenRetry": "Vuelve a buscar archivos.",
+    "tooltip.rekordboxCancel": "Cancela. El archivo no se descarga. Esc.",
+    "tooltip.rekordboxDownload": "Descarga el archivo de Rekordbox.",
+    "tooltip.rekordboxKey": "Elige cómo se escriben las tonalidades en el archivo de Rekordbox.",
+    "tooltip.reload": "Vuelve a cargar la biblioteca desde Serato.",
+    "tooltip.relocate": "Apunta esta pista a otro archivo de audio.",
+    "tooltip.removeRelated": "Quita el enlace guardado a {name}. El archivo de audio sigue en el disco.",
+    "tooltip.removeTrack": "Quita esta pista de la biblioteca. El archivo de audio sigue en el disco.",
+    "tooltip.rerunWizard": "Ejecuta la configuración otra vez.",
+    "tooltip.reveal": "Muestra este archivo en {name}. La biblioteca no cambia.",
+    "tooltip.reviewRestore": "Revisa qué cambiaría al restaurar esta instantánea.",
+    "tooltip.runSetup": "Ejecuta la configuración para encontrar las carpetas de música.",
+    "tooltip.saveLink": "Guarda este enlace.",
+    "tooltip.saveRules": "Guarda las reglas de esta caja inteligente.",
+    "tooltip.saveSuggestion": "Guarda un enlace en ambos sentidos a {name}. Serato no cambia hasta que actualices la caja.",
+    "tooltip.saveTrack": "Guarda estos datos de la pista.",
+    "tooltip.search": "Busca pistas por título o artista. Ctrl/Cmd+F o /. Esc borra la búsqueda.",
+    "tooltip.seek": "Avanza por la pista. Izquierda retrocede 5 segundos. Derecha avanza 5 segundos. Mayús con una flecha salta 30 segundos.",
+    "tooltip.selectFile": "Selecciona {name} para renombrar, mover o eliminar.",
+    "tooltip.selectFilePath": "Selecciona {name} en {path} para renombrar, mover o eliminar.",
+    "tooltip.selectRow": "Selecciona {name}. Intro abre esta fila.",
+    "tooltip.session": "Muestra las pistas reproducidas en la sesión {name}.",
+    "tooltip.settings": "Abre los ajustes.",
+    "tooltip.settingsClose": "Cierra los ajustes. Esc.",
+    "tooltip.shortcuts": "Muestra los atajos de teclado. ?.",
+    "tooltip.shortcutsClose": "Cierra la lista de atajos. Esc.",
+    "tooltip.showSearchCopies": "Muestra los campos que se compararon.",
+    "tooltip.smartRules": "Edita las reglas de la caja inteligente. No se guarda nada hasta que pulses Guardar reglas.",
+    "tooltip.snapshotCancel": "Cancela. No se restaura nada. Esc.",
+    "tooltip.snapshotConfirm": "Restaura esta instantánea. Antes se guarda una instantánea nueva.",
+    "tooltip.snapshotsList": "Lista de instantáneas. Arriba y Abajo cambian de fila. Intro revisa la instantánea.",
+    "tooltip.snapshotsRefresh": "Actualiza la lista de instantáneas.",
+    "tooltip.snapshotsRetry": "Intenta leer las instantáneas otra vez.",
+    "tooltip.snapshotsTake": "Guarda una instantánea de la biblioteca.",
+    "tooltip.snapshotsUndo": "Revisa cómo deshacer el último cambio externo.",
+    "tooltip.sortAdded": "Ordena las cajas por la fecha en que se añadieron.",
+    "tooltip.sortArtist": "Ordena las pistas por artista.",
+    "tooltip.sortBpm": "Ordena las pistas por tempo.",
+    "tooltip.sortBy": "Ordena por {label}.",
+    "tooltip.sortCrateName": "Ordena las cajas por nombre.",
+    "tooltip.sortDeck": "Ordena el historial por plato.",
+    "tooltip.sortKey": "Ordena las pistas por tonalidad.",
+    "tooltip.sortLength": "Ordena las pistas por duración.",
+    "tooltip.sortOrder": "Ordena las cajas en el orden guardado.",
+    "tooltip.sortPlayed": "Ordena el historial según si la pista se reprodujo.",
+    "tooltip.sortStart": "Ordena el historial por la hora de inicio.",
+    "tooltip.sortTitle": "Ordena las pistas por título.",
+    "tooltip.space": "Elige Biblioteca, Vídeo, Apple Music o Preparar.",
+    "tooltip.splitter": "Arrastra para cambiar el ancho de la lista. Doble clic lo devuelve. Las flechas lo redimensionan.",
+    "tooltip.telemetry": "Activa o desactiva las estadísticas anónimas y los informes de fallos.",
+    "tooltip.trackColor": "Elige un color para esta pista.",
+    "tooltip.trackList": "Lista de pistas. Arriba y Abajo cambian de fila. Intro abre la fila. Espacio reproduce o pausa.",
+    "tooltip.trackRating": "Elige una valoración para esta pista.",
+    "tooltip.transport": "{action}. Espacio reproduce o pausa.",
+    "tooltip.transportNamed": "{action} {name}. Espacio reproduce o pausa.",
+    "tooltip.updateRelated": "Crea o actualiza la caja Relacionadas en Serato. Serato tiene que estar cerrado.",
+    "tooltip.viewCrates": "Muestra las cajas. Ctrl/Cmd+2.",
+    "tooltip.viewDuplicates": "Muestra pistas que parecen copias unas de otras.",
+    "tooltip.viewFiles": "Muestra los archivos del disco. Ctrl/Cmd+3.",
+    "tooltip.viewHistory": "Muestra el historial. Ctrl/Cmd+4.",
+    "tooltip.viewMissing": "Muestra las pistas cuyo archivo no se encuentra.",
+    "tooltip.viewSnapshots": "Muestra las instantáneas. Ctrl/Cmd+5.",
+    "tooltip.viewStems": "Muestra las pistas que tienen stems.",
+    "tooltip.volume": "Cambia el volumen de la reproducción.",
+    "tooltip.wizard.checkAgain": "Vuelve a buscar la biblioteca de Serato.",
+    "tooltip.wizard.continue": "Sigue al paso siguiente.",
+    "tooltip.wizard.getStarted": "Empieza la configuración.",
+    "tooltip.wizard.looking": "Buscando la biblioteca de Serato.",
+    "tooltip.wizard.none": "Continúa la configuración.",
+    "tooltip.wizard.openLibrary": "Termina la configuración y abre la biblioteca.",
+    "tooltip.wizard.saving": "Guardando una copia de seguridad de la biblioteca.",
+    "tooltip.wizard.takeSnapshot": "Guarda una copia de seguridad de la biblioteca.",
+    "tooltip.wizard.tryAgain": "Intenta guardar la copia de seguridad otra vez.",
+    "tooltip.wizard.useLibrary": "Usa la biblioteca que se encontró.",
+    "tooltip.wizardBack": "Vuelve un paso en la configuración.",
+    "tooltip.wizardCancel": "Cancela la configuración. La biblioteca no cambia. Esc.",
+    "tooltip.wizardFolder": "Abre la carpeta {name}.",
+    "tooltip.wizardFolderClose": "Cierra la lista de carpetas. Esc.",
+    "tooltip.wizardFolderUp": "Sube a la carpeta superior.",
+    "tooltip.wizardFolderUse": "Usa esta carpeta como biblioteca.",
+    "tooltip.wizardNo": "No compartas estadísticas anónimas.",
+    "tooltip.wizardSecondary": "Elige una carpeta que ya tenga una biblioteca de Serato.",
+    "tooltip.wizardYes": "Comparte estadísticas anónimas e informes de fallos.",
+    "tooltip.zoomIn": "Muestra un tramo más corto de la forma de onda alrededor del cursor.",
+    "tooltip.zoomOut": "Muestra un tramo más largo de la forma de onda alrededor del cursor."
   };
 
   // src/i18n.ts
@@ -1390,20 +1710,20 @@
   function mountSplitter(options) {
     const { handle, container, first, property, minFirst, minSecond, onCommit } = options;
     const step = options.step ?? 16;
-    let current = null;
+    let current2 = null;
     const available = () => container.clientWidth - handle.offsetWidth;
     const fitted = (width) => clampWidth(width, available(), minFirst, minSecond);
-    const shown = () => current == null ? first.getBoundingClientRect().width : fitted(current);
+    const shown = () => current2 == null ? first.getBoundingClientRect().width : fitted(current2);
     function paint3() {
-      if (current == null) container.style.removeProperty(property);
-      else container.style.setProperty(property, `${fitted(current)}px`);
+      if (current2 == null) container.style.removeProperty(property);
+      else container.style.setProperty(property, `${fitted(current2)}px`);
       const room = available();
       handle.setAttribute("aria-valuemin", String(minFirst));
       handle.setAttribute("aria-valuemax", String(Math.max(minFirst, Math.round(room - minSecond))));
       handle.setAttribute("aria-valuenow", String(Math.round(shown())));
     }
     function move(width) {
-      current = fitted(width);
+      current2 = fitted(width);
       paint3();
     }
     handle.addEventListener("pointerdown", (event) => {
@@ -1425,7 +1745,7 @@
         handle.removeEventListener("pointercancel", onEnd);
         delete handle.dataset.dragging;
         document.body.classList.remove("is-resizing");
-        if (moved) onCommit(current);
+        if (moved) onCommit(current2);
       };
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", onEnd);
@@ -1440,22 +1760,22 @@
       else if (event.key === "End") next2 = available() - minSecond;
       else return;
       event.preventDefault();
-      const before = current;
+      const before = current2;
       move(next2);
-      if (current !== before) onCommit(current);
+      if (current2 !== before) onCommit(current2);
     });
     handle.addEventListener("dblclick", () => {
-      current = null;
+      current2 = null;
       paint3();
       onCommit(null);
     });
     paint3();
     return {
       set(width) {
-        current = width == null ? null : Math.round(width);
+        current2 = width == null ? null : Math.round(width);
         paint3();
       },
-      width: () => current,
+      width: () => current2,
       refit: paint3
     };
   }
@@ -1605,6 +1925,555 @@
     return a.id - b.id;
   }
 
+  // src/tooltip-strings.ts
+  function spec(key, params) {
+    return params ? { key, params } : { key };
+  }
+  var tips = {
+    space: spec("tooltip.space"),
+    crateSearch: spec("tooltip.crateSearch"),
+    mergeDuplicates: spec("tooltip.mergeDuplicates"),
+    crateNew: spec("tooltip.crateNew"),
+    crateRename: spec("tooltip.crateRename"),
+    crateColor: spec("tooltip.crateColor"),
+    crateDelete: spec("tooltip.crateDelete"),
+    shortcuts: spec("tooltip.shortcuts"),
+    settings: spec("tooltip.settings"),
+    search: spec("tooltip.search"),
+    exportM3u: spec("tooltip.exportM3u"),
+    exportRekordbox: spec("tooltip.exportRekordbox"),
+    memoryCues: spec("tooltip.memoryCues"),
+    hotLoops: spec("tooltip.hotLoops"),
+    rekordboxKey: spec("tooltip.rekordboxKey"),
+    importM3u: spec("tooltip.importM3u"),
+    importFile: spec("tooltip.importFile"),
+    reload: spec("tooltip.reload"),
+    filesUp: spec("tooltip.filesUp"),
+    filesSearch: spec("tooltip.filesSearch"),
+    filesRefresh: spec("tooltip.filesRefresh"),
+    filesElsewhere: spec("tooltip.filesElsewhere"),
+    filesMusicFolders: spec("tooltip.filesMusicFolders"),
+    filesRename: spec("tooltip.filesRename"),
+    filesMove: spec("tooltip.filesMove"),
+    filesMoveFolder: spec("tooltip.filesMoveFolder"),
+    filesReplace: spec("tooltip.filesReplace"),
+    filesDelete: spec("tooltip.filesDelete"),
+    filesMoveHere: spec("tooltip.filesMoveHere"),
+    filesPickCancel: spec("tooltip.filesPickCancel"),
+    snapshotsRefresh: spec("tooltip.snapshotsRefresh"),
+    snapshotsTake: spec("tooltip.snapshotsTake"),
+    snapshotsUndo: spec("tooltip.snapshotsUndo"),
+    consentDecline: spec("tooltip.consentDecline"),
+    consentAccept: spec("tooltip.consentAccept"),
+    telemetry: spec("tooltip.telemetry"),
+    copyVersion: spec("tooltip.copyVersion"),
+    rerunWizard: spec("tooltip.rerunWizard"),
+    openLogs: spec("tooltip.openLogs"),
+    copyLogs: spec("tooltip.copyLogs"),
+    settingsClose: spec("tooltip.settingsClose"),
+    logFallback: spec("tooltip.logFallback"),
+    mergeTrash: spec("tooltip.mergeTrash"),
+    mergeCancel: spec("tooltip.mergeCancel"),
+    mergeConfirm: spec("tooltip.mergeConfirm"),
+    mergeConfirmTrash: spec("tooltip.mergeConfirmTrash"),
+    merging: spec("tooltip.merging"),
+    rekordboxCancel: spec("tooltip.rekordboxCancel"),
+    rekordboxDownload: spec("tooltip.rekordboxDownload"),
+    filesName: spec("tooltip.filesName"),
+    filesReplacement: spec("tooltip.filesReplacement"),
+    filesCancel: spec("tooltip.filesCancel"),
+    filesReview: spec("tooltip.filesReview"),
+    filesConfirm: spec("tooltip.filesConfirm"),
+    filesMoveTrash: spec("tooltip.filesMoveTrash"),
+    shortcutsClose: spec("tooltip.shortcutsClose"),
+    quickOpen: spec("tooltip.quickOpen"),
+    quickOpenRetry: spec("tooltip.quickOpenRetry"),
+    quickOpenClose: spec("tooltip.quickOpenClose"),
+    snapshotCancel: spec("tooltip.snapshotCancel"),
+    snapshotConfirm: spec("tooltip.snapshotConfirm"),
+    wizardFolderUp: spec("tooltip.wizardFolderUp"),
+    wizardFolderUse: spec("tooltip.wizardFolderUse"),
+    wizardFolderClose: spec("tooltip.wizardFolderClose"),
+    wizardNo: spec("tooltip.wizardNo"),
+    wizardYes: spec("tooltip.wizardYes"),
+    wizardBack: spec("tooltip.wizardBack"),
+    wizardCancel: spec("tooltip.wizardCancel"),
+    wizardSecondary: spec("tooltip.wizardSecondary"),
+    trackList: spec("tooltip.trackList"),
+    filesList: spec("tooltip.filesList"),
+    snapshotsList: spec("tooltip.snapshotsList"),
+    splitter: spec("tooltip.splitter"),
+    previous: spec("tooltip.previous"),
+    next: spec("tooltip.next"),
+    seek: spec("tooltip.seek"),
+    volume: spec("tooltip.volume"),
+    zoomIn: spec("tooltip.zoomIn"),
+    zoomOut: spec("tooltip.zoomOut"),
+    overview: spec("tooltip.overview"),
+    smartRules: spec("tooltip.smartRules"),
+    saveRules: spec("tooltip.saveRules"),
+    saveTrack: spec("tooltip.saveTrack"),
+    trackColor: spec("tooltip.trackColor"),
+    trackRating: spec("tooltip.trackRating"),
+    beatgridLock: spec("tooltip.beatgridLock"),
+    relocate: spec("tooltip.relocate"),
+    removeTrack: spec("tooltip.removeTrack"),
+    prepareAdd: spec("tooltip.prepareAdd"),
+    prepareRemove: spec("tooltip.prepareRemove"),
+    updateRelated: spec("tooltip.updateRelated"),
+    findRelated: spec("tooltip.findRelated"),
+    linkNote: spec("tooltip.linkNote"),
+    linkRating: spec("tooltip.linkRating"),
+    language: spec("tooltip.language"),
+    linkMutual: spec("tooltip.linkMutual"),
+    saveLink: spec("tooltip.saveLink"),
+    showSearchCopies: spec("tooltip.showSearchCopies"),
+    hideSearchCopies: spec("tooltip.hideSearchCopies"),
+    openInLibrary: spec("tooltip.openInLibrary"),
+    runSetup: spec("tooltip.runSetup"),
+    snapshotsRetry: spec("tooltip.snapshotsRetry"),
+    reviewRestore: spec("tooltip.reviewRestore"),
+    allTracks: spec("tooltip.allTracks"),
+    viewCrates: spec("tooltip.viewCrates"),
+    viewHistory: spec("tooltip.viewHistory"),
+    viewMissing: spec("tooltip.viewMissing"),
+    viewDuplicates: spec("tooltip.viewDuplicates"),
+    viewStems: spec("tooltip.viewStems"),
+    viewFiles: spec("tooltip.viewFiles"),
+    viewSnapshots: spec("tooltip.viewSnapshots"),
+    sortTitle: spec("tooltip.sortTitle"),
+    sortArtist: spec("tooltip.sortArtist"),
+    sortBpm: spec("tooltip.sortBpm"),
+    sortKey: spec("tooltip.sortKey"),
+    sortLength: spec("tooltip.sortLength"),
+    sortDeck: spec("tooltip.sortDeck"),
+    sortPlayed: spec("tooltip.sortPlayed"),
+    sortStart: spec("tooltip.sortStart"),
+    sortOrder: spec("tooltip.sortOrder"),
+    sortCrateName: spec("tooltip.sortCrateName"),
+    sortAdded: spec("tooltip.sortAdded")
+  };
+  function playTip(action, name) {
+    if (name) return spec("tooltip.transportNamed", { action, name });
+    return spec("tooltip.transport", { action });
+  }
+  function sortTip(key, label) {
+    const known = {
+      name: "tooltip.sortTitle",
+      artist: "tooltip.sortArtist",
+      bpm: "tooltip.sortBpm",
+      key: "tooltip.sortKey",
+      length_ms: "tooltip.sortLength",
+      deck: "tooltip.sortDeck",
+      played: "tooltip.sortPlayed",
+      start: "tooltip.sortStart"
+    };
+    const message = known[key];
+    if (message) return spec(message);
+    return spec("tooltip.sortBy", { label });
+  }
+  function viewTip(view) {
+    const known = {
+      crates: tips.viewCrates,
+      history: tips.viewHistory,
+      missing: tips.viewMissing,
+      duplicates: tips.viewDuplicates,
+      stems: tips.viewStems,
+      files: tips.viewFiles,
+      snapshots: tips.viewSnapshots
+    };
+    return known[view];
+  }
+  function crateSortTip(key) {
+    if (key === "order") return tips.sortOrder;
+    if (key === "name") return tips.sortCrateName;
+    if (key === "added") return tips.sortAdded;
+    return void 0;
+  }
+  function staticTip(id) {
+    const known = {
+      space: tips.space,
+      "crate-search": tips.crateSearch,
+      "merge-duplicates": tips.mergeDuplicates,
+      "crate-new": tips.crateNew,
+      "crate-rename": tips.crateRename,
+      "crate-color": tips.crateColor,
+      "crate-delete": tips.crateDelete,
+      "open-shortcuts": tips.shortcuts,
+      "open-settings": tips.settings,
+      search: tips.search,
+      "export-m3u": tips.exportM3u,
+      "export-rekordbox": tips.exportRekordbox,
+      "rekordbox-memory": tips.memoryCues,
+      "rekordbox-hot-loops": tips.hotLoops,
+      "rekordbox-key": tips.rekordboxKey,
+      "import-m3u": tips.importM3u,
+      "import-file": tips.importFile,
+      reload: tips.reload,
+      "files-up": tips.filesUp,
+      "files-search": tips.filesSearch,
+      "files-refresh": tips.filesRefresh,
+      "files-elsewhere": tips.filesElsewhere,
+      "files-rename": tips.filesRename,
+      "files-move": tips.filesMove,
+      "files-move-folder": tips.filesMoveFolder,
+      "files-replace": tips.filesReplace,
+      "files-delete": tips.filesDelete,
+      "files-move-here": tips.filesMoveHere,
+      "files-pick-cancel": tips.filesPickCancel,
+      "snapshots-refresh": tips.snapshotsRefresh,
+      "snapshots-take": tips.snapshotsTake,
+      "snapshots-undo-button": tips.snapshotsUndo,
+      "consent-decline": tips.consentDecline,
+      "consent-accept": tips.consentAccept,
+      "telemetry-toggle": tips.telemetry,
+      "copy-version": tips.copyVersion,
+      "rerun-wizard": tips.rerunWizard,
+      "open-logs": tips.openLogs,
+      "copy-logs": tips.copyLogs,
+      "settings-close": tips.settingsClose,
+      "log-fallback": tips.logFallback,
+      "language-select": tips.language,
+      "merge-trash": tips.mergeTrash,
+      "merge-cancel": tips.mergeCancel,
+      "merge-confirm": tips.mergeConfirm,
+      "rekordbox-cancel": tips.rekordboxCancel,
+      "rekordbox-download": tips.rekordboxDownload,
+      "files-name": tips.filesName,
+      "files-replacement": tips.filesReplacement,
+      "files-cancel": tips.filesCancel,
+      "files-review": tips.filesReview,
+      "files-confirm": tips.filesConfirm,
+      "shortcuts-close": tips.shortcutsClose,
+      "quick-open-query": tips.quickOpen,
+      "quick-open-retry": tips.quickOpenRetry,
+      "quick-open-close": tips.quickOpenClose,
+      "snapshot-cancel": tips.snapshotCancel,
+      "snapshot-confirm": tips.snapshotConfirm,
+      "wizard-folder-up": tips.wizardFolderUp,
+      "wizard-folder-use": tips.wizardFolderUse,
+      "wizard-folder-close": tips.wizardFolderClose,
+      "wizard-no": tips.wizardNo,
+      "wizard-yes": tips.wizardYes,
+      "wizard-back": tips.wizardBack,
+      "wizard-cancel": tips.wizardCancel,
+      "wizard-secondary": tips.wizardSecondary,
+      "wizard-primary": spec("tooltip.wizard.getStarted"),
+      list: tips.trackList,
+      "files-list": tips.filesList,
+      "snapshots-list": tips.snapshotsList,
+      "track-splitter": tips.splitter
+    };
+    return known[id];
+  }
+  function expandCrate(name) {
+    return spec("tooltip.expandCrate", { name });
+  }
+  function collapseCrate(name) {
+    return spec("tooltip.collapseCrate", { name });
+  }
+  function openCrate(name) {
+    return spec("tooltip.openCrate", { name });
+  }
+  function sessionTip(name) {
+    return spec("tooltip.session", { name });
+  }
+  function playRow(name) {
+    return spec("tooltip.playRow", { name });
+  }
+  function selectRow(name) {
+    return spec("tooltip.selectRow", { name });
+  }
+  function cueTip(label) {
+    return spec("tooltip.cue", { label });
+  }
+  function editField(label) {
+    return spec("tooltip.editField", { label });
+  }
+  function revealTip(manager) {
+    return spec("tooltip.reveal", { name: manager });
+  }
+  function openCopy(name) {
+    return spec("tooltip.openCopy", { name });
+  }
+  function openRelated(name) {
+    return spec("tooltip.openRelated", { name });
+  }
+  function removeRelatedTip(name) {
+    return spec("tooltip.removeRelated", { name });
+  }
+  function chooseRelated(name) {
+    return spec("tooltip.chooseRelated", { name });
+  }
+  function saveSuggestion(name) {
+    return spec("tooltip.saveSuggestion", { name });
+  }
+  function membershipTip(name) {
+    return spec("tooltip.membership", { name });
+  }
+  function openCrumb(name) {
+    return spec("tooltip.openCrumb", { name });
+  }
+  function openFile(name) {
+    return spec("tooltip.openFile", { name });
+  }
+  function missingDrive(name) {
+    return spec("tooltip.missingDrive", { name });
+  }
+  function fileShortcut(name) {
+    return spec("tooltip.fileShortcut", { name });
+  }
+  function selectFile(name, path = "") {
+    if (path && path !== name) return spec("tooltip.selectFilePath", { name, path });
+    return spec("tooltip.selectFile", { name });
+  }
+  function keepCopy(name) {
+    return spec("tooltip.keepCopy", { name });
+  }
+  function quickOpenHit(kind, title2, detail) {
+    if (detail) return spec("tooltip.quickOpenHitDetail", { kind, title: title2, detail });
+    return spec("tooltip.quickOpenHit", { kind, title: title2 });
+  }
+
+  // src/tooltip.ts
+  var TOOLTIP_ID = "app-tooltip";
+  var TOOLTIP_HOVER_MS = 400;
+  var INTERACTIVE_SELECTOR = [
+    "button",
+    "input:not([type='hidden'])",
+    "select",
+    "textarea",
+    "a[href]",
+    "summary",
+    "[role='slider']",
+    "[role='button']",
+    "[role='tab']",
+    "[role='menuitem']",
+    "[role='menuitemcheckbox']",
+    "[role='menuitemradio']",
+    "[role='switch']",
+    "[role='option']",
+    "[role='separator']",
+    "[role='checkbox']",
+    "[role='radio']",
+    "[tabindex]:not([tabindex='-1'])"
+  ].join(",");
+  var installed = false;
+  var current = null;
+  var timer = 0;
+  var priorDescribedBy = "";
+  var tipParams = /* @__PURE__ */ new WeakMap();
+  function writeTooltip(element) {
+    const key = element.dataset.tooltipKey ?? "";
+    if (!hasKey(key)) throw new Error(`Unknown tooltip key ${key}.`);
+    const value = t(key, tipParams.get(element)).trim();
+    if (!value) throw new Error("A control tooltip cannot be empty.");
+    element.dataset.tooltip = value;
+  }
+  function syncOpenTooltip() {
+    if (!current) return;
+    const tip = document.getElementById(TOOLTIP_ID);
+    if (!(tip instanceof HTMLElement)) return;
+    tip.textContent = current.dataset.tooltip ?? "";
+  }
+  function setTooltip(element, spec2) {
+    element.dataset.tooltipKey = spec2.key;
+    if (spec2.params) tipParams.set(element, spec2.params);
+    else tipParams.delete(element);
+    writeTooltip(element);
+    element.removeAttribute("title");
+    if (current === element) syncOpenTooltip();
+  }
+  function buttonEl(spec2) {
+    const element = document.createElement("button");
+    element.type = "button";
+    setTooltip(element, spec2);
+    return element;
+  }
+  function inputEl(spec2) {
+    const element = document.createElement("input");
+    setTooltip(element, spec2);
+    return element;
+  }
+  function selectEl(spec2) {
+    const element = document.createElement("select");
+    setTooltip(element, spec2);
+    return element;
+  }
+  function textareaEl(spec2) {
+    const element = document.createElement("textarea");
+    setTooltip(element, spec2);
+    return element;
+  }
+  function applyStaticTooltips(root = document) {
+    root.querySelectorAll("[id]").forEach((node) => {
+      const text = staticTip(node.id);
+      if (text) setTooltip(node, text);
+    });
+    root.querySelectorAll("[data-view]").forEach((node) => {
+      const text = viewTip(node.dataset.view ?? "");
+      if (text) setTooltip(node, text);
+    });
+    root.querySelectorAll("[data-sort]").forEach((node) => {
+      const label = node.textContent?.trim() || node.dataset.sort || "";
+      setTooltip(node, sortTip(node.dataset.sort ?? "", label));
+    });
+    root.querySelectorAll("[data-crate-sort]").forEach((node) => {
+      const text = crateSortTip(node.dataset.crateSort ?? "");
+      if (text) setTooltip(node, text);
+    });
+  }
+  function refreshTooltips(root = document) {
+    root.querySelectorAll("[data-tooltip-key]").forEach((node) => writeTooltip(node));
+    if (current && !current.isConnected) {
+      hide();
+      return;
+    }
+    syncOpenTooltip();
+  }
+  function installTooltips() {
+    if (installed) return;
+    installed = true;
+    document.addEventListener("pointerover", onPointerOver);
+    document.addEventListener("pointerout", onPointerOut);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("scroll", onScroll, true);
+  }
+  function onPointerOver(event) {
+    if (event.pointerType && event.pointerType !== "mouse") return;
+    const target = tooltipTarget(event.target);
+    if (!target) return;
+    schedule(target, hoverDelay());
+  }
+  function onPointerOut(event) {
+    if (event.pointerType && event.pointerType !== "mouse") return;
+    const target = tooltipTarget(event.target);
+    if (!target || tooltipTarget(event.relatedTarget) === target) return;
+    if (current === target) hide();
+  }
+  function onFocusIn(event) {
+    const target = tooltipTarget(event.target);
+    if (!target) return;
+    schedule(target, 0);
+  }
+  function onFocusOut(event) {
+    if (tooltipTarget(event.relatedTarget)) return;
+    const target = tooltipTarget(event.target);
+    if (target && current === target) hide();
+  }
+  function onKeyDown(event) {
+    if (event.key !== "Escape" || !current) return;
+    hide();
+  }
+  function onScroll() {
+    if (current) hide();
+  }
+  function schedule(target, delay) {
+    window.clearTimeout(timer);
+    timer = 0;
+    if (delay <= 0) {
+      show(target);
+      return;
+    }
+    timer = window.setTimeout(() => show(target), delay);
+  }
+  function show(target) {
+    const text = target.dataset.tooltip?.trim() ?? "";
+    if (!text) return;
+    if (current && current !== target) restoreDescribedBy(current);
+    current = target;
+    const tip = ensureTip();
+    tip.textContent = text;
+    openTip(tip);
+    place(target, tip);
+    addDescribedBy(target);
+  }
+  function hide() {
+    window.clearTimeout(timer);
+    timer = 0;
+    if (current) restoreDescribedBy(current);
+    current = null;
+    const tip = document.getElementById(TOOLTIP_ID);
+    if (tip instanceof HTMLElement) closeTip(tip);
+  }
+  function hoverDelay() {
+    if (typeof matchMedia !== "function") return TOOLTIP_HOVER_MS;
+    return matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : TOOLTIP_HOVER_MS;
+  }
+  function tooltipTarget(node) {
+    if (!(node instanceof Element)) return null;
+    const direct = node.closest("[data-tooltip]");
+    if (direct?.dataset.tooltip?.trim()) return direct;
+    const label = node instanceof HTMLLabelElement ? node : node.closest("label");
+    if (!(label instanceof HTMLLabelElement)) return null;
+    if (label.control instanceof HTMLElement && label.control.dataset.tooltip?.trim()) return label.control;
+    const nested = label.querySelector("[data-tooltip]");
+    if (nested?.dataset.tooltip?.trim()) return nested;
+    return null;
+  }
+  function ensureTip() {
+    const existing = document.getElementById(TOOLTIP_ID);
+    if (existing instanceof HTMLElement) return existing;
+    const tip = document.createElement("div");
+    tip.id = TOOLTIP_ID;
+    tip.className = "app-tooltip";
+    tip.setAttribute("role", "tooltip");
+    tip.hidden = true;
+    tip.setAttribute("popover", "manual");
+    document.body.append(tip);
+    return tip;
+  }
+  function openTip(tip) {
+    tip.hidden = false;
+    if (typeof tip.showPopover !== "function") return;
+    try {
+      if (!tip.matches(":popover-open")) tip.showPopover();
+    } catch {
+    }
+  }
+  function closeTip(tip) {
+    if (typeof tip.hidePopover === "function") {
+      try {
+        if (tip.matches(":popover-open")) tip.hidePopover();
+      } catch {
+      }
+    }
+    tip.hidden = true;
+  }
+  function place(target, tip) {
+    const rect = target.getBoundingClientRect();
+    const gap = 8;
+    const margin = 8;
+    tip.style.position = "fixed";
+    tip.style.margin = "0";
+    tip.style.left = "0px";
+    tip.style.top = "0px";
+    const tipRect = tip.getBoundingClientRect();
+    let top = rect.bottom + gap;
+    let left = rect.left;
+    if (top + tipRect.height > window.innerHeight - margin) top = Math.max(margin, rect.top - gap - tipRect.height);
+    if (left + tipRect.width > window.innerWidth - margin) left = window.innerWidth - margin - tipRect.width;
+    tip.style.left = `${Math.round(Math.max(margin, left))}px`;
+    tip.style.top = `${Math.round(Math.max(margin, top))}px`;
+  }
+  function addDescribedBy(target) {
+    if (target.dataset.tooltipLive === "1") return;
+    target.dataset.tooltipLive = "1";
+    priorDescribedBy = target.getAttribute("aria-describedby") ?? "";
+    const ids = priorDescribedBy.split(/\s+/).filter((id) => id.length > 0 && id !== TOOLTIP_ID);
+    ids.push(TOOLTIP_ID);
+    target.setAttribute("aria-describedby", ids.join(" "));
+  }
+  function restoreDescribedBy(target) {
+    if (target.dataset.tooltipLive !== "1") return;
+    delete target.dataset.tooltipLive;
+    if (priorDescribedBy) target.setAttribute("aria-describedby", priorDescribedBy);
+    else target.removeAttribute("aria-describedby");
+    priorDescribedBy = "";
+  }
+
   // src/restore.ts
   var reloadLibrary = async () => {
   };
@@ -1658,8 +2527,7 @@
     }
     if (state.snapshotError) {
       status.textContent = state.snapshotError;
-      const retry = document.createElement("button");
-      retry.type = "button";
+      const retry = buttonEl(tips.snapshotsRetry);
       retry.textContent = t("common.tryAgain");
       retry.addEventListener("click", () => loadSnapshots().catch((error2) => failSnapshots(error2)));
       list.append(retry);
@@ -1682,8 +2550,7 @@
       const version = item.serato_version && item.serato_version !== "unknown" ? t("snapshots.seratoVersion", { version: item.serato_version, build: String(item.serato_build ?? "") }) : t("snapshots.seratoUnknown");
       const drives = (item.unavailable_drives || []).length ? ` ${t("snapshots.unavailableDrives", { drives: formatList(item.unavailable_drives || []) })}` : "";
       detail.textContent = `${version}. ${item.reason || ""}${drives}`;
-      const restore = document.createElement("button");
-      restore.type = "button";
+      const restore = buttonEl(tips.reviewRestore);
       restore.textContent = t("snapshots.reviewRestore");
       restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error2) => setSnapshotDialogStatus(failureOf(error2).message)));
       card.append(title2, detail, restore);
@@ -2016,8 +2883,8 @@
     const ratio = Math.min(1, Math.max(0, x / width));
     return ratio * durationSeconds;
   }
-  function zoomPixelsPerSecond(current, direction) {
-    const base = Number.isFinite(current) && current > 0 ? current : ZOOM_DEFAULT_PPS;
+  function zoomPixelsPerSecond(current2, direction) {
+    const base = Number.isFinite(current2) && current2 > 0 ? current2 : ZOOM_DEFAULT_PPS;
     const next2 = base * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR);
     if (next2 >= ZOOM_MAX_PPS) return ZOOM_MAX_PPS;
     if (next2 <= ZOOM_MIN_PPS) return ZOOM_MIN_PPS;
@@ -2452,15 +3319,15 @@
       this.overviewHit.setAttribute("role", "slider");
       this.overviewHit.setAttribute("aria-label", playerStrings.overview);
       this.overviewHit.setAttribute("aria-orientation", "horizontal");
-      this.overviewHit.title = playerStrings.overviewSeek;
+      setTooltip(this.overviewHit, tips.overview);
       this.overviewCanvas = document.createElement("canvas");
       this.overviewCanvas.setAttribute("aria-hidden", "true");
       this.overviewHit.append(this.overviewCanvas);
       main.append(this.detailWrap, this.note, this.overviewHit);
       const zoom = document.createElement("div");
       zoom.className = "waveform-zoom";
-      this.zoomIn = button(playerStrings.zoomIn, "+");
-      this.zoomOut = button(playerStrings.zoomOut, "−");
+      this.zoomIn = button(playerStrings.zoomIn, "+", tips.zoomIn);
+      this.zoomOut = button(playerStrings.zoomOut, "−", tips.zoomOut);
       this.zoomIn.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, 1)));
       this.zoomOut.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, -1)));
       zoom.append(this.zoomIn, this.zoomOut);
@@ -2540,11 +3407,11 @@
       this.reading.textContent = playerStrings.waveformReading;
       if (!this.note.hidden) this.note.textContent = playerStrings.waveformUnavailable;
       this.overviewHit.setAttribute("aria-label", playerStrings.overview);
-      this.overviewHit.title = playerStrings.overviewSeek;
-      this.zoomIn.title = playerStrings.zoomIn;
+      setTooltip(this.overviewHit, tips.overview);
       this.zoomIn.setAttribute("aria-label", playerStrings.zoomIn);
-      this.zoomOut.title = playerStrings.zoomOut;
+      setTooltip(this.zoomIn, tips.zoomIn);
       this.zoomOut.setAttribute("aria-label", playerStrings.zoomOut);
+      setTooltip(this.zoomOut, tips.zoomOut);
     }
     /**
      * Show the format note and hide the canvases.
@@ -2802,8 +3669,8 @@
      * @returns The buffer to draw into.
      */
     canvasImage(context, which, width, height) {
-      const current = which === "detail" ? this.detailImage : this.overviewImage;
-      if (current && current.width === width && current.height === height) return current;
+      const current2 = which === "detail" ? this.detailImage : this.overviewImage;
+      if (current2 && current2.width === width && current2.height === height) return current2;
       const image = context.createImageData(width, height);
       if (which === "detail") this.detailImage = image;
       else this.overviewImage = image;
@@ -2851,12 +3718,10 @@
       return this.parsed.durationMs / 1e3;
     }
   };
-  function button(label, text) {
-    const element = document.createElement("button");
-    element.type = "button";
+  function button(label, text, tooltip) {
+    const element = buttonEl(tooltip);
     element.className = "waveform-zoom-button";
     element.textContent = text;
-    element.title = label;
     element.setAttribute("aria-label", label);
     return element;
   }
@@ -3207,17 +4072,14 @@
     statusNode.className = "player-status";
     statusNode.setAttribute("role", "status");
     meta.append(titleNode, artistNode, statusNode);
-    previousNode = document.createElement("button");
-    previousNode.type = "button";
+    previousNode = buttonEl(tips.previous);
     previousNode.className = "player-toggle";
     previousNode.textContent = playerStrings.previous;
     previousNode.addEventListener("click", () => previous());
-    toggleNode = document.createElement("button");
-    toggleNode.type = "button";
+    toggleNode = buttonEl(playTip(playerStrings.play, ""));
     toggleNode.className = "player-toggle player-play";
     toggleNode.addEventListener("click", () => togglePlayPause());
-    nextNode = document.createElement("button");
-    nextNode.type = "button";
+    nextNode = buttonEl(tips.next);
     nextNode.className = "player-toggle";
     nextNode.textContent = playerStrings.next;
     nextNode.addEventListener("click", () => next());
@@ -3236,7 +4098,7 @@
     elapsedWrap.append(elapsedLabel, elapsedNode);
     const track = document.createElement("div");
     track.className = "player-seek-track";
-    seekNode = document.createElement("input");
+    seekNode = inputEl(tips.seek);
     seekNode.type = "range";
     seekNode.className = "player-range";
     seekNode.min = "0";
@@ -3274,7 +4136,7 @@
     volumeTextNode = document.createElement("span");
     volumeTextNode.textContent = playerStrings.volume;
     const volumeText = volumeTextNode;
-    const volumeInput = document.createElement("input");
+    const volumeInput = inputEl(tips.volume);
     volumeInput.type = "range";
     volumeInput.min = "0";
     volumeInput.max = "1";
@@ -3346,6 +4208,7 @@
     const action = playing ? playerStrings.pause : playerStrings.play;
     const named = loaded ? title || playerStrings.untitled : "";
     toggleNode.textContent = action;
+    setTooltip(toggleNode, playTip(action, named));
     toggleNode.disabled = !loaded && selectedPlayableId() === null;
     toggleNode.setAttribute("aria-pressed", String(playing));
     toggleNode.setAttribute("aria-label", named ? `${action} ${named}` : action);
@@ -3376,15 +4239,13 @@
     cueLayer.replaceChildren();
     if (!(limit > 0) || cues.length === 0) return;
     for (const cue of cues) {
-      const button2 = document.createElement("button");
-      button2.type = "button";
+      const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
+      const button2 = buttonEl(cueTip(label));
       button2.className = "player-cue";
       const ratio = Math.min(1, Math.max(0, cue.seconds / limit));
       const percent = Math.round(ratio * 1e3) / 10;
       button2.style.left = `${percent}%`;
       if (cue.color) button2.style.setProperty("--cue", cue.color);
-      const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
-      button2.title = label;
       button2.setAttribute("aria-label", label);
       button2.addEventListener("click", () => {
         seek(cue.seconds);
@@ -3424,6 +4285,7 @@
       button2.setAttribute("role", "option");
       button2.setAttribute("aria-selected", String(track.id === state.selectedId));
       button2.dataset.id = String(track.id);
+      setTooltip(button2, selectRow(track.name || "Untitled"));
       const titleCell = document.createElement("span");
       titleCell.className = "cell";
       const line = document.createElement("span");
@@ -3431,8 +4293,7 @@
       if (!track.entry) {
         const playingNow = getPlayerState();
         const playingThis = playingNow.trackId === track.id && playingNow.playing;
-        const playButton = document.createElement("button");
-        playButton.type = "button";
+        const playButton = buttonEl(playRow(track.name || playerStrings.untitled));
         playButton.className = "row-play";
         const labelName = track.name || playerStrings.untitled;
         playButton.setAttribute("aria-label", `${playerStrings.play} ${labelName}`);
@@ -3514,10 +4375,10 @@
   }
   function openTrackList() {
     const view = state.view || [];
-    const current = view.find((track) => track.id === state.selectedId) ?? view[0];
-    if (!current) return;
-    if (current.entry) bridge.selectEntry(current.id);
-    else void bridge.selectTrack(current.id);
+    const current2 = view.find((track) => track.id === state.selectedId) ?? view[0];
+    if (!current2) return;
+    if (current2.entry) bridge.selectEntry(current2.id);
+    else void bridge.selectTrack(current2.id);
   }
   function moveSelection(delta) {
     const view = state.view || [];
@@ -3604,12 +4465,12 @@
     const keep = /* @__PURE__ */ new Set();
     for (const crate of state.crates) {
       if (!terms.every((term) => crate.name.toLocaleLowerCase().includes(term))) continue;
-      let current = crate;
+      let current2 = crate;
       const guard = /* @__PURE__ */ new Set();
-      while (current && !guard.has(current.id)) {
-        guard.add(current.id);
-        keep.add(current.id);
-        current = byId.get(current.parent);
+      while (current2 && !guard.has(current2.id)) {
+        guard.add(current2.id);
+        keep.add(current2.id);
+        current2 = byId.get(current2.parent);
       }
     }
     return keep;
@@ -3721,8 +4582,7 @@
     row.style.paddingLeft = `${crate.depth * 14}px`;
     if (crate.childCount) {
       const open = state.crateQuery ? true : state.expanded.has(crate.id);
-      const twist = document.createElement("button");
-      twist.type = "button";
+      const twist = buttonEl(open ? collapseCrate(crate.name) : expandCrate(crate.name));
       twist.className = "twist";
       twist.tabIndex = -1;
       twist.setAttribute("aria-expanded", String(open));
@@ -3735,8 +4595,7 @@
       gap.setAttribute("aria-hidden", "true");
       row.append(gap);
     }
-    const button2 = document.createElement("button");
-    button2.type = "button";
+    const button2 = buttonEl(crate.id === "all" ? tips.allTracks : openCrate(crate.name));
     button2.className = "crate";
     button2.dataset.id = String(crate.id);
     if (crate.parent != null) button2.dataset.parent = String(crate.parent);
@@ -3774,9 +4633,9 @@
   function placeCrateFocus(previousId) {
     const items = [...el("crate-list").querySelectorAll(".crate")];
     if (!items.length) return null;
-    const current = items.find((item) => item.dataset.id === previousId) || items[0];
-    for (const item of items) item.tabIndex = item === current ? 0 : -1;
-    return current;
+    const current2 = items.find((item) => item.dataset.id === previousId) || items[0];
+    for (const item of items) item.tabIndex = item === current2 ? 0 : -1;
+    return current2;
   }
   function renderCrates() {
     const scroll = el("crate-list").scrollTop;
@@ -3839,12 +4698,11 @@
     }
     const editor = document.createElement("div");
     editor.className = "rule-edit";
-    const area = document.createElement("textarea");
+    const area = textareaEl(tips.smartRules);
     area.value = JSON.stringify(crate.rules, null, 2);
     area.disabled = !state.writable;
     area.setAttribute("aria-label", t("rules.label"));
-    const save2 = document.createElement("button");
-    save2.type = "button";
+    const save2 = buttonEl(tips.saveRules);
     save2.className = "text-button";
     save2.textContent = t("rules.save");
     save2.disabled = !state.writable;
@@ -3868,6 +4726,7 @@
       button2.dataset.sort = key;
       button2.textContent = t(label);
       button2.dataset.active = String(button2.dataset.sort === state.sort);
+      setTooltip(button2, sortTip(key, t(label)));
     });
   }
   function renderShell() {
@@ -4051,8 +4910,7 @@
       body.append(row);
     }
     if (entry.asset_id) {
-      const open = document.createElement("button");
-      open.type = "button";
+      const open = buttonEl(tips.openInLibrary);
       open.className = "text-button";
       open.textContent = t("history.openInLibrary");
       open.addEventListener("click", () => openInLibrary(entry.asset_id));
@@ -4064,7 +4922,7 @@
     const wrap = document.createElement("label");
     if (wide) wrap.className = "wide";
     wrap.append(document.createTextNode(label));
-    const input = name === "comments" ? document.createElement("textarea") : document.createElement("input");
+    const input = name === "comments" ? textareaEl(editField(label)) : inputEl(editField(label));
     input.name = name;
     input.value = String(value ?? "");
     if (name === "bpm") input.inputMode = "decimal";
@@ -4091,10 +4949,9 @@
       artist2.textContent = track.artist ?? "";
       body.append(artist2);
     }
-    const playButton = document.createElement("button");
-    playButton.type = "button";
-    playButton.className = "detail-play";
     const playTitle = track.title || track.name || playerStrings.untitled;
+    const playButton = buttonEl(playRow(playTitle));
+    playButton.className = "detail-play";
     playButton.textContent = playerStrings.play;
     playButton.setAttribute("aria-label", `${playerStrings.play} ${playTitle}`);
     playButton.addEventListener("click", () => {
@@ -4153,7 +5010,7 @@
     }
     const colorLabel = document.createElement("label");
     colorLabel.append(document.createTextNode(t("field.color")));
-    const colorSelect = document.createElement("select");
+    const colorSelect = selectEl(tips.trackColor);
     colorSelect.name = "color";
     const currentColor = Number(edit.color ?? 16777215);
     const palette = COLORS.map(([value, key]) => [value, t(key)]);
@@ -4169,7 +5026,7 @@
     form.append(colorLabel);
     const ratingLabel = document.createElement("label");
     ratingLabel.append(document.createTextNode(t("field.rating")));
-    const ratingSelect = document.createElement("select");
+    const ratingSelect = selectEl(tips.trackRating);
     ratingSelect.name = "rating";
     const ratings = [
       ["", t("rating.none")],
@@ -4189,13 +5046,13 @@
     form.append(ratingLabel);
     const lock = document.createElement("label");
     lock.className = "check";
-    const lockInput = document.createElement("input");
+    const lockInput = inputEl(tips.beatgridLock);
     lockInput.type = "checkbox";
     lockInput.name = "is_beatgrid_locked";
     lockInput.checked = Boolean(edit.is_beatgrid_locked);
     lock.append(lockInput, document.createTextNode(t("field.beatgridLocked")));
     form.append(lock);
-    const save2 = document.createElement("button");
+    const save2 = buttonEl(tips.saveTrack);
     save2.type = "submit";
     save2.className = "text-button wide";
     save2.textContent = t("detail.saveTrack");
@@ -4208,31 +5065,26 @@
     body.append(form);
     const actions = document.createElement("div");
     actions.className = "actions";
-    const reveal = document.createElement("button");
-    reveal.type = "button";
+    const reveal = buttonEl(revealTip(track.serato?.file_manager || state.serato?.file_manager || "Finder"));
     const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
     reveal.textContent = t("detail.reveal", { manager });
     reveal.disabled = !track.file_on_disk;
     reveal.addEventListener("click", () => revealTrack(track.id));
-    const prepare = document.createElement("button");
-    prepare.type = "button";
+    const prepare = buttonEl(track.in_prepare ? tips.prepareRemove : tips.prepareAdd);
     prepare.textContent = track.in_prepare ? t("detail.removePrepare") : t("detail.sendPrepare");
     prepare.disabled = !writable;
     prepare.addEventListener("click", () => prepareTrack(track.id, !track.in_prepare));
-    const relocate = document.createElement("button");
-    relocate.type = "button";
+    const relocate = buttonEl(tips.relocate);
     relocate.textContent = t("detail.relocate");
     relocate.disabled = !writable;
     relocate.addEventListener("click", () => relocateTrack(track));
-    const remove = document.createElement("button");
-    remove.type = "button";
+    const remove = buttonEl(tips.removeTrack);
     remove.textContent = t("detail.removeFromLibrary");
     remove.disabled = !writable;
     remove.addEventListener("click", () => removeTrack(track.id));
     actions.append(reveal, prepare, relocate, remove);
     if (state.mode === "duplicates" && selectedDuplicateGroup()) {
-      const merge = document.createElement("button");
-      merge.type = "button";
+      const merge = buttonEl(tips.mergeDuplicates);
       merge.textContent = t("merge.title");
       merge.disabled = !writable;
       merge.addEventListener("click", () => {
@@ -4253,8 +5105,7 @@
       section.append(heading);
       const open = group.name !== "Search copies";
       if (!open) {
-        const toggle = document.createElement("button");
-        toggle.type = "button";
+        const toggle = buttonEl(tips.showSearchCopies);
         toggle.className = "text-button";
         toggle.textContent = t("detail.searchCopies", { count: group.fields.length });
         let shown = false;
@@ -4263,6 +5114,7 @@
           shown = !shown;
           section.hidden = !shown;
           toggle.textContent = shown ? t("detail.hideSearchCopies") : t("detail.searchCopies", { count: group.fields.length });
+          setTooltip(toggle, shown ? tips.hideSearchCopies : tips.showSearchCopies);
         });
         body.append(toggle);
       }
@@ -4383,8 +5235,7 @@
     for (const copy of copies) {
       const row = document.createElement("div");
       row.className = "copy-row";
-      const button2 = document.createElement("button");
-      button2.type = "button";
+      const button2 = buttonEl(openCopy(copy.file || `Track ${copy.id}`));
       button2.className = "text-button";
       button2.textContent = copy.file || t("track.numbered", { id: String(copy.id) });
       button2.addEventListener("click", () => selectTrack(copy.id));
@@ -4452,8 +5303,7 @@
     suggestHeading.textContent = suggested.length ? t("related.suggested") : t("related.noSuggestions");
     section.append(suggestHeading);
     if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
-    const crate = document.createElement("button");
-    crate.type = "button";
+    const crate = buttonEl(tips.updateRelated);
     crate.className = "text-button";
     crate.dataset.relatedCrate = "true";
     const crateName = payload.crate_name || "Related";
@@ -4475,8 +5325,7 @@
       const other = link.track || {};
       const label = other.title || t("track.untitled");
       if (other.asset_id != null && other.in_library) {
-        const open = document.createElement("button");
-        open.type = "button";
+        const open = buttonEl(openRelated(label));
         open.className = "text-button";
         open.textContent = label;
         open.addEventListener("click", () => selectTrack(other.asset_id));
@@ -4503,8 +5352,7 @@
         note.textContent = link.note;
         main.append(note);
       }
-      const remove = document.createElement("button");
-      remove.type = "button";
+      const remove = buttonEl(removeRelatedTip(label));
       remove.className = "text-button";
       remove.textContent = t("common.remove");
       remove.setAttribute("aria-label", t("related.removeLink", { name: label }));
@@ -4519,7 +5367,7 @@
     block.className = "related-search";
     const label = document.createElement("label");
     label.append(document.createTextNode(t("related.find")));
-    const input = document.createElement("input");
+    const input = inputEl(tips.findRelated);
     input.type = "search";
     input.autocomplete = "off";
     input.placeholder = t("related.findPlaceholder");
@@ -4553,8 +5401,8 @@
       }
       for (const hit of hits2) {
         const item = document.createElement("li");
-        const choose = document.createElement("button");
-        choose.type = "button";
+        const name = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : hit.name || t("track.untitled");
+        const choose = buttonEl(chooseRelated(name));
         choose.className = "text-button";
         choose.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : hit.name || t("track.untitled");
         choose.addEventListener("click", () => relatedLinkForm(track, section, form, hit, input.value));
@@ -4574,14 +5422,14 @@
     chosen.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : hit.name || t("track.untitled");
     const noteLabel = document.createElement("label");
     noteLabel.append(document.createTextNode(t("related.note")));
-    const note = document.createElement("input");
+    const note = inputEl(tips.linkNote);
     note.type = "text";
     note.maxLength = 500;
     note.placeholder = t("related.notePlaceholder");
     noteLabel.append(note);
     const ratingLabel = document.createElement("label");
     ratingLabel.append(document.createTextNode(t("related.linkRating")));
-    const rating = document.createElement("select");
+    const rating = selectEl(tips.linkRating);
     for (const [value, text] of [["", t("rating.none")], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]]) {
       const option = document.createElement("option");
       option.value = value;
@@ -4591,12 +5439,11 @@
     ratingLabel.append(rating);
     const mutualLabel = document.createElement("label");
     mutualLabel.className = "check";
-    const mutual = document.createElement("input");
+    const mutual = inputEl(tips.linkMutual);
     mutual.type = "checkbox";
     mutual.checked = true;
     mutualLabel.append(mutual, document.createTextNode(t("related.twoWayLink")));
-    const save2 = document.createElement("button");
-    save2.type = "button";
+    const save2 = buttonEl(tips.saveLink);
     save2.className = "text-button";
     save2.textContent = t("related.saveLink");
     save2.addEventListener("click", () => {
@@ -4626,8 +5473,7 @@
       reasons.className = "related-meta";
       reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
       main.append(name, reasons);
-      const save2 = document.createElement("button");
-      save2.type = "button";
+      const save2 = buttonEl(saveSuggestion(item.title || "Untitled"));
       save2.className = "text-button";
       save2.textContent = t("common.save");
       save2.setAttribute("aria-label", t("related.saveLinkTo", { name: item.title || t("track.untitled") }));
@@ -4704,7 +5550,7 @@
     for (const crate of crates) {
       const label = document.createElement("label");
       label.className = "member";
-      const input = document.createElement("input");
+      const input = inputEl(membershipTip(crate.name));
       input.type = "checkbox";
       input.checked = chosen.has(crate.id);
       input.disabled = !writable;
@@ -4963,8 +5809,7 @@
   function renderSessions() {
     el("session-list").replaceChildren();
     for (const session of state.historySessions) {
-      const button2 = document.createElement("button");
-      button2.type = "button";
+      const button2 = buttonEl(sessionTip(session.name || "Session"));
       button2.className = "crate";
       button2.setAttribute("role", "option");
       button2.setAttribute("aria-selected", String(session.id === state.historyId));
@@ -5083,9 +5928,9 @@
     const wrap = el("duplicate-actions");
     const button2 = el("merge-duplicates");
     if (!wrap || !button2) return;
-    const show = state.mode === "duplicates";
-    wrap.hidden = !show;
-    button2.disabled = !show || !state.writable || !selectedDuplicateGroup();
+    const show2 = state.mode === "duplicates";
+    wrap.hidden = !show2;
+    button2.disabled = !show2 || !state.writable || !selectedDuplicateGroup();
   }
   function crateNamesFor(assetId) {
     return state.crates.filter((crate) => !crate.smart && (crate.tracks || []).includes(assetId)).map((crate) => crate.name);
@@ -5207,6 +6052,7 @@
     renderBreadcrumb();
     const elsewhere = el("files-elsewhere");
     elsewhere.textContent = state.filesElsewhere ? t("files.roots") : t("files.browseElsewhere");
+    setTooltip(elsewhere, state.filesElsewhere ? tips.filesMusicFolders : tips.filesElsewhere);
     el("files-up").disabled = !state.filesParent || state.filesLoading;
     const notes = [];
     if (state.filesLoading) notes.push(state.filesAtRoots ? t("files.readingRootsNote") : t("files.readingFolderNote"));
@@ -5237,8 +6083,7 @@
       const item = document.createElement("li");
       const last = index === crumbs.length - 1;
       if (!last && crumb.path) {
-        const button2 = document.createElement("button");
-        button2.type = "button";
+        const button2 = buttonEl(openCrumb(crumb.name));
         button2.className = "files-crumb";
         button2.textContent = crumb.name;
         button2.addEventListener("click", () => {
@@ -5246,11 +6091,11 @@
         });
         item.append(button2);
       } else {
-        const current = document.createElement("span");
-        current.className = "files-crumb";
-        current.setAttribute("aria-current", "page");
-        current.textContent = crumb.name;
-        item.append(current);
+        const current2 = document.createElement("span");
+        current2.className = "files-crumb";
+        current2.setAttribute("aria-current", "page");
+        current2.textContent = crumb.name;
+        item.append(current2);
       }
       if (!last) {
         const sep = document.createElement("span");
@@ -5372,8 +6217,7 @@
     heading.textContent = t("files.noRoots");
     const copy = document.createElement("p");
     copy.textContent = t("files.noRootsBody");
-    const button2 = document.createElement("button");
-    button2.type = "button";
+    const button2 = buttonEl(tips.runSetup);
     button2.id = "files-run-setup";
     button2.className = "files-primary";
     button2.textContent = t("files.runSetup");
@@ -5443,8 +6287,7 @@
     row.setAttribute("role", "listitem");
     const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
     if (openKind) {
-      const button2 = document.createElement("button");
-      button2.type = "button";
+      const button2 = buttonEl(entry.missing ? missingDrive(entry.name) : openFile(entry.name));
       button2.className = "files-open";
       button2.dataset.filesIndex = String(index);
       button2.id = `files-item-${index}`;
@@ -5472,7 +6315,6 @@
           button2.append(detail);
         }
       }
-      button2.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
       if (entry.missing) {
         button2.setAttribute("aria-disabled", "true");
         button2.setAttribute("aria-label", t("files.driveMissingLabel", { name: entry.name }));
@@ -5494,20 +6336,19 @@
       return row;
     }
     if (entry.kind !== "file") {
-      const label2 = document.createElement("button");
-      label2.type = "button";
+      const label2 = buttonEl(fileShortcut(entry.name));
       label2.className = "files-kind";
       label2.dataset.filesIndex = String(index);
       label2.id = `files-item-${index}`;
       label2.tabIndex = index === state.filesActive ? 0 : -1;
       label2.textContent = t("files.shortcut", { name: entry.name });
-      label2.setAttribute("aria-label", `${entry.name} shortcut`);
+      label2.setAttribute("aria-label", t("files.shortcut", { name: entry.name }));
       row.append(label2);
       return row;
     }
     const label = document.createElement("label");
     label.className = "files-file";
-    const box = document.createElement("input");
+    const box = inputEl(selectFile(entry.name, entry.path));
     box.type = "checkbox";
     box.dataset.filesIndex = String(index);
     box.id = `files-item-${index}`;
@@ -5523,13 +6364,11 @@
     const name = document.createElement("span");
     name.className = "files-name";
     name.textContent = entry.name;
-    name.title = entry.path || entry.name;
     label.append(box, name);
     if (entry.detail) {
       const detail = document.createElement("span");
       detail.className = "files-match-detail";
       detail.textContent = entry.detail;
-      detail.title = entry.detail;
       label.append(detail);
     }
     if (entry.in_library) {
@@ -5900,6 +6739,10 @@
     const danger = el("merge-trash").checked;
     el("merge-confirm").classList.toggle("danger", danger);
     el("merge-confirm").textContent = mergeLoading ? t("merge.merging") : danger ? t("merge.confirmTrash") : t("merge.title");
+    setTooltip(
+      el("merge-confirm"),
+      mergeLoading ? tips.merging : danger ? tips.mergeConfirmTrash : tips.mergeConfirm
+    );
     el("merge-confirm").disabled = mergeLoading || !mergePreview || mergePreview.writable === false;
     const note = el("merge-file-note");
     if (!note) return;
@@ -5948,7 +6791,7 @@
       const label = document.createElement("label");
       label.className = "merge-choice";
       label.htmlFor = `merge-keep-${id}`;
-      const input = document.createElement("input");
+      const input = inputEl(keepCopy(track.file || `Track ${id}`));
       input.type = "radio";
       input.name = "merge-keep";
       input.id = `merge-keep-${id}`;
@@ -6136,6 +6979,7 @@
     const confirm2 = el("files-confirm");
     confirm2.classList.toggle("danger", action === "delete");
     confirm2.textContent = action === "delete" ? t("files.moveToTrash") : t("common.confirm");
+    setTooltip(confirm2, action === "delete" ? tips.filesMoveTrash : tips.filesConfirm);
     syncFilesDialog();
     el("files-dialog").showModal();
     if (action === "delete" || action === "move" || action === "move_folder") {
@@ -6532,7 +7376,7 @@
   var QUICK_OPEN_MS = 200;
   var LIMIT = 8;
   var returnFocus = null;
-  var timer = 0;
+  var timer2 = 0;
   var requestToken = 0;
   var hits = [];
   var active = 0;
@@ -6573,7 +7417,7 @@
     active = 0;
     phase = "idle";
     truncated = false;
-    window.clearTimeout(timer);
+    window.clearTimeout(timer2);
     el("quick-open-query").value = "";
     labelQuickOpen();
     paint();
@@ -6588,12 +7432,12 @@
     const dialog = el("quick-open");
     dialog.addEventListener("keydown", onDialogKey);
     dialog.addEventListener("close", () => {
-      window.clearTimeout(timer);
+      window.clearTimeout(timer2);
       const node = returnFocus;
       returnFocus = null;
       if (node && node.isConnected) node.focus();
     });
-    el("quick-open-query").addEventListener("input", () => schedule());
+    el("quick-open-query").addEventListener("input", () => schedule2());
     el("quick-open-close").addEventListener("click", () => closeQuickOpen());
     el("quick-open-retry").addEventListener("click", () => {
       const query = el("quick-open-query").value.trim();
@@ -6612,8 +7456,8 @@
     }
     if (event.key !== "Enter") paint();
   }
-  function schedule() {
-    window.clearTimeout(timer);
+  function schedule2() {
+    window.clearTimeout(timer2);
     const query = el("quick-open-query").value;
     pendingQuery = query;
     const tracks = trackHits(query);
@@ -6628,7 +7472,7 @@
     }
     phase = "loading";
     paint();
-    timer = window.setTimeout(() => {
+    timer2 = window.setTimeout(() => {
       void loadFiles(query.trim(), tracks);
     }, QUICK_OPEN_MS);
   }
@@ -6731,8 +7575,11 @@
     else status.textContent = truncated ? t("quickOpen.truncated") : t("quickOpen.matchCount", { count: hits.length });
     hits.forEach((hit, index) => {
       const item = document.createElement("li");
-      const button2 = document.createElement("button");
-      button2.type = "button";
+      const button2 = buttonEl(quickOpenHit(
+        hit.kind === "track" ? t("quickOpen.track") : t("quickOpen.file"),
+        hit.title,
+        hit.detail
+      ));
       button2.className = "quick-open-option";
       button2.id = `quick-open-option-${index}`;
       button2.setAttribute("role", "option");
@@ -6745,11 +7592,9 @@
       const title2 = document.createElement("span");
       title2.className = "quick-open-name";
       title2.textContent = hit.title;
-      title2.title = hit.title;
       const detail = document.createElement("span");
       detail.className = "quick-open-detail";
       detail.textContent = hit.detail;
-      detail.title = hit.detail;
       button2.append(kind, title2, detail);
       button2.addEventListener("click", () => {
         active = index;
@@ -6759,8 +7604,8 @@
       list.append(item);
     });
     const field = el("quick-open-query");
-    const current = hits[active];
-    if (current) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
+    const current2 = hits[active];
+    if (current2) field.setAttribute("aria-activedescendant", `quick-open-option-${active}`);
     else field.removeAttribute("aria-activedescendant");
     const chosen = list.querySelector(".is-active");
     if (chosen && typeof chosen.scrollIntoView === "function") chosen.scrollIntoView({ block: "nearest" });
@@ -7335,6 +8180,7 @@
     repaintQuickOpen();
     repaintPlayer();
     repaintVersion();
+    refreshTooltips();
   }
   var stop = null;
   function wireLocale() {
@@ -7365,6 +8211,8 @@
     });
   }
   wireLocale();
+  installTooltips();
+  applyStaticTooltips();
   mountTrackList();
   mountPlayer();
   registerPlayerControls(playerControls);

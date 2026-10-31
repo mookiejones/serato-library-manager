@@ -19,6 +19,8 @@ import { bridge } from "./bridge";
 import { el } from "./dom";
 import { applyLayout } from "./layout";
 import { state } from "./state";
+import { inputEl, setTooltip } from "./tooltip";
+import { keepCopy, tips } from "./tooltip-strings";
 import {
   applyStatus,
   crateNamesFor,
@@ -270,6 +272,10 @@ function syncTrashChoice() {
   const danger = el("merge-trash").checked;
   el("merge-confirm").classList.toggle("danger", danger);
   el("merge-confirm").textContent = mergeLoading ? t("merge.merging") : (danger ? t("merge.confirmTrash") : t("merge.title"));
+  setTooltip(
+    el("merge-confirm"),
+    mergeLoading ? tips.merging : (danger ? tips.mergeConfirmTrash : tips.mergeConfirm),
+  );
   el("merge-confirm").disabled = mergeLoading || !mergePreview || mergePreview.writable === false;
   const note = el("merge-file-note");
   if (!note) return;
@@ -337,7 +343,7 @@ function renderMergeChoices() {
     const label = document.createElement("label");
     label.className = "merge-choice";
     label.htmlFor = `merge-keep-${id}`;
-    const input = document.createElement("input");
+    const input = inputEl(keepCopy(track.file || `Track ${id}`));
     input.type = "radio";
     input.name = "merge-keep";
     input.id = `merge-keep-${id}`;
@@ -649,6 +655,7 @@ function openFilesDialog(action: string, trigger: EventTarget | null) {
   const confirm = el("files-confirm");
   confirm.classList.toggle("danger", action === "delete");
   confirm.textContent = action === "delete" ? t("files.moveToTrash") : t("common.confirm");
+  setTooltip(confirm, action === "delete" ? tips.filesMoveTrash : tips.filesConfirm);
   syncFilesDialog();
   el("files-dialog").showModal();
   if (action === "delete" || action === "move" || action === "move_folder") {

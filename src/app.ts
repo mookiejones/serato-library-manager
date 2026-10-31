@@ -29,6 +29,7 @@ import { state } from "./state";
 import { loadVersion, wireVersion } from "./version";
 import { loadLibrary, showFailure, wireLibrary } from "./views";
 import { mountPlayer, playerControls } from "./player";
+import { applyStaticTooltips, installTooltips } from "./tooltip";
 import { mountTrackList, wireVirtualScroll } from "./virtual-scroll";
 
 /**
@@ -64,6 +65,8 @@ function wireSnapshots(): void {
 }
 
 wireLocale();
+installTooltips();
+applyStaticTooltips();
 mountTrackList();
 mountPlayer();
 registerPlayerControls(playerControls);

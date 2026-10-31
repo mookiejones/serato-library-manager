@@ -370,6 +370,8 @@ _TEXT: tuple[tuple[str, tuple[str, ...], float, int], ...] = (
     ('.sort-crates button[aria-pressed="true"]', ("--color-bg",), 15, 400),
     (".rail-foot button", ("--color-bg",), 15, 400),
     (".app-version", ("--color-bg",), 13, 400),
+    (".app-tooltip", ("--color-bg",), 13, 400),
+    (".app-tooltip:popover-open", ("--color-bg",), 13, 400),
     (".mode-note", ("--color-bg",), 13, 400),
     (".crate-foot", ("--color-bg",), 13, 400),
     (".crate-row", ("--color-bg", "--color-panel"), 15, 400),
@@ -534,6 +536,8 @@ _CONTROL_EDGE = (
     ("dialog .settings-field select", "--color-card", "border"),
     (".rule-edit textarea", "--color-card", "border"),
     (".wizard-folder", "--color-card", "border"),
+    (".app-tooltip", "--color-bg", "border"),
+    (".app-tooltip:popover-open", "--color-bg", "border"),
 )
 
 

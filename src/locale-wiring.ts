@@ -14,6 +14,7 @@ import { repaintQuickOpen } from "./quick-open";
 import { renderSnapshots, repaintSnapshotPlan } from "./restore";
 import { repaintCheatSheet } from "./shortcuts";
 import { state } from "./state";
+import { refreshTooltips } from "./tooltip";
 import { repaintVersion } from "./version";
 import { repaintViews } from "./views";
 
@@ -36,6 +37,7 @@ export function repaintAll(): void {
   repaintQuickOpen();
   repaintPlayer();
   repaintVersion();
+  refreshTooltips();
 }
 
 let stop: (() => void) | null = null;

@@ -589,7 +589,167 @@ var SeratoWizard = (() => {
     "wizard.stepOf": "Step {index} of {count}",
     "wizard.useFolder": "Use this folder",
     "wizard.welcomeBody": "This app shows the library Serato already keeps on this computer. It will not change anything without asking.",
-    "wizard.yes": "Yes, share"
+    "wizard.yes": "Yes, share",
+    "tooltip.allTracks": "Show every track in this space. Ctrl/Cmd+1.",
+    "tooltip.beatgridLock": "Lock the beatgrid so Serato does not move it.",
+    "tooltip.chooseRelated": "Choose {name} as the track to link.",
+    "tooltip.collapseCrate": "Hide the crates nested under {name}.",
+    "tooltip.consentAccept": "Share anonymous stats and crash reports.",
+    "tooltip.consentDecline": "Don't share anonymous stats.",
+    "tooltip.copyLogs": "Copy the log text.",
+    "tooltip.copyVersion": "Copy the app version.",
+    "tooltip.crateColor": "Set the color of the selected crate.",
+    "tooltip.crateDelete": "Delete the selected crate. The tracks stay in the library.",
+    "tooltip.crateNew": "Create a new crate.",
+    "tooltip.crateRename": "Rename the selected crate.",
+    "tooltip.crateSearch": "Find a crate by name. Esc clears the search.",
+    "tooltip.cue": "Move the playhead to {label}.",
+    "tooltip.editField": "Edit {label}. Nothing is saved until you save the track.",
+    "tooltip.expandCrate": "Show the crates nested under {name}.",
+    "tooltip.exportM3u": "Download this list as a playlist file.",
+    "tooltip.exportRekordbox": "Download a playlist file Rekordbox can open. You confirm before it downloads.",
+    "tooltip.fileShortcut": "{name} is a shortcut. It cannot be opened from here.",
+    "tooltip.filesCancel": "Cancel. Nothing is changed. Esc.",
+    "tooltip.filesConfirm": "Save this file change.",
+    "tooltip.filesDelete": "Move the selected files to the Trash.",
+    "tooltip.filesElsewhere": "Browse a folder that is not one of the music folders.",
+    "tooltip.filesList": "Folder list. Up arrow and Down arrow move between rows. Enter opens the row.",
+    "tooltip.filesMove": "Move the selected files to another folder.",
+    "tooltip.filesMoveFolder": "Move this folder.",
+    "tooltip.filesMoveHere": "Move the files into this folder.",
+    "tooltip.filesMoveTrash": "Move the selected files to the Trash. You can restore them from there.",
+    "tooltip.filesMusicFolders": "Go back to the music folders.",
+    "tooltip.filesName": "Type the new file name.",
+    "tooltip.filesPickCancel": "Cancel choosing a folder.",
+    "tooltip.filesRefresh": "Refresh this folder from disk.",
+    "tooltip.filesRename": "Rename the selected file.",
+    "tooltip.filesReplace": "Replace the selected file and keep its cue points.",
+    "tooltip.filesReplacement": "Type the path of the replacement file.",
+    "tooltip.filesReview": "Review this change before it is saved.",
+    "tooltip.filesSearch": "Search file names. Ctrl/Cmd+F or /. Esc clears the search.",
+    "tooltip.filesUp": "Go up to the parent folder.",
+    "tooltip.findRelated": "Find a track to link by title or artist.",
+    "tooltip.hideSearchCopies": "Hide the fields that were compared.",
+    "tooltip.hotLoops": "Copy loops onto a free hot-cue pad in the Rekordbox file.",
+    "tooltip.importFile": "Choose a playlist file to import.",
+    "tooltip.importM3u": "Add tracks from a playlist file into a new crate.",
+    "tooltip.keepCopy": "Keep this copy: {name}. The others leave the library.",
+    "tooltip.linkMutual": "Also link that track back to this one.",
+    "tooltip.linkNote": "Add a note for this link.",
+    "tooltip.language": "Choose the language for this window. Same as the system follows this computer.",
+    "tooltip.linkRating": "Rate this link from 1 to 5.",
+    "tooltip.logFallback": "Log text, when it could not be copied.",
+    "tooltip.membership": "Add this track to {name}, or take it out.",
+    "tooltip.memoryCues": "Include memory cues in the Rekordbox file.",
+    "tooltip.mergeCancel": "Cancel. Nothing is merged. Esc.",
+    "tooltip.mergeConfirm": "Merge the copies into the one you keep.",
+    "tooltip.mergeConfirmTrash": "Merge the copies and move the other audio files to the Trash.",
+    "tooltip.mergeDuplicates": "Merge the selected copies into the one you keep.",
+    "tooltip.mergeTrash": "Move the other audio files to the Trash. You can restore them from there.",
+    "tooltip.merging": "Merging the copies.",
+    "tooltip.missingDrive": "Connect the drive that holds {name} before opening it.",
+    "tooltip.next": "Play the next track in this list.",
+    "tooltip.openCopy": "Open this other copy, {name}.",
+    "tooltip.openCrate": "Show the tracks in the crate {name}.",
+    "tooltip.openCrumb": "Open the folder {name}.",
+    "tooltip.openFile": "Open the folder {name}. Enter opens the highlighted row.",
+    "tooltip.openInLibrary": "Open this history row in the library.",
+    "tooltip.openLogs": "Open the folder that holds the log.",
+    "tooltip.openRelated": "Open the linked track {name}.",
+    "tooltip.overview": "Overview of the whole track. Click or drag to seek. Left arrow goes back 5 seconds. Right arrow goes forward 5 seconds.",
+    "tooltip.playRow": "Start {name}. Space plays or pauses.",
+    "tooltip.prepareAdd": "Send this track to Prepare.",
+    "tooltip.prepareRemove": "Take this track out of Prepare.",
+    "tooltip.previous": "Play the previous track in this list.",
+    "tooltip.quickOpen": "Find a track or a file by name. Ctrl/Cmd+K. Esc closes this box.",
+    "tooltip.quickOpenClose": "Close find. Esc.",
+    "tooltip.quickOpenHit": "Open {kind} {title}. Enter.",
+    "tooltip.quickOpenHitDetail": "Open {kind} {title}. {detail}. Enter.",
+    "tooltip.quickOpenRetry": "Search files again.",
+    "tooltip.rekordboxCancel": "Cancel. The file is not downloaded. Esc.",
+    "tooltip.rekordboxDownload": "Download the Rekordbox file.",
+    "tooltip.rekordboxKey": "Choose how keys are written in the Rekordbox file.",
+    "tooltip.reload": "Reload the library from Serato.",
+    "tooltip.relocate": "Point this track at a different audio file.",
+    "tooltip.removeRelated": "Remove the saved link to {name}. The audio file stays on disk.",
+    "tooltip.removeTrack": "Remove this track from the library. The audio file stays on disk.",
+    "tooltip.rerunWizard": "Run setup again.",
+    "tooltip.reveal": "Show this file in {name}. The library is not changed.",
+    "tooltip.reviewRestore": "Review what restoring this snapshot would change.",
+    "tooltip.runSetup": "Run setup to find music folders.",
+    "tooltip.saveLink": "Save this link.",
+    "tooltip.saveRules": "Save these smart crate rules.",
+    "tooltip.saveSuggestion": "Save a two-way link to {name}. Serato is not changed until you update the crate.",
+    "tooltip.saveTrack": "Save these track details.",
+    "tooltip.search": "Search tracks by title or artist. Ctrl/Cmd+F or /. Esc clears the search.",
+    "tooltip.seek": "Move through the track. Left arrow goes back 5 seconds. Right arrow goes forward 5 seconds. Shift with an arrow jumps 30 seconds.",
+    "tooltip.selectFile": "Select {name} for rename, move, or delete.",
+    "tooltip.selectFilePath": "Select {name} at {path} for rename, move, or delete.",
+    "tooltip.selectRow": "Select {name}. Enter opens this row.",
+    "tooltip.session": "Show the tracks played in the session {name}.",
+    "tooltip.settings": "Open settings.",
+    "tooltip.settingsClose": "Close settings. Esc.",
+    "tooltip.shortcuts": "Show keyboard shortcuts. ?.",
+    "tooltip.shortcutsClose": "Close the shortcut list. Esc.",
+    "tooltip.showSearchCopies": "Show the fields that were compared.",
+    "tooltip.smartRules": "Edit the smart crate rules. Nothing is saved until you press Save rules.",
+    "tooltip.snapshotCancel": "Cancel. Nothing is restored. Esc.",
+    "tooltip.snapshotConfirm": "Restore this snapshot. A new snapshot is saved first.",
+    "tooltip.snapshotsList": "Snapshot list. Up arrow and Down arrow move between rows. Enter reviews the snapshot.",
+    "tooltip.snapshotsRefresh": "Refresh the snapshot list.",
+    "tooltip.snapshotsRetry": "Try reading the snapshots again.",
+    "tooltip.snapshotsTake": "Save a snapshot of the library.",
+    "tooltip.snapshotsUndo": "Review undoing the last outside change.",
+    "tooltip.sortAdded": "Sort crates by the date they were added.",
+    "tooltip.sortArtist": "Sort tracks by artist.",
+    "tooltip.sortBpm": "Sort tracks by tempo.",
+    "tooltip.sortBy": "Sort by {label}.",
+    "tooltip.sortCrateName": "Sort crates by name.",
+    "tooltip.sortDeck": "Sort history by deck.",
+    "tooltip.sortKey": "Sort tracks by key.",
+    "tooltip.sortLength": "Sort tracks by length.",
+    "tooltip.sortOrder": "Sort crates in the saved order.",
+    "tooltip.sortPlayed": "Sort history by whether the track was played.",
+    "tooltip.sortStart": "Sort history by the time it started.",
+    "tooltip.sortTitle": "Sort tracks by title.",
+    "tooltip.space": "Choose Library, Video, Apple Music, or Prepare.",
+    "tooltip.splitter": "Drag to resize the track list. Double-click to put it back. Arrow keys resize it.",
+    "tooltip.telemetry": "Turn anonymous stats and crash reports on or off.",
+    "tooltip.trackColor": "Choose a color for this track.",
+    "tooltip.trackList": "Track list. Up arrow and Down arrow move between rows. Enter opens the row. Space plays or pauses.",
+    "tooltip.trackRating": "Choose a rating for this track.",
+    "tooltip.transport": "{action}. Space plays or pauses.",
+    "tooltip.transportNamed": "{action} {name}. Space plays or pauses.",
+    "tooltip.updateRelated": "Create or refresh the Related crate in Serato. Serato has to be quit.",
+    "tooltip.viewCrates": "Show crates. Ctrl/Cmd+2.",
+    "tooltip.viewDuplicates": "Show tracks that look like copies of each other.",
+    "tooltip.viewFiles": "Show files on disk. Ctrl/Cmd+3.",
+    "tooltip.viewHistory": "Show history. Ctrl/Cmd+4.",
+    "tooltip.viewMissing": "Show tracks whose files are missing.",
+    "tooltip.viewSnapshots": "Show snapshots. Ctrl/Cmd+5.",
+    "tooltip.viewStems": "Show tracks that have stems.",
+    "tooltip.volume": "Change how loud playback is.",
+    "tooltip.wizard.checkAgain": "Look for the Serato library again.",
+    "tooltip.wizard.continue": "Continue to the next step.",
+    "tooltip.wizard.getStarted": "Start setup.",
+    "tooltip.wizard.looking": "Looking for the Serato library.",
+    "tooltip.wizard.none": "Continue setup.",
+    "tooltip.wizard.openLibrary": "Finish setup and open the library.",
+    "tooltip.wizard.saving": "Saving a safety copy of the library.",
+    "tooltip.wizard.takeSnapshot": "Save a safety copy of the library.",
+    "tooltip.wizard.tryAgain": "Try saving the safety copy again.",
+    "tooltip.wizard.useLibrary": "Use the library that was found.",
+    "tooltip.wizardBack": "Go back one setup step.",
+    "tooltip.wizardCancel": "Cancel setup. The library is not changed. Esc.",
+    "tooltip.wizardFolder": "Open the folder {name}.",
+    "tooltip.wizardFolderClose": "Close the folder list. Esc.",
+    "tooltip.wizardFolderUp": "Go up to the parent folder.",
+    "tooltip.wizardFolderUse": "Use this folder as the library.",
+    "tooltip.wizardNo": "Don't share anonymous stats.",
+    "tooltip.wizardSecondary": "Choose a folder that already has a Serato library.",
+    "tooltip.wizardYes": "Share anonymous stats and crash reports.",
+    "tooltip.zoomIn": "Show a shorter stretch of the waveform around the playhead.",
+    "tooltip.zoomOut": "Show a longer stretch of the waveform around the playhead."
   };
 
   // locales/es.json
@@ -1157,7 +1317,167 @@ var SeratoWizard = (() => {
     "wizard.stepOf": "Paso {index} de {count}",
     "wizard.useFolder": "Usar esta carpeta",
     "wizard.welcomeBody": "Esta app muestra la biblioteca que Serato ya guarda en este equipo. No cambiará nada sin preguntar.",
-    "wizard.yes": "Sí, compartir"
+    "wizard.yes": "Sí, compartir",
+    "tooltip.allTracks": "Muestra todas las pistas de este espacio. Ctrl/Cmd+1.",
+    "tooltip.beatgridLock": "Bloquea la rejilla de tiempo para que Serato no la mueva.",
+    "tooltip.chooseRelated": "Elige {name} como pista para enlazar.",
+    "tooltip.collapseCrate": "Oculta las cajas que están dentro de {name}.",
+    "tooltip.consentAccept": "Comparte estadísticas anónimas e informes de fallos.",
+    "tooltip.consentDecline": "No compartas estadísticas anónimas.",
+    "tooltip.copyLogs": "Copia el texto del registro.",
+    "tooltip.copyVersion": "Copia la versión de la aplicación.",
+    "tooltip.crateColor": "Elige el color de la caja seleccionada.",
+    "tooltip.crateDelete": "Elimina la caja seleccionada. Las pistas siguen en la biblioteca.",
+    "tooltip.crateNew": "Crea una caja nueva.",
+    "tooltip.crateRename": "Cambia el nombre de la caja seleccionada.",
+    "tooltip.crateSearch": "Busca una caja por nombre. Esc borra la búsqueda.",
+    "tooltip.cue": "Lleva el cursor de reproducción a {label}.",
+    "tooltip.editField": "Edita {label}. No se guarda nada hasta que guardes la pista.",
+    "tooltip.expandCrate": "Muestra las cajas que están dentro de {name}.",
+    "tooltip.exportM3u": "Descarga esta lista como un archivo de lista de reproducción.",
+    "tooltip.exportRekordbox": "Descarga un archivo de lista que Rekordbox puede abrir. Confirmas antes de la descarga.",
+    "tooltip.fileShortcut": "{name} es un acceso directo. No se puede abrir desde aquí.",
+    "tooltip.filesCancel": "Cancela. No se cambia nada. Esc.",
+    "tooltip.filesConfirm": "Guarda este cambio de archivo.",
+    "tooltip.filesDelete": "Mueve los archivos seleccionados a la papelera.",
+    "tooltip.filesElsewhere": "Examina una carpeta que no es una de las carpetas de música.",
+    "tooltip.filesList": "Lista de carpetas. Arriba y Abajo cambian de fila. Intro abre la fila.",
+    "tooltip.filesMove": "Mueve los archivos seleccionados a otra carpeta.",
+    "tooltip.filesMoveFolder": "Mueve esta carpeta.",
+    "tooltip.filesMoveHere": "Mueve los archivos a esta carpeta.",
+    "tooltip.filesMoveTrash": "Mueve los archivos seleccionados a la papelera. Puedes restaurarlos desde allí.",
+    "tooltip.filesMusicFolders": "Vuelve a las carpetas de música.",
+    "tooltip.filesName": "Escribe el nombre nuevo del archivo.",
+    "tooltip.filesPickCancel": "Cancela la elección de carpeta.",
+    "tooltip.filesRefresh": "Actualiza esta carpeta desde el disco.",
+    "tooltip.filesRename": "Cambia el nombre del archivo seleccionado.",
+    "tooltip.filesReplace": "Sustituye el archivo seleccionado y conserva sus puntos de cue.",
+    "tooltip.filesReplacement": "Escribe la ruta del archivo de sustitución.",
+    "tooltip.filesReview": "Revisa este cambio antes de guardarlo.",
+    "tooltip.filesSearch": "Busca nombres de archivo. Ctrl/Cmd+F o /. Esc borra la búsqueda.",
+    "tooltip.filesUp": "Sube a la carpeta superior.",
+    "tooltip.findRelated": "Busca una pista para enlazar por título o artista.",
+    "tooltip.hideSearchCopies": "Oculta los campos que se compararon.",
+    "tooltip.hotLoops": "Copia los bucles a un pad de cue libre en el archivo de Rekordbox.",
+    "tooltip.importFile": "Elige un archivo de lista de reproducción para importar.",
+    "tooltip.importM3u": "Añade pistas de un archivo de lista a una caja nueva.",
+    "tooltip.keepCopy": "Conserva esta copia: {name}. Las demás salen de la biblioteca.",
+    "tooltip.linkMutual": "Enlaza también esa pista de vuelta a esta.",
+    "tooltip.linkNote": "Añade una nota a este enlace.",
+    "tooltip.language": "Elige el idioma de esta ventana. Igual que el sistema sigue el idioma de este ordenador.",
+    "tooltip.linkRating": "Valora este enlace de 1 a 5.",
+    "tooltip.logFallback": "Texto del registro, cuando no se pudo copiar.",
+    "tooltip.membership": "Añade esta pista a {name}, o quítala.",
+    "tooltip.memoryCues": "Incluye los cues de memoria en el archivo de Rekordbox.",
+    "tooltip.mergeCancel": "Cancela. No se fusiona nada. Esc.",
+    "tooltip.mergeConfirm": "Fusiona las copias en la que conservas.",
+    "tooltip.mergeConfirmTrash": "Fusiona las copias y mueve los otros archivos de audio a la papelera.",
+    "tooltip.mergeDuplicates": "Fusiona las copias seleccionadas en la que conservas.",
+    "tooltip.mergeTrash": "Mueve los otros archivos de audio a la papelera. Puedes restaurarlos desde allí.",
+    "tooltip.merging": "Fusionando las copias.",
+    "tooltip.missingDrive": "Conecta el disco que contiene {name} antes de abrirlo.",
+    "tooltip.next": "Reproduce la pista siguiente de esta lista.",
+    "tooltip.openCopy": "Abre esta otra copia, {name}.",
+    "tooltip.openCrate": "Muestra las pistas de la caja {name}.",
+    "tooltip.openCrumb": "Abre la carpeta {name}.",
+    "tooltip.openFile": "Abre la carpeta {name}. Intro abre la fila resaltada.",
+    "tooltip.openInLibrary": "Abre esta fila del historial en la biblioteca.",
+    "tooltip.openLogs": "Abre la carpeta que contiene el registro.",
+    "tooltip.openRelated": "Abre la pista enlazada {name}.",
+    "tooltip.overview": "Vista de toda la pista. Haz clic o arrastra para buscar. Izquierda retrocede 5 segundos. Derecha avanza 5 segundos.",
+    "tooltip.playRow": "Empieza {name}. Espacio reproduce o pausa.",
+    "tooltip.prepareAdd": "Envía esta pista a Preparar.",
+    "tooltip.prepareRemove": "Quita esta pista de Preparar.",
+    "tooltip.previous": "Reproduce la pista anterior de esta lista.",
+    "tooltip.quickOpen": "Busca una pista o un archivo por nombre. Ctrl/Cmd+K. Esc cierra este cuadro.",
+    "tooltip.quickOpenClose": "Cierra la búsqueda. Esc.",
+    "tooltip.quickOpenHit": "Abre {kind} {title}. Intro.",
+    "tooltip.quickOpenHitDetail": "Abre {kind} {title}. {detail}. Intro.",
+    "tooltip.quickOpenRetry": "Vuelve a buscar archivos.",
+    "tooltip.rekordboxCancel": "Cancela. El archivo no se descarga. Esc.",
+    "tooltip.rekordboxDownload": "Descarga el archivo de Rekordbox.",
+    "tooltip.rekordboxKey": "Elige cómo se escriben las tonalidades en el archivo de Rekordbox.",
+    "tooltip.reload": "Vuelve a cargar la biblioteca desde Serato.",
+    "tooltip.relocate": "Apunta esta pista a otro archivo de audio.",
+    "tooltip.removeRelated": "Quita el enlace guardado a {name}. El archivo de audio sigue en el disco.",
+    "tooltip.removeTrack": "Quita esta pista de la biblioteca. El archivo de audio sigue en el disco.",
+    "tooltip.rerunWizard": "Ejecuta la configuración otra vez.",
+    "tooltip.reveal": "Muestra este archivo en {name}. La biblioteca no cambia.",
+    "tooltip.reviewRestore": "Revisa qué cambiaría al restaurar esta instantánea.",
+    "tooltip.runSetup": "Ejecuta la configuración para encontrar las carpetas de música.",
+    "tooltip.saveLink": "Guarda este enlace.",
+    "tooltip.saveRules": "Guarda las reglas de esta caja inteligente.",
+    "tooltip.saveSuggestion": "Guarda un enlace en ambos sentidos a {name}. Serato no cambia hasta que actualices la caja.",
+    "tooltip.saveTrack": "Guarda estos datos de la pista.",
+    "tooltip.search": "Busca pistas por título o artista. Ctrl/Cmd+F o /. Esc borra la búsqueda.",
+    "tooltip.seek": "Avanza por la pista. Izquierda retrocede 5 segundos. Derecha avanza 5 segundos. Mayús con una flecha salta 30 segundos.",
+    "tooltip.selectFile": "Selecciona {name} para renombrar, mover o eliminar.",
+    "tooltip.selectFilePath": "Selecciona {name} en {path} para renombrar, mover o eliminar.",
+    "tooltip.selectRow": "Selecciona {name}. Intro abre esta fila.",
+    "tooltip.session": "Muestra las pistas reproducidas en la sesión {name}.",
+    "tooltip.settings": "Abre los ajustes.",
+    "tooltip.settingsClose": "Cierra los ajustes. Esc.",
+    "tooltip.shortcuts": "Muestra los atajos de teclado. ?.",
+    "tooltip.shortcutsClose": "Cierra la lista de atajos. Esc.",
+    "tooltip.showSearchCopies": "Muestra los campos que se compararon.",
+    "tooltip.smartRules": "Edita las reglas de la caja inteligente. No se guarda nada hasta que pulses Guardar reglas.",
+    "tooltip.snapshotCancel": "Cancela. No se restaura nada. Esc.",
+    "tooltip.snapshotConfirm": "Restaura esta instantánea. Antes se guarda una instantánea nueva.",
+    "tooltip.snapshotsList": "Lista de instantáneas. Arriba y Abajo cambian de fila. Intro revisa la instantánea.",
+    "tooltip.snapshotsRefresh": "Actualiza la lista de instantáneas.",
+    "tooltip.snapshotsRetry": "Intenta leer las instantáneas otra vez.",
+    "tooltip.snapshotsTake": "Guarda una instantánea de la biblioteca.",
+    "tooltip.snapshotsUndo": "Revisa cómo deshacer el último cambio externo.",
+    "tooltip.sortAdded": "Ordena las cajas por la fecha en que se añadieron.",
+    "tooltip.sortArtist": "Ordena las pistas por artista.",
+    "tooltip.sortBpm": "Ordena las pistas por tempo.",
+    "tooltip.sortBy": "Ordena por {label}.",
+    "tooltip.sortCrateName": "Ordena las cajas por nombre.",
+    "tooltip.sortDeck": "Ordena el historial por plato.",
+    "tooltip.sortKey": "Ordena las pistas por tonalidad.",
+    "tooltip.sortLength": "Ordena las pistas por duración.",
+    "tooltip.sortOrder": "Ordena las cajas en el orden guardado.",
+    "tooltip.sortPlayed": "Ordena el historial según si la pista se reprodujo.",
+    "tooltip.sortStart": "Ordena el historial por la hora de inicio.",
+    "tooltip.sortTitle": "Ordena las pistas por título.",
+    "tooltip.space": "Elige Biblioteca, Vídeo, Apple Music o Preparar.",
+    "tooltip.splitter": "Arrastra para cambiar el ancho de la lista. Doble clic lo devuelve. Las flechas lo redimensionan.",
+    "tooltip.telemetry": "Activa o desactiva las estadísticas anónimas y los informes de fallos.",
+    "tooltip.trackColor": "Elige un color para esta pista.",
+    "tooltip.trackList": "Lista de pistas. Arriba y Abajo cambian de fila. Intro abre la fila. Espacio reproduce o pausa.",
+    "tooltip.trackRating": "Elige una valoración para esta pista.",
+    "tooltip.transport": "{action}. Espacio reproduce o pausa.",
+    "tooltip.transportNamed": "{action} {name}. Espacio reproduce o pausa.",
+    "tooltip.updateRelated": "Crea o actualiza la caja Relacionadas en Serato. Serato tiene que estar cerrado.",
+    "tooltip.viewCrates": "Muestra las cajas. Ctrl/Cmd+2.",
+    "tooltip.viewDuplicates": "Muestra pistas que parecen copias unas de otras.",
+    "tooltip.viewFiles": "Muestra los archivos del disco. Ctrl/Cmd+3.",
+    "tooltip.viewHistory": "Muestra el historial. Ctrl/Cmd+4.",
+    "tooltip.viewMissing": "Muestra las pistas cuyo archivo no se encuentra.",
+    "tooltip.viewSnapshots": "Muestra las instantáneas. Ctrl/Cmd+5.",
+    "tooltip.viewStems": "Muestra las pistas que tienen stems.",
+    "tooltip.volume": "Cambia el volumen de la reproducción.",
+    "tooltip.wizard.checkAgain": "Vuelve a buscar la biblioteca de Serato.",
+    "tooltip.wizard.continue": "Sigue al paso siguiente.",
+    "tooltip.wizard.getStarted": "Empieza la configuración.",
+    "tooltip.wizard.looking": "Buscando la biblioteca de Serato.",
+    "tooltip.wizard.none": "Continúa la configuración.",
+    "tooltip.wizard.openLibrary": "Termina la configuración y abre la biblioteca.",
+    "tooltip.wizard.saving": "Guardando una copia de seguridad de la biblioteca.",
+    "tooltip.wizard.takeSnapshot": "Guarda una copia de seguridad de la biblioteca.",
+    "tooltip.wizard.tryAgain": "Intenta guardar la copia de seguridad otra vez.",
+    "tooltip.wizard.useLibrary": "Usa la biblioteca que se encontró.",
+    "tooltip.wizardBack": "Vuelve un paso en la configuración.",
+    "tooltip.wizardCancel": "Cancela la configuración. La biblioteca no cambia. Esc.",
+    "tooltip.wizardFolder": "Abre la carpeta {name}.",
+    "tooltip.wizardFolderClose": "Cierra la lista de carpetas. Esc.",
+    "tooltip.wizardFolderUp": "Sube a la carpeta superior.",
+    "tooltip.wizardFolderUse": "Usa esta carpeta como biblioteca.",
+    "tooltip.wizardNo": "No compartas estadísticas anónimas.",
+    "tooltip.wizardSecondary": "Elige una carpeta que ya tenga una biblioteca de Serato.",
+    "tooltip.wizardYes": "Comparte estadísticas anónimas e informes de fallos.",
+    "tooltip.zoomIn": "Muestra un tramo más corto de la forma de onda alrededor del cursor.",
+    "tooltip.zoomOut": "Muestra un tramo más largo de la forma de onda alrededor del cursor."
   };
 
   // src/i18n.ts
@@ -1377,6 +1697,205 @@ var SeratoWizard = (() => {
     const next = steps[index + 1];
     if (next === void 0) return model2;
     return { ...model2, step: next };
+  }
+
+  // src/tooltip-strings.ts
+  function spec(key, params) {
+    return params ? { key, params } : { key };
+  }
+  var tips = {
+    space: spec("tooltip.space"),
+    crateSearch: spec("tooltip.crateSearch"),
+    mergeDuplicates: spec("tooltip.mergeDuplicates"),
+    crateNew: spec("tooltip.crateNew"),
+    crateRename: spec("tooltip.crateRename"),
+    crateColor: spec("tooltip.crateColor"),
+    crateDelete: spec("tooltip.crateDelete"),
+    shortcuts: spec("tooltip.shortcuts"),
+    settings: spec("tooltip.settings"),
+    search: spec("tooltip.search"),
+    exportM3u: spec("tooltip.exportM3u"),
+    exportRekordbox: spec("tooltip.exportRekordbox"),
+    memoryCues: spec("tooltip.memoryCues"),
+    hotLoops: spec("tooltip.hotLoops"),
+    rekordboxKey: spec("tooltip.rekordboxKey"),
+    importM3u: spec("tooltip.importM3u"),
+    importFile: spec("tooltip.importFile"),
+    reload: spec("tooltip.reload"),
+    filesUp: spec("tooltip.filesUp"),
+    filesSearch: spec("tooltip.filesSearch"),
+    filesRefresh: spec("tooltip.filesRefresh"),
+    filesElsewhere: spec("tooltip.filesElsewhere"),
+    filesMusicFolders: spec("tooltip.filesMusicFolders"),
+    filesRename: spec("tooltip.filesRename"),
+    filesMove: spec("tooltip.filesMove"),
+    filesMoveFolder: spec("tooltip.filesMoveFolder"),
+    filesReplace: spec("tooltip.filesReplace"),
+    filesDelete: spec("tooltip.filesDelete"),
+    filesMoveHere: spec("tooltip.filesMoveHere"),
+    filesPickCancel: spec("tooltip.filesPickCancel"),
+    snapshotsRefresh: spec("tooltip.snapshotsRefresh"),
+    snapshotsTake: spec("tooltip.snapshotsTake"),
+    snapshotsUndo: spec("tooltip.snapshotsUndo"),
+    consentDecline: spec("tooltip.consentDecline"),
+    consentAccept: spec("tooltip.consentAccept"),
+    telemetry: spec("tooltip.telemetry"),
+    copyVersion: spec("tooltip.copyVersion"),
+    rerunWizard: spec("tooltip.rerunWizard"),
+    openLogs: spec("tooltip.openLogs"),
+    copyLogs: spec("tooltip.copyLogs"),
+    settingsClose: spec("tooltip.settingsClose"),
+    logFallback: spec("tooltip.logFallback"),
+    mergeTrash: spec("tooltip.mergeTrash"),
+    mergeCancel: spec("tooltip.mergeCancel"),
+    mergeConfirm: spec("tooltip.mergeConfirm"),
+    mergeConfirmTrash: spec("tooltip.mergeConfirmTrash"),
+    merging: spec("tooltip.merging"),
+    rekordboxCancel: spec("tooltip.rekordboxCancel"),
+    rekordboxDownload: spec("tooltip.rekordboxDownload"),
+    filesName: spec("tooltip.filesName"),
+    filesReplacement: spec("tooltip.filesReplacement"),
+    filesCancel: spec("tooltip.filesCancel"),
+    filesReview: spec("tooltip.filesReview"),
+    filesConfirm: spec("tooltip.filesConfirm"),
+    filesMoveTrash: spec("tooltip.filesMoveTrash"),
+    shortcutsClose: spec("tooltip.shortcutsClose"),
+    quickOpen: spec("tooltip.quickOpen"),
+    quickOpenRetry: spec("tooltip.quickOpenRetry"),
+    quickOpenClose: spec("tooltip.quickOpenClose"),
+    snapshotCancel: spec("tooltip.snapshotCancel"),
+    snapshotConfirm: spec("tooltip.snapshotConfirm"),
+    wizardFolderUp: spec("tooltip.wizardFolderUp"),
+    wizardFolderUse: spec("tooltip.wizardFolderUse"),
+    wizardFolderClose: spec("tooltip.wizardFolderClose"),
+    wizardNo: spec("tooltip.wizardNo"),
+    wizardYes: spec("tooltip.wizardYes"),
+    wizardBack: spec("tooltip.wizardBack"),
+    wizardCancel: spec("tooltip.wizardCancel"),
+    wizardSecondary: spec("tooltip.wizardSecondary"),
+    trackList: spec("tooltip.trackList"),
+    filesList: spec("tooltip.filesList"),
+    snapshotsList: spec("tooltip.snapshotsList"),
+    splitter: spec("tooltip.splitter"),
+    previous: spec("tooltip.previous"),
+    next: spec("tooltip.next"),
+    seek: spec("tooltip.seek"),
+    volume: spec("tooltip.volume"),
+    zoomIn: spec("tooltip.zoomIn"),
+    zoomOut: spec("tooltip.zoomOut"),
+    overview: spec("tooltip.overview"),
+    smartRules: spec("tooltip.smartRules"),
+    saveRules: spec("tooltip.saveRules"),
+    saveTrack: spec("tooltip.saveTrack"),
+    trackColor: spec("tooltip.trackColor"),
+    trackRating: spec("tooltip.trackRating"),
+    beatgridLock: spec("tooltip.beatgridLock"),
+    relocate: spec("tooltip.relocate"),
+    removeTrack: spec("tooltip.removeTrack"),
+    prepareAdd: spec("tooltip.prepareAdd"),
+    prepareRemove: spec("tooltip.prepareRemove"),
+    updateRelated: spec("tooltip.updateRelated"),
+    findRelated: spec("tooltip.findRelated"),
+    linkNote: spec("tooltip.linkNote"),
+    linkRating: spec("tooltip.linkRating"),
+    language: spec("tooltip.language"),
+    linkMutual: spec("tooltip.linkMutual"),
+    saveLink: spec("tooltip.saveLink"),
+    showSearchCopies: spec("tooltip.showSearchCopies"),
+    hideSearchCopies: spec("tooltip.hideSearchCopies"),
+    openInLibrary: spec("tooltip.openInLibrary"),
+    runSetup: spec("tooltip.runSetup"),
+    snapshotsRetry: spec("tooltip.snapshotsRetry"),
+    reviewRestore: spec("tooltip.reviewRestore"),
+    allTracks: spec("tooltip.allTracks"),
+    viewCrates: spec("tooltip.viewCrates"),
+    viewHistory: spec("tooltip.viewHistory"),
+    viewMissing: spec("tooltip.viewMissing"),
+    viewDuplicates: spec("tooltip.viewDuplicates"),
+    viewStems: spec("tooltip.viewStems"),
+    viewFiles: spec("tooltip.viewFiles"),
+    viewSnapshots: spec("tooltip.viewSnapshots"),
+    sortTitle: spec("tooltip.sortTitle"),
+    sortArtist: spec("tooltip.sortArtist"),
+    sortBpm: spec("tooltip.sortBpm"),
+    sortKey: spec("tooltip.sortKey"),
+    sortLength: spec("tooltip.sortLength"),
+    sortDeck: spec("tooltip.sortDeck"),
+    sortPlayed: spec("tooltip.sortPlayed"),
+    sortStart: spec("tooltip.sortStart"),
+    sortOrder: spec("tooltip.sortOrder"),
+    sortCrateName: spec("tooltip.sortCrateName"),
+    sortAdded: spec("tooltip.sortAdded")
+  };
+  var WIZARD = {
+    "get-started": "tooltip.wizard.getStarted",
+    looking: "tooltip.wizard.looking",
+    "use-library": "tooltip.wizard.useLibrary",
+    "check-again": "tooltip.wizard.checkAgain",
+    "take-snapshot": "tooltip.wizard.takeSnapshot",
+    "try-again": "tooltip.wizard.tryAgain",
+    continue: "tooltip.wizard.continue",
+    "open-library": "tooltip.wizard.openLibrary",
+    none: "tooltip.wizard.none"
+  };
+  function wizardPrimaryTip(action, saving) {
+    if (saving) return spec("tooltip.wizard.saving");
+    return spec(WIZARD[action]);
+  }
+  function wizardFolder(name) {
+    return spec("tooltip.wizardFolder", { name });
+  }
+
+  // src/tooltip.ts
+  var TOOLTIP_ID = "app-tooltip";
+  var INTERACTIVE_SELECTOR = [
+    "button",
+    "input:not([type='hidden'])",
+    "select",
+    "textarea",
+    "a[href]",
+    "summary",
+    "[role='slider']",
+    "[role='button']",
+    "[role='tab']",
+    "[role='menuitem']",
+    "[role='menuitemcheckbox']",
+    "[role='menuitemradio']",
+    "[role='switch']",
+    "[role='option']",
+    "[role='separator']",
+    "[role='checkbox']",
+    "[role='radio']",
+    "[tabindex]:not([tabindex='-1'])"
+  ].join(",");
+  var current = null;
+  var tipParams = /* @__PURE__ */ new WeakMap();
+  function writeTooltip(element2) {
+    const key = element2.dataset.tooltipKey ?? "";
+    if (!hasKey(key)) throw new Error(`Unknown tooltip key ${key}.`);
+    const value = t(key, tipParams.get(element2)).trim();
+    if (!value) throw new Error("A control tooltip cannot be empty.");
+    element2.dataset.tooltip = value;
+  }
+  function syncOpenTooltip() {
+    if (!current) return;
+    const tip = document.getElementById(TOOLTIP_ID);
+    if (!(tip instanceof HTMLElement)) return;
+    tip.textContent = current.dataset.tooltip ?? "";
+  }
+  function setTooltip(element2, spec2) {
+    element2.dataset.tooltipKey = spec2.key;
+    if (spec2.params) tipParams.set(element2, spec2.params);
+    else tipParams.delete(element2);
+    writeTooltip(element2);
+    element2.removeAttribute("title");
+    if (current === element2) syncOpenTooltip();
+  }
+  function buttonEl(spec2) {
+    const element2 = document.createElement("button");
+    element2.type = "button";
+    setTooltip(element2, spec2);
+    return element2;
   }
 
   // src/wizard-view.ts
@@ -1698,8 +2217,7 @@ var SeratoWizard = (() => {
       return;
     }
     for (const folder of folders) {
-      const control = document.createElement("button");
-      control.type = "button";
+      const control = buttonEl(wizardFolder(folder.name));
       control.className = "wizard-folder";
       control.textContent = folder.name;
       const nextPath = folder.path;
@@ -1742,6 +2260,7 @@ var SeratoWizard = (() => {
     const action = primaryAction(model);
     primary.hidden = action === "none";
     primary.textContent = model.context.snapshot === "saving" ? t("wizard.savingCopy") : action === "none" ? "" : t(LABELS[action]);
+    setTooltip(primary, wizardPrimaryTip(action, model.context.snapshot === "saving"));
     primary.disabled = busy || !primaryEnabled(model);
     button("wizard-no").disabled = busy;
     button("wizard-yes").disabled = busy;
@@ -1779,14 +2298,14 @@ var SeratoWizard = (() => {
     if (statusNote) return { text: statusNote(), kind: "" };
     return { text: "", kind: "" };
   }
-  function paintSegments(current, count) {
+  function paintSegments(current2, count) {
     const host = element("wizard-segments");
     host.replaceChildren();
     for (let index = 1; index <= count; index += 1) {
       const segment = document.createElement("span");
       segment.className = "wizard-segment";
-      if (index < current) segment.dataset.state = "done";
-      else if (index === current) segment.dataset.state = "current";
+      if (index < current2) segment.dataset.state = "done";
+      else if (index === current2) segment.dataset.state = "current";
       else segment.dataset.state = "upcoming";
       host.append(segment);
     }
@@ -1794,9 +2313,9 @@ var SeratoWizard = (() => {
   function paintArt() {
     const slots = document.querySelectorAll(".wizard-art");
     slots.forEach((slot) => {
-      const current = slot.dataset.artSlot === model.step;
+      const current2 = slot.dataset.artSlot === model.step;
       const hasArt = slot.querySelector("svg, img") !== null;
-      slot.hidden = !(current && hasArt);
+      slot.hidden = !(current2 && hasArt);
     });
   }
   function publishStatus(setup) {

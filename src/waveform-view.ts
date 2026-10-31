@@ -8,11 +8,14 @@
  * replaces them when `GET /api/waveform` finishes. Zoom is the plus and
  * minus buttons, and Ctrl or Command with the wheel. No shortcut is added.
  *
- * Strings come from `player-strings.ts`. Tooltips are title attributes.
+ * Strings come from `player-strings.ts`. Zoom and the overview use the
+ * shared tooltip, including the seek keys that already exist.
  */
 
 import { playerStrings } from "./player-strings";
 import { state } from "./state";
+import { buttonEl, setTooltip } from "./tooltip";
+import { tips, type TipSpec } from "./tooltip-strings";
 import {
   DetailTiles,
   ZOOM_DEFAULT_PPS,
@@ -166,15 +169,15 @@ class WaveformView implements WaveformController {
     this.overviewHit.setAttribute("role", "slider");
     this.overviewHit.setAttribute("aria-label", playerStrings.overview);
     this.overviewHit.setAttribute("aria-orientation", "horizontal");
-    this.overviewHit.title = playerStrings.overviewSeek;
+    setTooltip(this.overviewHit, tips.overview);
     this.overviewCanvas = document.createElement("canvas");
     this.overviewCanvas.setAttribute("aria-hidden", "true");
     this.overviewHit.append(this.overviewCanvas);
     main.append(this.detailWrap, this.note, this.overviewHit);
     const zoom = document.createElement("div");
     zoom.className = "waveform-zoom";
-    this.zoomIn = button(playerStrings.zoomIn, "+");
-    this.zoomOut = button(playerStrings.zoomOut, "\u2212");
+    this.zoomIn = button(playerStrings.zoomIn, "+", tips.zoomIn);
+    this.zoomOut = button(playerStrings.zoomOut, "\u2212", tips.zoomOut);
     this.zoomIn.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, 1)));
     this.zoomOut.addEventListener("click", () => this.setZoom(zoomPixelsPerSecond(this.pps, -1)));
     zoom.append(this.zoomIn, this.zoomOut);
@@ -258,11 +261,11 @@ class WaveformView implements WaveformController {
     this.reading.textContent = playerStrings.waveformReading;
     if (!this.note.hidden) this.note.textContent = playerStrings.waveformUnavailable;
     this.overviewHit.setAttribute("aria-label", playerStrings.overview);
-    this.overviewHit.title = playerStrings.overviewSeek;
-    this.zoomIn.title = playerStrings.zoomIn;
+    setTooltip(this.overviewHit, tips.overview);
     this.zoomIn.setAttribute("aria-label", playerStrings.zoomIn);
-    this.zoomOut.title = playerStrings.zoomOut;
+    setTooltip(this.zoomIn, tips.zoomIn);
     this.zoomOut.setAttribute("aria-label", playerStrings.zoomOut);
+    setTooltip(this.zoomOut, tips.zoomOut);
   }
 
   /**
@@ -602,12 +605,10 @@ class WaveformView implements WaveformController {
   }
 }
 
-function button(label: string, text: string): HTMLButtonElement {
-  const element = document.createElement("button");
-  element.type = "button";
+function button(label: string, text: string, tooltip: TipSpec): HTMLButtonElement {
+  const element = buttonEl(tooltip);
   element.className = "waveform-zoom-button";
   element.textContent = text;
-  element.title = label;
   element.setAttribute("aria-label", label);
   return element;
 }
