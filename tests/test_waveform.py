@@ -1445,9 +1445,10 @@ class NativeDecoderTests(unittest.TestCase):
                 source.parent.mkdir()
                 source.write_bytes(b"container")
                 dest = Path(dest_dir) / "pcm.wav"
-                command = waveform_native.afconvert_command("/usr/bin/afconvert", source, dest)
+                executable = _absolute_named("afconvert")
+                command = waveform_native.afconvert_command(executable, source, dest)
         self.assertIsInstance(command, list)
-        self.assertEqual(command[0], "/usr/bin/afconvert")
+        self.assertEqual(command[0], executable)
         self.assertEqual(command[-2], os.fspath(source))
         self.assertEqual(command[-1], os.fspath(dest))
         self.assertIn("WAVE", command)
@@ -1457,7 +1458,7 @@ class NativeDecoderTests(unittest.TestCase):
         with self.assertRaises(waveform.DecodeError):
             waveform_native.afconvert_command("afconvert", source, dest)
         with self.assertRaises(waveform.DecodeError):
-            waveform_native.afconvert_command("/tmp/ffmpeg", source, dest)
+            waveform_native.afconvert_command(_absolute_named("ffmpeg"), source, dest)
         with self.assertRaises(waveform.DecodeError):
             waveform_native.afconvert_command("/usr/bin/afconvert", source, source.with_suffix(".wav"))
 
@@ -1537,7 +1538,8 @@ class NativeDecoderTests(unittest.TestCase):
             except OSError:
                 link = source
             names_before = sorted(item.name for item in folder.iterdir())
-            with mock.patch("waveform_native.apple_converter", return_value="/usr/bin/afconvert"):
+            executable = _absolute_named("afconvert")
+            with mock.patch("waveform_native.apple_converter", return_value=executable):
                 with mock.patch("waveform_native.tempfile.TemporaryDirectory", tracking):
                     with mock.patch("waveform_native.subprocess.Popen", side_effect=_Proc) as popen:
                         stream = waveform_native.open_apple(link)
@@ -1547,7 +1549,7 @@ class NativeDecoderTests(unittest.TestCase):
                             stream.close()
             command = popen.call_args.args[0]
             self.assertIsInstance(command, list)
-            self.assertEqual(command[0], "/usr/bin/afconvert")
+            self.assertEqual(command[0], executable)
             self.assertEqual(command[-2], os.fspath(link))
             self.assertTrue(Path(command[-1]).parent.name.startswith(waveform_native.TEMP_PREFIX))
             self.assertNotEqual(Path(command[-1]).resolve().parent, folder.resolve())
@@ -1604,7 +1606,7 @@ class NativeDecoderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "song.m4a"
             path.write_bytes(b"container")
-            with mock.patch("waveform_native.apple_converter", return_value="/usr/bin/afconvert"):
+            with mock.patch("waveform_native.apple_converter", return_value=_absolute_named("afconvert")):
                 with mock.patch("waveform_native.tempfile.TemporaryDirectory", tracking):
                     with mock.patch("waveform_native.subprocess.Popen", return_value=hung):
                         with self.assertRaises(waveform.WaveformUnavailable) as caught:
@@ -1697,6 +1699,19 @@ class NativeDecoderTests(unittest.TestCase):
         finally:
             if dest.exists():
                 dest.unlink()
+
+
+def _absolute_named(name: str) -> str:
+    """Return an absolute path whose final component is ``name``.
+
+    Args:
+        name: File name, such as ``afconvert``.
+
+    Returns:
+        A path under the system temp directory. ``/usr/bin/afconvert`` is
+        not absolute on Windows, so tests use this instead.
+    """
+    return str(Path(tempfile.gettempdir()) / name)
 
 
 def _aac_tool() -> str | None:

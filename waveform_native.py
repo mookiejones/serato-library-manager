@@ -116,6 +116,7 @@ _BITS = _guid(0xF2DEB57F, 0x40FA, 0x4764, bytes.fromhex("aa33ed4f2d1ff669"))
 _BLOCK = _guid(0x322DE230, 0x9EEB, 0x43BD, bytes.fromhex("ab7aff412251541d"))
 _AVG = _guid(0x1BA85B5D, 0xFCE7, 0x4C43, bytes.fromhex("8a3e6f6c7e40b4a0"))
 _AAC_PAYLOAD = _guid(0xBFBABE79, 0x7434, 0x4D1C, bytes.fromhex("94f072a3b9e17188"))
+_CHANNEL_MASK = _guid(0x55FB5765, 0x644A, 0x4CAF, bytes.fromhex("8479938983bb1588"))
 
 
 class PcmStream(Protocol):
@@ -819,12 +820,13 @@ def _create_media_type() -> int:
     return int(out.value)
 
 
-def _pcm_type(channels: int, rate: int) -> int:
+def _pcm_type(channels: int, rate: int, channel_mask: int | None = None) -> int:
     """Create a 16-bit PCM media type.
 
     Args:
         channels: Channel count.
         rate: Sample rate in Hz.
+        channel_mask: Speaker mask. The AAC encoder requires one for stereo.
 
     Returns:
         An ``IMFMediaType`` pointer the caller must release.
@@ -842,6 +844,8 @@ def _pcm_type(channels: int, rate: int) -> int:
         block = channels * 2
         _set_uint32(media, _BLOCK, block)
         _set_uint32(media, _AVG, rate * block)
+        if channel_mask is not None:
+            _set_uint32(media, _CHANNEL_MASK, channel_mask)
     except Exception:
         _release(media)
         raise
@@ -1726,7 +1730,7 @@ def _write_aac(pcm: bytes, rate: int, dest: Path) -> None:
             index = _add_stream(writer, output_type)
         finally:
             _release(output_type)
-        input_type = _pcm_type(2, rate)
+        input_type = _pcm_type(2, rate, channel_mask=3)
         try:
             _check(
                 _invoke(
