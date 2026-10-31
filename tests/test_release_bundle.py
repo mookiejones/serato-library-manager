@@ -596,6 +596,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("scripts/release_*", header)
         self.assertIn(".github/workflows/release.yml", header)
         self.assertIn("desktop.py", header)
+        self.assertIn("waveform*.py", header)
         self.assertIn("requirements.txt", header)
         self.assertIn("requirements-build.txt", header)
         self.assertIn("requirements-macos.txt", header)

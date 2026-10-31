@@ -46,12 +46,12 @@ npx playwright install chromium
 npx playwright test -c e2e/playwright.config.ts
 ```
 
-The test job installs `requirements.txt`, then runs the suite. The Ubuntu Python 3.12 job also installs `pyright==1.1.407` and runs `python -m pyright waveform.py tests/test_waveform.py` in strict mode (`pyrightconfig.json`). Those files are on the strict include list. The rest of the include list is not gated by this step. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
+The test job installs `requirements.txt`, then runs the suite. The Ubuntu Python 3.12 job also installs `pyright==1.1.407` and runs `python -m pyright waveform.py waveform_native.py tests/test_waveform.py` in strict mode (`pyrightconfig.json`). Those files are on the strict include list. The rest of the include list is not gated by this step. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
 
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m pip install pyright==1.1.407
-python3 -m pyright waveform.py tests/test_waveform.py
+python3 -m pyright waveform.py waveform_native.py tests/test_waveform.py
 python3 -m unittest discover -s tests -t . -v
 ```
 
@@ -89,7 +89,7 @@ The tag filter `v*.*.*` is a glob. `scripts/release_bundle.py check-tag` accepts
 
 A final tag is published with `gh release create --latest`. An `-rcN` or `-betaN` tag is published with `--prerelease --latest=false`. `scripts/release_bundle.py release-flags` prints those flags. The publish job runs only when the event is `push` and the ref is a tag. `workflow_dispatch` builds and uploads artifacts and does not publish, including when the selected ref is a tag. A `pull_request` cannot publish either: the publish condition requires `push`.
 
-A pull request runs the three `build` legs when it changes `packaging/`, `serato-library.spec`, `scripts/release_*`, `scripts/write_version.py`, `version_info.py`, `_version.py`, `.github/workflows/release.yml`, `desktop.py`, `static/app.js`, `static/app.css`, `requirements.txt`, `requirements-build.txt`, or `requirements-macos.txt`. Each leg builds, smoke-tests, and uploads its artifact. The token for that job is `contents: read` only. `actions/upload-artifact` does not need `actions: write`. The job does not attest or publish. A step with no secrets runs `scripts/release_sign.py`, which prints `Signing skipped` and exits 0. The telemetry bake is not in that job, so the build keeps the empty `_build_config.py` from git. The version bake is in that job. It does not use a secret. A pull request stamps `git describe` or `0.0.0+dev`, and the Windows leg checks that resource. Sharing stays off until the person opts in, and a build from a pull request or from source has no keys to send.
+A pull request runs the three `build` legs when it changes `packaging/`, `serato-library.spec`, `scripts/release_*`, `scripts/write_version.py`, `version_info.py`, `_version.py`, `.github/workflows/release.yml`, `desktop.py`, `waveform.py`, `waveform_native.py` (`waveform*.py`), `static/app.js`, `static/app.css`, `requirements.txt`, `requirements-build.txt`, or `requirements-macos.txt`. Each leg builds, smoke-tests, and uploads its artifact. The token for that job is `contents: read` only. `actions/upload-artifact` does not need `actions: write`. The job does not attest or publish. A step with no secrets runs `scripts/release_sign.py`, which prints `Signing skipped` and exits 0. The telemetry bake is not in that job, so the build keeps the empty `_build_config.py` from git. The version bake is in that job. It does not use a secret. A pull request stamps `git describe` or `0.0.0+dev`, and the Windows leg checks that resource. Sharing stays off until the person opts in, and a build from a pull request or from source has no keys to send.
 
 Signing is a dormant hook in `scripts/release_sign.py`. The macOS step runs when `runner.os` is `macOS` and receives only `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_NOTARY_KEY_BASE64`, `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER_ID`. The Windows app step runs when `runner.os` is `Windows` and receives only `WINDOWS_CERTIFICATE_PFX_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD`. The installer step on Windows receives those same two Windows secrets. Those secrets are not configured. When every secret for that step is empty, the step prints `Signing skipped` and exits 0. When some are set and some are not, the step fails. The script does not print secret values. The Inno Setup script does not call SignTool.
 

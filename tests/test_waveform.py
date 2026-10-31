@@ -11,8 +11,10 @@ import http.client
 import json
 import math
 import os
+import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -31,6 +33,7 @@ import audio_stream
 import server
 import tags
 import waveform
+import waveform_native
 from tests.fixture import ROOT, TempLibrary, open_database
 
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -257,19 +260,21 @@ class BandTests(unittest.TestCase):
 
 
 class DecoderTests(unittest.TestCase):
-    """Check which formats need ffmpeg, using generated PCM."""
+    """Check which formats the OS decoder or ffmpeg must open."""
 
-    def test_ffmpeg_is_required_only_for_aac_family(self) -> None:
+    def test_aac_family_is_not_a_miniaudio_suffix(self) -> None:
         """Name the suffixes miniaudio does not decode.
 
         A generated AIFF is not in that set. No library file is opened.
+        Those suffixes use the OS decoder, then ffmpeg when it is on PATH.
 
         Returns:
-            None. The test fails if AIFF is treated as ffmpeg-only.
+            None. The test fails if AIFF is treated as an AAC-family file.
         """
-        self.assertEqual(waveform.FFMPEG_REQUIRED_SUFFIXES, frozenset({".m4a", ".aac", ".alac"}))
-        self.assertNotIn(".aiff", waveform.FFMPEG_REQUIRED_SUFFIXES)
-        self.assertNotIn(".aif", waveform.FFMPEG_REQUIRED_SUFFIXES)
+        self.assertEqual(waveform.AAC_FAMILY_SUFFIXES, frozenset({".m4a", ".aac", ".alac"}))
+        self.assertNotIn(".aiff", waveform.AAC_FAMILY_SUFFIXES)
+        self.assertNotIn(".aif", waveform.AAC_FAMILY_SUFFIXES)
+        self.assertNotIn(".wav", waveform.AAC_FAMILY_SUFFIXES)
 
     def test_wav_falls_back_when_miniaudio_refuses(self) -> None:
         """Decode a WAV with the stdlib when miniaudio raises.
@@ -307,13 +312,17 @@ class DecoderTests(unittest.TestCase):
                     body, _cached = waveform.load(path)
         self.assertEqual(waveform.parse_waveform(body)["detail_count"], 75)
 
-    def test_m4a_without_ffmpeg_is_unavailable(self) -> None:
+    @mock.patch("waveform.native_container_opener", return_value=None)
+    def test_m4a_without_ffmpeg_is_unavailable(self, _native: mock.MagicMock) -> None:
         """Return the stable sentence when ffmpeg is not on PATH.
 
-        The file is a few bytes with an ``.m4a`` name. ``Popen`` is not called.
+        The native opener is patched to None, which is the Linux path and
+        the path the other systems take after a native refusal. The file
+        is a few bytes with an ``.m4a`` name. ``Popen`` is not called.
 
         Returns:
-            None. The test fails if a waveform body is produced.
+            None. The test fails if a waveform body is produced or the
+            native opener is not consulted.
         """
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "song.m4a"
@@ -324,8 +333,11 @@ class DecoderTests(unittest.TestCase):
                         waveform.load(path)
         self.assertEqual(caught.exception.message, "waveform unavailable")
         popen.assert_not_called()
+        self.assertIsNone(_native.return_value)
+        _native.assert_called()
 
-    def test_ffmpeg_on_path_decodes_m4a(self) -> None:
+    @mock.patch("waveform.native_container_opener", return_value=None)
+    def test_ffmpeg_on_path_decodes_m4a(self, _native: mock.MagicMock) -> None:
         """Use ffmpeg only as an argv list when ``which`` finds it.
 
         The process is fake. Its stdout is one float32 sine. The command
@@ -379,6 +391,8 @@ class DecoderTests(unittest.TestCase):
         self.assertIs(popen.call_args.kwargs.get("shell", False), False)
         self.assertEqual(waveform.parse_waveform(body)["detail_count"], 75)
         self.assertGreater(_middle_means(body)[2], 100)
+        self.assertIsNone(_native.return_value)
+        _native.assert_called()
 
     def test_mid_file_decode_error_is_unavailable(self) -> None:
         """Turn a miniaudio failure after the first chunk into the stable sentence.
@@ -401,7 +415,8 @@ class DecoderTests(unittest.TestCase):
                     waveform.load(path)
         self.assertEqual(caught.exception.message, "waveform unavailable")
 
-    def test_ffmpeg_timeout_is_unavailable_and_the_process_is_killed(self) -> None:
+    @mock.patch("waveform.native_container_opener", return_value=None)
+    def test_ffmpeg_timeout_is_unavailable_and_the_process_is_killed(self, _native: mock.MagicMock) -> None:
         """Kill ffmpeg when it does not exit, and do not raise 500.
 
         The fake process raises ``TimeoutExpired`` from the first wait.
@@ -455,8 +470,11 @@ class DecoderTests(unittest.TestCase):
                     with self.assertRaises(waveform.WaveformUnavailable):
                         waveform.load(path)
         self.assertTrue(hung.killed)
+        self.assertIsNone(_native.return_value)
+        _native.assert_called()
 
-    def test_closing_ffmpeg_early_kills_the_process(self) -> None:
+    @mock.patch("waveform.native_container_opener", return_value=None)
+    def test_closing_ffmpeg_early_kills_the_process(self, _native: mock.MagicMock) -> None:
         """Reap ffmpeg when the caller closes the generator before it ends.
 
         One chunk is taken. ``close`` is what a disconnected client does
@@ -500,6 +518,8 @@ class DecoderTests(unittest.TestCase):
                     stream.close()
         self.assertTrue(proc.killed)
         self.assertTrue(proc.waited)
+        self.assertIsNone(_native.return_value)
+        _native.assert_called()
 
     def test_truncated_wav_read_is_unavailable(self) -> None:
         """Map a short WAV read to waveform unavailable.
@@ -1211,3 +1231,794 @@ def _tree(root: Path) -> list[tuple[str, int, int, str]]:
             digest = hashlib.sha256(file.read_bytes()).hexdigest()
             rows.append((relative, info.st_size, info.st_mtime_ns, digest))
     return rows
+
+
+class NativeDecoderTests(unittest.TestCase):
+    """Exercise the macOS and Windows container decoders with fakes.
+
+    The real files are covered by :class:`NativeFileTests`, which run on
+    the macOS and Windows runners. These tests run on every OS.
+    """
+
+    def test_platform_selects_one_native_opener(self) -> None:
+        """Use AudioToolbox on macOS, Media Foundation on Windows, and neither on Linux.
+
+        No file is opened. The test fails if Linux calls afconvert or if
+        macOS skips the native opener and goes straight to ffmpeg.
+
+        Returns:
+            None.
+        """
+        cases = {
+            "darwin": waveform_native.open_apple,
+            "win32": waveform_native.open_media_foundation,
+            "linux": None,
+        }
+        for platform, expected in cases.items():
+            with self.subTest(platform=platform):
+                with mock.patch("waveform.sys.platform", platform):
+                    opener = waveform.native_container_opener()
+                if expected is None:
+                    self.assertIsNone(opener)
+                else:
+                    self.assertIs(opener, expected)
+
+    def test_linux_does_not_call_afconvert(self) -> None:
+        """Leave an m4a unavailable on Linux when ffmpeg is absent.
+
+        ``open_apple`` raises if it is called. The file is a few bytes in
+        a temp directory.
+
+        Returns:
+            None. The test fails if a waveform is produced.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"not-audio")
+            with mock.patch("waveform.sys.platform", "linux"):
+                with mock.patch("waveform_native.open_apple", side_effect=AssertionError("afconvert")):
+                    with mock.patch("waveform.shutil.which", return_value=None):
+                        with self.assertRaises(waveform.WaveformUnavailable) as caught:
+                            waveform.load(path)
+        self.assertEqual(caught.exception.message, "waveform unavailable")
+
+    def test_each_os_refuses_a_container_the_native_decoder_rejects(self) -> None:
+        """Return the stable sentence when that OS decoder and ffmpeg both refuse.
+
+        Upper-case suffixes still select the container path. The source
+        directory is unchanged.
+
+        Returns:
+            None. The test fails if the native opener is skipped or a body is produced.
+        """
+        cases = (
+            ("darwin", "waveform_native.open_apple", "Song.M4A"),
+            ("win32", "waveform_native.open_media_foundation", "Song.AAC"),
+            ("linux", None, "song.alac"),
+        )
+        for platform, opener_name, filename in cases:
+            with self.subTest(platform=platform):
+                with tempfile.TemporaryDirectory() as raw:
+                    path = Path(raw) / filename
+                    before = b"not-audio"
+                    path.write_bytes(before)
+                    seen: list[Path] = []
+
+                    def refuse(source: Path) -> None:
+                        seen.append(source)
+                        raise waveform.DecodeError()
+
+                    patches = [
+                        mock.patch("waveform.sys.platform", platform),
+                        mock.patch("waveform.shutil.which", return_value=None),
+                    ]
+                    if opener_name is not None:
+                        patches.append(mock.patch(opener_name, side_effect=refuse))
+                    with patches[0], patches[1]:
+                        if opener_name is not None:
+                            with patches[2]:
+                                with self.assertRaises(waveform.WaveformUnavailable) as caught:
+                                    waveform.load(path)
+                        else:
+                            with self.assertRaises(waveform.WaveformUnavailable) as caught:
+                                waveform.load(path)
+                    self.assertEqual(caught.exception.message, "waveform unavailable")
+                    self.assertEqual(path.read_bytes(), before)
+                    self.assertEqual([item.name for item in Path(raw).iterdir()], [filename])
+                    if opener_name is None:
+                        self.assertEqual(seen, [])
+                    else:
+                        self.assertEqual(seen, [path])
+
+    def test_native_success_does_not_spawn_ffmpeg(self) -> None:
+        """Stop after the OS decoder returns samples.
+
+        ffmpeg is reported on PATH. ``Popen`` must not run. The tone is a
+        generated 1 kHz sine, not a library file.
+
+        Returns:
+            None. The test fails if ffmpeg is launched or the mid band is quiet.
+        """
+        def succeed(_path: Path):
+            return iter((_sine(1000.0, 0.5),))
+
+        for platform, opener_name in (
+            ("darwin", "waveform_native.open_apple"),
+            ("win32", "waveform_native.open_media_foundation"),
+        ):
+            with self.subTest(platform=platform):
+                with tempfile.TemporaryDirectory() as raw:
+                    path = Path(raw) / "song.m4a"
+                    path.write_bytes(b"container")
+                    with mock.patch("waveform.sys.platform", platform):
+                        with mock.patch(opener_name, side_effect=succeed):
+                            with mock.patch("waveform.shutil.which", return_value="/usr/bin/ffmpeg"):
+                                with mock.patch("waveform.subprocess.Popen") as popen:
+                                    body, _cached = waveform.load(path)
+                popen.assert_not_called()
+                self.assertGreater(_middle_means(body)[2], 100)
+
+    def test_native_refusal_falls_through_to_ffmpeg(self) -> None:
+        """Use ffmpeg when the OS decoder raises ``DecodeError``.
+
+        The process is fake. Its stdout is one float32 sine. The command
+        is an argv list.
+
+        Returns:
+            None. The test fails if ffmpeg is not launched after the refusal.
+        """
+        samples = _sine(1000.0, 0.5).astype("<f4")
+
+        class _Process:
+            def __init__(self) -> None:
+                self.stdout = _Stdout(samples.tobytes())
+                self.returncode: int | None = None
+
+            def wait(self, timeout: int | None = None) -> int:
+                del timeout
+                self.returncode = 0
+                return 0
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def kill(self) -> None:
+                self.returncode = -9
+
+        class _Stdout:
+            def __init__(self, payload: bytes) -> None:
+                self._payload = payload
+                self._at = 0
+
+            def read(self, count: int) -> bytes:
+                piece = self._payload[self._at:self._at + count]
+                self._at += count
+                return piece
+
+            def close(self) -> None:
+                return None
+
+        def refuse(_path: Path) -> None:
+            raise waveform.DecodeError("native refused")
+
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"container")
+            with mock.patch("waveform.sys.platform", "darwin"):
+                with mock.patch("waveform_native.open_apple", side_effect=refuse):
+                    with mock.patch("waveform.shutil.which", return_value="/usr/bin/ffmpeg"):
+                        with mock.patch("waveform.subprocess.Popen", return_value=_Process()) as popen:
+                            body, _cached = waveform.load(path)
+        self.assertEqual(popen.call_args.args[0][0], "/usr/bin/ffmpeg")
+        self.assertIs(popen.call_args.kwargs.get("shell", False), False)
+        self.assertGreater(_middle_means(body)[2], 100)
+
+    def test_wav_does_not_use_the_container_decoder(self) -> None:
+        """Decode a WAV with miniaudio even when the OS container decoder exists.
+
+        The container opener raises if it is called. ffmpeg is absent.
+
+        Returns:
+            None. The test fails if the WAV is sent to afconvert.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "tone.wav"
+            _write_wav(path, _sine(440.0, 0.5))
+            with mock.patch("waveform.sys.platform", "darwin"):
+                with mock.patch("waveform_native.open_apple", side_effect=AssertionError("container")):
+                    with mock.patch("waveform.shutil.which", return_value=None):
+                        body, _cached = waveform.load(path)
+        self.assertEqual(waveform.parse_waveform(body)["detail_count"], 75)
+
+    def test_afconvert_command_stays_in_temp_and_is_not_a_shell_string(self) -> None:
+        """Build an argv list whose output is a different temp directory.
+
+        The source directory name contains a space. No process is started.
+
+        Returns:
+            None. The test fails if the output sits beside the source or the
+            executable is not absolute ``afconvert``.
+        """
+        with tempfile.TemporaryDirectory() as source_dir:
+            with tempfile.TemporaryDirectory() as dest_dir:
+                source = Path(source_dir) / "my music" / "song.m4a"
+                source.parent.mkdir()
+                source.write_bytes(b"container")
+                dest = Path(dest_dir) / "pcm.wav"
+                executable = _absolute_named("afconvert")
+                command = waveform_native.afconvert_command(executable, source, dest)
+        self.assertIsInstance(command, list)
+        self.assertEqual(command[0], executable)
+        self.assertEqual(command[-2], os.path.realpath(source))
+        self.assertEqual(command[-1], os.fspath(dest))
+        self.assertIn("WAVE", command)
+        self.assertIn("LEI16@44100", command)
+        self.assertIn("1", command)
+        self.assertNotIn("--", command)
+        with self.assertRaises(waveform.DecodeError):
+            waveform_native.afconvert_command("afconvert", source, dest)
+        with self.assertRaises(waveform.DecodeError):
+            waveform_native.afconvert_command(_absolute_named("ffmpeg"), source, dest)
+        with self.assertRaises(waveform.DecodeError):
+            waveform_native.afconvert_command("/usr/bin/afconvert", source, source.with_suffix(".wav"))
+
+    def test_afconvert_source_with_a_leading_dash_is_absolute(self) -> None:
+        """Pass a real absolute path when the file name starts with ``-``.
+
+        The name is relative, ``-song.m4a``, so an unconverted argument
+        would be an afconvert option. The command must name the same file
+        by its real path. No process is started.
+
+        Returns:
+            None. The test fails if the source argument still starts with ``-``.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw)
+            source = folder / "-song.m4a"
+            source.write_bytes(b"container")
+            dest_dir = Path(tempfile.mkdtemp(prefix=waveform_native.TEMP_PREFIX))
+            previous = Path.cwd()
+            try:
+                os.chdir(folder)
+                command = waveform_native.afconvert_command(
+                    _absolute_named("afconvert"),
+                    Path("-song.m4a"),
+                    dest_dir / "pcm.wav",
+                )
+            finally:
+                os.chdir(previous)
+                shutil.rmtree(dest_dir)
+        source_arg = command[-2]
+        self.assertEqual(source_arg, os.path.realpath(source))
+        self.assertTrue(os.path.isabs(source_arg))
+        self.assertFalse(source_arg.startswith("-"))
+        self.assertEqual(Path(source_arg).name, "-song.m4a")
+
+    def test_temp_output_refuses_the_source_directory_and_the_library(self) -> None:
+        """Reject a WAV written next to the audio file or into the library folder.
+
+        Two different temp directories are allowed. The library check is
+        patched so the refusal does not depend on this machine's home folder.
+
+        Returns:
+            None. The test fails if a same-directory output is accepted.
+        """
+        with tempfile.TemporaryDirectory() as left:
+            with tempfile.TemporaryDirectory() as right:
+                source = Path(left) / "song.m4a"
+                source.write_bytes(b"container")
+                dest = Path(right) / "pcm.wav"
+                with mock.patch("waveform_native._library_blocked", return_value=False):
+                    self.assertTrue(waveform_native.separate_temp_output(source, dest))
+                with mock.patch("waveform_native._library_blocked", return_value=True):
+                    self.assertFalse(waveform_native.separate_temp_output(source, dest))
+                self.assertFalse(waveform_native.separate_temp_output(source, source.with_suffix(".wav")))
+                self.assertFalse(waveform_native.destination_in_temp(Path.cwd() / "song.m4a"))
+                self.assertTrue(waveform_native.destination_in_temp(dest))
+
+    def test_afconvert_decodes_and_deletes_the_temp_wav(self) -> None:
+        """Run the macOS opener against a fake afconvert and delete its WAV.
+
+        The fake writes a real PCM WAV to the output argument. The source
+        name contains a space and is also reached through a symlink. The
+        source bytes and mtime stay put, and the temp directory is gone
+        after the iterator finishes.
+
+        Returns:
+            None. The test fails if a file appears beside the source or the
+            command is not an argv list.
+        """
+        created: list[str] = []
+        real_directory = tempfile.TemporaryDirectory
+
+        def tracking(*_args: object, **kwargs: object) -> tempfile.TemporaryDirectory[str]:
+            prefix = kwargs.get("prefix")
+            directory = real_directory(prefix=prefix if isinstance(prefix, str) else None)
+            created.append(directory.name)
+            return directory
+
+        class _Proc:
+            def __init__(self, command: list[str], **kwargs: object) -> None:
+                self.command = command
+                self.kwargs = kwargs
+                self.returncode: int | None = None
+                self.killed = False
+                dest = Path(command[-1])
+                _write_wav(dest, _sine(1000.0, 0.5))
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                del timeout
+                self.returncode = 0
+                return b"", b""
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def kill(self) -> None:
+                self.killed = True
+
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw) / "my music"
+            folder.mkdir()
+            source = folder / "song.m4a"
+            payload = b"container-bytes"
+            source.write_bytes(payload)
+            stamp = source.stat().st_mtime_ns
+            link = folder / "link.m4a"
+            try:
+                link.symlink_to(source)
+            except OSError:
+                link = source
+            names_before = sorted(item.name for item in folder.iterdir())
+            executable = _absolute_named("afconvert")
+            with mock.patch("waveform_native.apple_converter", return_value=executable):
+                with mock.patch("waveform_native.tempfile.TemporaryDirectory", tracking):
+                    with mock.patch("waveform_native.subprocess.Popen", side_effect=_Proc) as popen:
+                        stream = waveform_native.open_apple(link)
+                        try:
+                            chunks = list(stream)
+                        finally:
+                            stream.close()
+            command = popen.call_args.args[0]
+            self.assertIsInstance(command, list)
+            self.assertEqual(command[0], executable)
+            self.assertEqual(command[-2], os.path.realpath(link))
+            self.assertTrue(Path(command[-1]).parent.name.startswith(waveform_native.TEMP_PREFIX))
+            self.assertNotEqual(Path(command[-1]).resolve().parent, folder.resolve())
+            self.assertIs(popen.call_args.kwargs.get("shell"), False)
+            self.assertIn("shell", popen.call_args.kwargs)
+            self.assertIs(popen.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
+            self.assertGreater(len(chunks), 0)
+            self.assertEqual(source.read_bytes(), payload)
+            self.assertEqual(source.stat().st_mtime_ns, stamp)
+            self.assertEqual(sorted(item.name for item in folder.iterdir()), names_before)
+            self.assertTrue(created)
+            self.assertFalse(Path(created[0]).exists())
+
+    def test_afconvert_timeout_kills_the_process_and_removes_the_temp_dir(self) -> None:
+        """Kill afconvert when it does not exit, and do not leave the WAV directory.
+
+        The fake ``communicate`` raises ``TimeoutExpired`` once. The source
+        is a few bytes in a temp directory.
+
+        Returns:
+            None. The test fails if the process is left running or the temp
+            directory remains.
+        """
+        created: list[str] = []
+        real_directory = tempfile.TemporaryDirectory
+
+        def tracking(*_args: object, **kwargs: object) -> tempfile.TemporaryDirectory[str]:
+            prefix = kwargs.get("prefix")
+            directory = real_directory(prefix=prefix if isinstance(prefix, str) else None)
+            created.append(directory.name)
+            return directory
+
+        class _Hung:
+            def __init__(self, command: list[str], **kwargs: object) -> None:
+                del command, kwargs
+                self.killed = False
+                self.calls = 0
+                self.returncode: int | None = None
+
+            def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+                self.calls += 1
+                if self.calls == 1:
+                    raise subprocess.TimeoutExpired(cmd="afconvert", timeout=timeout or 1)
+                self.returncode = -9
+                return b"", b""
+
+            def poll(self) -> int | None:
+                return self.returncode
+
+            def kill(self) -> None:
+                self.killed = True
+
+        hung = _Hung([])
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"container")
+            with mock.patch("waveform_native.apple_converter", return_value=_absolute_named("afconvert")):
+                with mock.patch("waveform_native.tempfile.TemporaryDirectory", tracking):
+                    with mock.patch("waveform_native.subprocess.Popen", return_value=hung):
+                        with self.assertRaises(waveform.WaveformUnavailable) as caught:
+                            waveform_native.open_apple(path)
+        self.assertEqual(caught.exception.message, "waveform unavailable")
+        self.assertTrue(hung.killed)
+        self.assertTrue(created)
+        self.assertFalse(Path(created[0]).exists())
+
+    def test_relative_afconvert_is_not_executed(self) -> None:
+        """Refuse a relative converter path before starting a process.
+
+        Returns:
+            None. The test fails if ``Popen`` is called.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"container")
+            with mock.patch("waveform_native.apple_converter", return_value="afconvert"):
+                with mock.patch("waveform_native.subprocess.Popen") as popen:
+                    with self.assertRaises(waveform.DecodeError):
+                        waveform_native.open_apple(path)
+        popen.assert_not_called()
+
+    def test_media_foundation_uninitializes_com_only_on_the_opening_thread(self) -> None:
+        """Call ``CoUninitialize`` only from the thread that initialized COM.
+
+        The file is not opened and no DLL is loaded. ``close`` on the
+        opening thread calls ``_com_stop``. ``__del__`` calls that same
+        ``close``, so a close from another thread does not.
+
+        Returns:
+            None. The test fails if the other thread uninitializes COM.
+        """
+        def chunk(_self: object) -> np.ndarray:
+            return np.zeros(16, dtype=np.float64)
+
+        def quiet_open(_self: object, _path: Path) -> None:
+            return None
+
+        patches = (
+            mock.patch("waveform_native.sys.platform", "win32"),
+            mock.patch("waveform_native._com_start", return_value=True),
+            mock.patch("waveform_native._mf_start"),
+            mock.patch("waveform_native._mf_stop"),
+            mock.patch("waveform_native._MfReader._open", quiet_open),
+            mock.patch("waveform_native._MfReader.read_chunk", chunk),
+            mock.patch("waveform_native._com_stop"),
+        )
+
+        def open_stream() -> waveform_native.PcmStream:
+            return waveform_native.open_media_foundation(Path("song.m4a"))
+
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as stop:
+            same = open_stream()
+            same.close()
+            self.assertEqual(stop.call_count, 1)
+            other = open_stream()
+
+            def elsewhere() -> None:
+                other.close()
+
+            worker = threading.Thread(target=elsewhere)
+            worker.start()
+            worker.join()
+            self.assertEqual(stop.call_count, 1)
+
+    def test_media_foundation_is_refused_off_windows(self) -> None:
+        """Do not load Media Foundation DLLs on Linux or macOS.
+
+        Returns:
+            None. The test fails if a non-Windows call returns samples.
+        """
+        if sys.platform == "win32":
+            self.skipTest("the refusal is the non-Windows path")
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "song.m4a"
+            path.write_bytes(b"container")
+            with mock.patch("waveform_native._com_start", side_effect=AssertionError("com")):
+                with self.assertRaises(waveform.DecodeError):
+                    waveform_native.open_media_foundation(path)
+
+    def test_alac_alias_is_removed_and_does_not_touch_the_source_directory(self) -> None:
+        """Hard-link or copy a ``.alac`` file to a temp ``.m4a`` and then delete it.
+
+        The source bytes and the source directory listing stay the same.
+        No library file is used.
+
+        Returns:
+            None. The test fails if the alias remains or the source changes.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw) / "tracks"
+            folder.mkdir()
+            source = folder / "song.alac"
+            payload = b"alac-bytes-not-a-real-file"
+            source.write_bytes(payload)
+            before = sorted(item.name for item in folder.iterdir())
+            alias, cleanup = waveform_native.temporary_m4a_alias(source)
+            try:
+                self.assertEqual(alias.name, "track.m4a")
+                self.assertTrue(alias.parent.name.startswith(waveform_native.TEMP_PREFIX))
+                self.assertNotEqual(alias.resolve().parent, folder.resolve())
+                self.assertEqual(alias.read_bytes(), payload)
+                self.assertEqual(source.read_bytes(), payload)
+                self.assertEqual(sorted(item.name for item in folder.iterdir()), before)
+                self.assertTrue(waveform_native.separate_temp_output(source, alias))
+            finally:
+                cleanup()
+            self.assertFalse(alias.exists())
+            self.assertFalse(alias.parent.exists())
+            self.assertEqual(source.read_bytes(), payload)
+
+    def test_encoder_does_not_start_media_foundation_outside_temp(self) -> None:
+        """Refuse an ``.m4a`` destination in the working directory.
+
+        COM startup is patched to fail the test if it is reached. The
+        destination is deleted if a regression creates it.
+
+        Returns:
+            None. The test fails if a file is written outside temp.
+        """
+        dest = Path.cwd() / "not-a-waveform.m4a"
+        try:
+            with tempfile.TemporaryDirectory() as raw:
+                wav = Path(raw) / "tone.wav"
+                _write_wav(wav, _sine(440.0, 0.1))
+                with mock.patch("waveform_native.sys.platform", "win32"):
+                    with mock.patch("waveform_native._com_start", side_effect=AssertionError("com")):
+                        with self.assertRaises(waveform.DecodeError):
+                            waveform_native.encode_aac_m4a(wav, dest)
+            self.assertFalse(dest.exists())
+        finally:
+            if dest.exists():
+                dest.unlink()
+
+
+def _absolute_named(name: str) -> str:
+    """Return an absolute path whose final component is ``name``.
+
+    Args:
+        name: File name, such as ``afconvert``.
+
+    Returns:
+        A path under the system temp directory. ``/usr/bin/afconvert`` is
+        not absolute on Windows, so tests use this instead.
+    """
+    return str(Path(tempfile.gettempdir()) / name)
+
+
+def _aac_tool() -> str | None:
+    """Return the AAC encoder this machine can run, or None.
+
+    Returns:
+        ``afconvert`` on macOS when the system tool exists, ``ffmpeg`` when
+        that program is on PATH, or ``media-foundation`` on Windows when the
+        DLLs load. None when no encoder is available.
+    """
+    if sys.platform == "darwin" and waveform_native.apple_converter():
+        return "afconvert"
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    if sys.platform == "win32" and waveform_native.media_foundation_available():
+        return "media-foundation"
+    return None
+
+
+def _alac_tool() -> str | None:
+    """Return an ALAC encoder this machine can run, or None.
+
+    Returns:
+        ``afconvert`` on macOS, or an ffmpeg path. Media Foundation is not
+        an ALAC encoder, so Windows without ffmpeg returns None.
+    """
+    if sys.platform == "darwin" and waveform_native.apple_converter():
+        return "afconvert"
+    return shutil.which("ffmpeg")
+
+
+def _run_encoder(command: list[str]) -> None:
+    """Run one encoder argv and raise when it does not write a file.
+
+    Args:
+        command: Argument vector. It is not a shell string.
+
+    Raises:
+        AssertionError: The process exits non-zero or does not finish.
+    """
+    completed = subprocess.run(
+        command,
+        check=False,
+        shell=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=60,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", "replace")[:500]
+        raise AssertionError(detail)
+
+
+def _encode_fixture(kind: str, wav: Path, dest: Path) -> None:
+    """Encode ``wav`` to ``dest`` with the tool selected for ``kind``.
+
+    Args:
+        kind: ``aac``, ``alac``, or ``adts``.
+        wav: 16-bit mono WAV.
+        dest: Output path in the same temp directory as ``wav``.
+
+    Raises:
+        AssertionError: The encoder fails or writes an empty file.
+    """
+    if kind == "aac" and _aac_tool() == "media-foundation":
+        waveform_native.encode_aac_m4a(wav, dest)
+    elif sys.platform == "darwin" and waveform_native.apple_converter():
+        converter = waveform_native.apple_converter()
+        if converter is None:
+            raise AssertionError("afconvert is not installed")
+        data = {"aac": "aac", "alac": "alac", "adts": "aac"}[kind]
+        file_format = "adts" if kind == "adts" else "m4af"
+        command = [converter, "-f", file_format, "-d", data, "-c", "1"]
+        if kind != "alac":
+            command.extend(["-b", "96000"])
+        command.extend([os.fspath(wav), os.fspath(dest)])
+        _run_encoder(command)
+    else:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise AssertionError("no encoder")
+        if kind == "alac":
+            command = [ffmpeg, "-y", "-i", os.fspath(wav), "-c:a", "alac", os.fspath(dest)]
+        elif kind == "adts":
+            command = [ffmpeg, "-y", "-i", os.fspath(wav), "-f", "adts", "-c:a", "aac", os.fspath(dest)]
+        else:
+            command = [ffmpeg, "-y", "-i", os.fspath(wav), "-c:a", "aac", "-b:a", "96k", os.fspath(dest)]
+        _run_encoder(command)
+    if not dest.is_file() or dest.stat().st_size == 0:
+        raise AssertionError("encoder wrote no bytes")
+
+
+def _prepare_audio(kind: str, folder: Path) -> Path | None:
+    """Return a temp AAC or ALAC file, generated or copied from the baked sine.
+
+    Generation is preferred when this machine has an encoder. A failure, or
+    a machine with no encoder, uses the synthetic file under
+    ``tests/waveform_sines``. Those files are one-second 1 kHz sines.
+
+    Args:
+        kind: ``aac``, ``alac``, or ``adts``.
+        folder: Temp directory that will hold the copy.
+
+    Returns:
+        The audio path, or None when neither an encoder nor a baked file exists.
+    """
+    baked_name = {"aac": "tone-aac.m4a", "alac": "tone-alac.m4a", "adts": "tone.aac"}[kind]
+    dest = folder / baked_name
+    wav = folder / "tone.wav"
+    if not wav.is_file():
+        _write_wav(wav, _sine(1000.0, 1.0))
+    if kind == "alac":
+        has_tool = _alac_tool()
+    elif kind == "adts":
+        has_tool = (sys.platform == "darwin" and waveform_native.apple_converter()) or shutil.which("ffmpeg")
+    else:
+        has_tool = _aac_tool()
+    if has_tool:
+        try:
+            _encode_fixture(kind, wav, dest)
+        except Exception:
+            if dest.exists():
+                dest.unlink()
+    if not dest.is_file() or dest.stat().st_size == 0:
+        baked = ROOT / "tests" / "waveform_sines" / baked_name
+        if not baked.is_file():
+            return None
+        dest.write_bytes(baked.read_bytes())
+    return dest
+
+
+def _assert_mid_tone(test: unittest.TestCase, body: bytes) -> None:
+    """Require a 1 kHz tone to land in the mid band.
+
+    Args:
+        test: The running test.
+        body: An ``SWF1`` body.
+    """
+    parsed = waveform.parse_waveform(body)
+    test.assertGreater(parsed["detail_count"], 40)
+    means = _middle_means(body)
+    test.assertGreater(float(means[2]), float(means[0]))
+    test.assertGreater(float(means[2]), float(means[4]))
+
+
+@unittest.skipUnless(
+    sys.platform in {"darwin", "win32"},
+    "OS-native AAC and ALAC decode is exercised on the macOS and Windows runners",
+)
+class NativeFileTests(unittest.TestCase):
+    """Decode AAC or ALAC with the OS decoder.
+
+    The file is generated when an encoder exists. Otherwise the baked
+    one-second 1 kHz sine in ``tests/waveform_sines`` is copied into a
+    temp directory. ffmpeg is hidden for the decode, so a pass is the
+    native reader. Linux skips this class.
+    """
+
+    def _load_native(self, path: Path) -> bytes:
+        """Decode ``path`` with ffmpeg hidden.
+
+        Args:
+            path: Generated audio file.
+
+        Returns:
+            The ``SWF1`` body.
+        """
+        before = path.read_bytes()
+        stamp = path.stat().st_mtime_ns
+        names = sorted(item.name for item in path.parent.iterdir())
+        with mock.patch("waveform.shutil.which", return_value=None):
+            body, _cached = waveform.load(path)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(path.stat().st_mtime_ns, stamp)
+        self.assertEqual(sorted(item.name for item in path.parent.iterdir()), names)
+        return body
+
+    def test_aac_m4a_decodes_with_the_native_decoder(self) -> None:
+        """Read a mid-band waveform from a one-second AAC file.
+
+        macOS prefers ``afconvert``. Windows prefers Media Foundation and
+        falls back to the baked sine when that encoder refuses the type.
+        The source directory does not gain a decoded WAV.
+
+        Returns:
+            None. The test skips when no AAC bytes are available.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            dest = _prepare_audio("aac", Path(raw))
+            if dest is None:
+                self.skipTest("no AAC encoder on this runner")
+                return
+            body = self._load_native(dest)
+        _assert_mid_tone(self, body)
+
+    def test_alac_m4a_and_alac_suffix_decode_with_the_native_decoder(self) -> None:
+        """Decode an ALAC file under both a ``.m4a`` name and a ``.alac`` name.
+
+        The ``.alac`` file is a copy of the same bytes in the temp directory.
+        Windows uses the baked sine when it has no ALAC encoder.
+
+        Returns:
+            None. The test skips when no ALAC bytes are available.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw)
+            dest = _prepare_audio("alac", folder)
+            if dest is None:
+                self.skipTest("no ALAC encoder on this runner")
+                return
+            renamed = folder / "tone.alac"
+            renamed.write_bytes(dest.read_bytes())
+            body = self._load_native(dest)
+            renamed_body = self._load_native(renamed)
+        _assert_mid_tone(self, body)
+        _assert_mid_tone(self, renamed_body)
+
+    def test_adts_aac_decodes_with_the_native_decoder(self) -> None:
+        """Read a mid-band waveform from an ADTS ``.aac`` file.
+
+        macOS prefers ``afconvert``. Windows uses the baked sine when
+        ffmpeg is not installed.
+
+        Returns:
+            None. The test skips when no ADTS bytes are available.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            dest = _prepare_audio("adts", Path(raw))
+            if dest is None:
+                self.skipTest("no ADTS encoder on this runner")
+                return
+            body = self._load_native(dest)
+        _assert_mid_tone(self, body)

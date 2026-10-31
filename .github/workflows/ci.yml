@@ -45,7 +45,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: |
           python -m pip install pyright==1.1.407
-          python -m pyright waveform.py tests/test_waveform.py
+          python -m pyright waveform.py waveform_native.py tests/test_waveform.py
 
       # Exercises bash plus the RELEASE_TAG environment path on the Windows
       # runner. The release job reads the tag from that variable because

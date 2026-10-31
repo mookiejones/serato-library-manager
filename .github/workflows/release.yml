@@ -16,6 +16,7 @@ on:
       - "static/app.js"
       - "static/app.css"
       - "desktop.py"
+      - "waveform*.py"
       - "version_info.py"
       - "_version.py"
       - "scripts/write_version.py"
