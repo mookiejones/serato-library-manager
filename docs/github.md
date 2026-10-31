@@ -46,12 +46,12 @@ npx playwright install chromium
 npx playwright test -c e2e/playwright.config.ts
 ```
 
-The test job installs `requirements.txt`, then runs the suite. The Ubuntu Python 3.12 job also installs `pyright==1.1.407` and runs `python -m pyright waveform.py tests/test_waveform.py` in strict mode (`pyrightconfig.json`). Those files are on the strict include list. The rest of the include list is not gated by this step. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
+The test job installs `requirements.txt`, then runs the suite. The Ubuntu Python 3.12 job also installs `pyright==1.1.407` and runs `python -m pyright waveform.py waveform_native.py tests/test_waveform.py` in strict mode (`pyrightconfig.json`). Those files are on the strict include list. The rest of the include list is not gated by this step. The suite imports `sentry-sdk` and `posthog`. On your machine the commands are:
 
 ```bash
 python3 -m pip install -r requirements.txt
 python3 -m pip install pyright==1.1.407
-python3 -m pyright waveform.py tests/test_waveform.py
+python3 -m pyright waveform.py waveform_native.py tests/test_waveform.py
 python3 -m unittest discover -s tests -t . -v
 ```
 

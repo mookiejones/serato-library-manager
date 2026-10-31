@@ -11,12 +11,17 @@ Decoding uses miniaudio (MIT; dr_mp3, dr_flac, and stb_vorbis, which are
 public domain). That covers ``.wav``, ``.aiff``, ``.aif``, ``.flac``,
 ``.mp3``, and ``.ogg``. A WAV or AIFF that miniaudio cannot open falls
 back to the stdlib ``wave`` module or a pure-Python AIFF reader. ``.m4a``,
-``.aac``, and ``.alac`` are not in those decoders. They are read with
-``ffmpeg`` only when ``shutil.which`` finds it on ``PATH``. ffmpeg is not
-bundled, and the PyInstaller spec is not changed to add it. soundfile and
-libsndfile are not used. A file that still cannot be decoded raises
-:class:`WaveformUnavailable`. Playback is a different route and is left
-alone.
+``.aac``, and ``.alac`` are not in those decoders. macOS reads them with
+``afconvert`` (AudioToolbox), which writes a temporary WAV under the system
+temp directory. Windows reads them with Media Foundation, in memory.
+Linux tries ``ffmpeg`` only when ``shutil.which`` finds it on ``PATH``.
+The other two systems try that same ffmpeg when the native decoder
+refuses the file. ffmpeg is not bundled, and the PyInstaller spec is not
+changed to add it. soundfile and libsndfile are not used. A temp file is
+removed when decoding finishes or fails, and it is not written beside the
+audio file or inside the Serato library folder. A file that still cannot
+be decoded raises :class:`WaveformUnavailable`. Playback is a different
+route and is left alone.
 
 The response body is little-endian ``SWF1``:
 
@@ -65,6 +70,7 @@ import os
 import shutil
 import struct
 import subprocess
+import sys
 import threading
 import wave
 from collections.abc import Generator, Iterator
@@ -77,6 +83,7 @@ import numpy as np
 import app_config
 import library
 import tags
+import waveform_native
 
 logger = logging.getLogger("serato.waveform")
 
@@ -92,8 +99,8 @@ _TAPS = 1023
 _HEADER = struct.Struct("<4s4H6I2H2I")
 _SERATO_BANDS = 16
 
-# miniaudio's bundled decoders do not open these. ffmpeg is the only reader.
-FFMPEG_REQUIRED_SUFFIXES = frozenset({".m4a", ".aac", ".alac"})
+# miniaudio's bundled decoders do not open these. The OS reader or ffmpeg does.
+AAC_FAMILY_SUFFIXES = frozenset({".m4a", ".aac", ".alac"})
 
 _FLAG_DETAIL = 1
 _FLAG_OVERVIEW = 2
@@ -340,6 +347,88 @@ def overview_document(path: Path) -> dict[str, object]:
     }
 
 
+def wave_chunks(path: Path) -> Iterator[np.ndarray]:
+    """Read a PCM WAV with the stdlib and yield mono float chunks.
+
+    The macOS container decoder uses this after ``afconvert`` has written
+    a temporary WAV. The file is opened read-only.
+
+    Args:
+        path: WAV path.
+
+    Returns:
+        Chunks at :data:`ANALYZE_RATE`.
+
+    Raises:
+        DecodeError: The file is not a PCM WAV this reader understands.
+    """
+    return _open_wave(path)
+
+
+def mix_pcm(raw: bytes, width: int, channels: int, *, little: bool) -> np.ndarray:
+    """Convert interleaved PCM to mono floats in -1 to 1.
+
+    Args:
+        raw: Interleaved frames.
+        width: Bytes per sample. 1, 2, or 4.
+        channels: Channel count. More than one is averaged.
+        little: True for little-endian integer PCM.
+
+    Returns:
+        Mono float samples.
+
+    Raises:
+        DecodeError: ``width`` is not 1, 2, or 4.
+    """
+    return _pcm_bytes(raw, width, channels, little=little)
+
+
+def resample_mono(samples: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+    """Resample mono samples with linear interpolation.
+
+    Args:
+        samples: Mono samples.
+        source_rate: Current sample rate.
+        target_rate: Desired sample rate.
+
+    Returns:
+        Samples at ``target_rate``.
+
+    Raises:
+        DecodeError: ``source_rate`` is not a positive number.
+    """
+    return _resample(samples, source_rate, target_rate)
+
+
+def cache_directory_blocked(directory: Path) -> bool:
+    """Return whether a temp or cache directory would land in the Serato folder.
+
+    Args:
+        directory: Directory that would receive a new file.
+
+    Returns:
+        True when that directory must not be written.
+    """
+    return _cache_blocked(directory)
+
+
+def native_container_opener() -> Callable[[Path], Iterator[np.ndarray]] | None:
+    """Return the built-in decoder for m4a, AAC, and ALAC, or None on Linux.
+
+    macOS uses AudioToolbox through ``afconvert``. Windows uses Media
+    Foundation. Linux has no built-in decoder for these suffixes, so the
+    caller tries ffmpeg only when it is already on ``PATH``.
+
+    Returns:
+        The opener for this operating system, or None.
+    """
+    if sys.platform == "darwin":
+        return waveform_native.open_apple
+    if sys.platform == "win32":
+        return waveform_native.open_media_foundation
+    return None
+
+
 def iter_pcm(path: Path) -> Generator[np.ndarray, None, None]:
     """Yield mono float samples at 44100 Hz for one file.
 
@@ -350,12 +439,16 @@ def iter_pcm(path: Path) -> Generator[np.ndarray, None, None]:
         One chunk of mono samples. The concatenation is the track.
 
     Raises:
-        WaveformUnavailable: Every decoder refused the file, or ffmpeg is
-            not on ``PATH`` for a format miniaudio cannot open.
+        WaveformUnavailable: Every decoder refused the file. On Linux that
+            includes an AAC-family file when ffmpeg is not on ``PATH``.
     """
     suffix = path.suffix.lower()
     openers: list[Callable[[Path], Iterator[np.ndarray]]] = []
-    if suffix not in FFMPEG_REQUIRED_SUFFIXES:
+    if suffix in AAC_FAMILY_SUFFIXES:
+        native = native_container_opener()
+        if native is not None:
+            openers.append(native)
+    else:
         openers.append(_open_miniaudio)
         if suffix == ".wav":
             openers.append(_open_wave)
