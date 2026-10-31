@@ -117,6 +117,8 @@ _BLOCK = _guid(0x322DE230, 0x9EEB, 0x43BD, bytes.fromhex("ab7aff412251541d"))
 _AVG = _guid(0x1BA85B5D, 0xFCE7, 0x4C43, bytes.fromhex("8a3e6f6c7e40b4a0"))
 _AAC_PAYLOAD = _guid(0xBFBABE79, 0x7434, 0x4D1C, bytes.fromhex("94f072a3b9e17188"))
 _CHANNEL_MASK = _guid(0x55FB5765, 0x644A, 0x4CAF, bytes.fromhex("8479938983bb1588"))
+_IID_MEDIA_TYPE = _guid(0x44AE0FA8, 0xEA31, 0x4109, bytes.fromhex("8d2e4cae4997c555"))
+_MFT_ENUM_FLAG_ALL = 0x3F
 
 
 class PcmStream(Protocol):
@@ -525,6 +527,8 @@ def _configure_dlls(ole: ctypes.CDLL, plat: ctypes.CDLL, readwrite: ctypes.CDLL)
     plat.MFCreateMemoryBuffer.restype = ctypes.c_long
     plat.MFCreateSample.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
     plat.MFCreateSample.restype = ctypes.c_long
+    plat.MFCreateAttributes.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32]
+    plat.MFCreateAttributes.restype = ctypes.c_long
     readwrite.MFCreateSourceReaderFromURL.argtypes = [
         ctypes.c_wchar_p,
         ctypes.c_void_p,
@@ -869,6 +873,133 @@ def _blank_pcm_type() -> int:
         _release(media)
         raise
     return media
+
+
+def _mf_transcode() -> ctypes.CDLL:
+    """Load ``mf.dll`` and type the AAC output-type enumerator.
+
+    Returns:
+        The loaded library.
+
+    Raises:
+        waveform.DecodeError: ``WinDLL`` is unavailable.
+        OSError: ``mf.dll`` did not load.
+    """
+    dll = _windll("mf")
+    enumerator = dll.MFTranscodeGetAudioOutputAvailableTypes
+    enumerator.argtypes = [
+        ctypes.POINTER(_GUID),
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    enumerator.restype = ctypes.c_long
+    return dll
+
+
+def _query_media_type(unknown: int) -> int:
+    """Query an object for ``IMFMediaType``.
+
+    Args:
+        unknown: ``IUnknown`` pointer from a collection element.
+
+    Returns:
+        An ``IMFMediaType`` pointer the caller must release.
+
+    Raises:
+        waveform.DecodeError: The object is not a media type.
+    """
+    out = ctypes.c_void_p()
+    _check(
+        _invoke(
+            unknown,
+            0,
+            ctypes.c_long,
+            [ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)],
+            ctypes.byref(_IID_MEDIA_TYPE),
+            ctypes.byref(out),
+        ),
+        "QueryInterface",
+    )
+    if not out.value:
+        _fail("media type was null")
+    return int(out.value)
+
+
+def _pick_aac_type(rate: int, channels: int) -> int:
+    """Return an AAC media type the installed encoder publishes.
+
+    Args:
+        rate: Sample rate in Hz.
+        channels: Channel count.
+
+    Returns:
+        An ``IMFMediaType`` pointer the caller must release. The type is
+        the published one whose average bitrate is closest to 128 kbps.
+
+    Raises:
+        waveform.DecodeError: No published type matches ``rate`` and
+        ``channels``.
+    """
+    listed = ctypes.c_void_p()
+    _check(
+        int(_mf_transcode().MFTranscodeGetAudioOutputAvailableTypes(ctypes.byref(_AAC), _MFT_ENUM_FLAG_ALL, None, ctypes.byref(listed))),
+        "MFTranscodeGetAudioOutputAvailableTypes",
+    )
+    collection = int(listed.value or 0)
+    if collection == 0:
+        _fail("AAC type collection was null")
+    chosen = 0
+    best_delta = 10**9
+    try:
+        count_out = ctypes.c_uint32()
+        _check(
+            _invoke(collection, 3, ctypes.c_long, [ctypes.POINTER(ctypes.c_uint32)], ctypes.byref(count_out)),
+            "GetElementCount",
+        )
+        for index in range(int(count_out.value)):
+            element = ctypes.c_void_p()
+            _check(
+                _invoke(
+                    collection,
+                    4,
+                    ctypes.c_long,
+                    [ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)],
+                    index,
+                    ctypes.byref(element),
+                ),
+                "GetElement",
+            )
+            unknown = int(element.value or 0)
+            if unknown == 0:
+                continue
+            try:
+                media = _query_media_type(unknown)
+            finally:
+                _release(unknown)
+            try:
+                media_rate = _get_uint32(media, _RATE)
+                media_channels = _get_uint32(media, _CHANNELS)
+                average = _get_uint32(media, _AVG)
+            except Exception:
+                _release(media)
+                continue
+            if media_rate != rate or media_channels != channels:
+                _release(media)
+                continue
+            delta = abs(average - 16000)
+            if chosen == 0 or delta < best_delta:
+                if chosen:
+                    _release(chosen)
+                chosen = media
+                best_delta = delta
+            else:
+                _release(media)
+    finally:
+        _release(collection)
+    if chosen == 0:
+        _fail("no published AAC type matched the WAV")
+    return chosen
 
 
 def _aac_type(rate: int, channels: int) -> int:
@@ -1706,6 +1837,37 @@ def _add_stream(writer: int, media: int) -> int:
     return int(index.value)
 
 
+def _set_encoder_input(writer: int, index: int, rate: int) -> None:
+    """Set the PCM input type, retrying without a channel mask.
+
+    Args:
+        writer: ``IMFSinkWriter`` pointer.
+        index: Stream index from ``AddStream``.
+        rate: Sample rate in Hz.
+
+    Raises:
+        waveform.DecodeError: Both input types were refused.
+    """
+    last = 0
+    for mask in (3, None):
+        media = _pcm_type(2, rate, channel_mask=mask)
+        try:
+            last = _invoke(
+                writer,
+                _WRITER_SET_INPUT,
+                ctypes.c_long,
+                [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p],
+                index,
+                media,
+                None,
+            )
+        finally:
+            _release(media)
+        if last >= 0:
+            return
+    _check(last, "SetInputMediaType")
+
+
 def _write_aac(pcm: bytes, rate: int, dest: Path) -> None:
     """Encode stereo PCM to ``dest``.
 
@@ -1725,27 +1887,22 @@ def _write_aac(pcm: bytes, rate: int, dest: Path) -> None:
         _mf_start()
         started = True
         writer = _create_writer(_media_path(dest))
-        output_type = _aac_type(rate, 2)
+        output_type = 0
+        index = 0
         try:
-            index = _add_stream(writer, output_type)
+            try:
+                output_type = _pick_aac_type(rate, 2)
+                index = _add_stream(writer, output_type)
+            except Exception:
+                if output_type:
+                    _release(output_type)
+                    output_type = 0
+                output_type = _aac_type(rate, 2)
+                index = _add_stream(writer, output_type)
         finally:
-            _release(output_type)
-        input_type = _pcm_type(2, rate, channel_mask=3)
-        try:
-            _check(
-                _invoke(
-                    writer,
-                    _WRITER_SET_INPUT,
-                    ctypes.c_long,
-                    [ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p],
-                    index,
-                    input_type,
-                    None,
-                ),
-                "SetInputMediaType",
-            )
-        finally:
-            _release(input_type)
+            if output_type:
+                _release(output_type)
+        _set_encoder_input(writer, index, rate)
         _check(_invoke(writer, _WRITER_BEGIN, ctypes.c_long, []), "BeginWriting")
         _write_pcm_samples(writer, index, pcm, rate, 2)
         _check(_invoke(writer, _WRITER_FINALIZE, ctypes.c_long, []), "Finalize")
