@@ -33,6 +33,8 @@
 import type { Marker, Track } from "./api-types";
 import { playerStrings } from "./player-strings";
 import { state } from "./state";
+import { buttonEl, inputEl, setTooltip } from "./tooltip";
+import { cueTip, playTip, tips } from "./tooltip-strings";
 import { beatgridFromMarkers, loopsFromMarkers } from "./waveform";
 import { mountWaveform, type WaveformController } from "./waveform-view";
 
@@ -596,19 +598,16 @@ function buildBar(): HTMLElement {
   statusNode.setAttribute("role", "status");
   meta.append(titleNode, artistNode, statusNode);
 
-  previousNode = document.createElement("button");
-  previousNode.type = "button";
+  previousNode = buttonEl(tips.previous);
   previousNode.className = "player-toggle";
   previousNode.textContent = playerStrings.previous;
   previousNode.addEventListener("click", () => previous());
 
-  toggleNode = document.createElement("button");
-  toggleNode.type = "button";
+  toggleNode = buttonEl(playTip(playerStrings.play, ""));
   toggleNode.className = "player-toggle player-play";
   toggleNode.addEventListener("click", () => togglePlayPause());
 
-  nextNode = document.createElement("button");
-  nextNode.type = "button";
+  nextNode = buttonEl(tips.next);
   nextNode.className = "player-toggle";
   nextNode.textContent = playerStrings.next;
   nextNode.addEventListener("click", () => next());
@@ -630,7 +629,7 @@ function buildBar(): HTMLElement {
 
   const track = document.createElement("div");
   track.className = "player-seek-track";
-  seekNode = document.createElement("input");
+  seekNode = inputEl(tips.seek);
   seekNode.type = "range";
   seekNode.className = "player-range";
   seekNode.min = "0";
@@ -670,7 +669,7 @@ function buildBar(): HTMLElement {
   volumeTextNode = document.createElement("span");
   volumeTextNode.textContent = playerStrings.volume;
   const volumeText = volumeTextNode;
-  const volumeInput = document.createElement("input");
+  const volumeInput = inputEl(tips.volume);
   volumeInput.type = "range";
   volumeInput.min = "0";
   volumeInput.max = "1";
@@ -746,6 +745,7 @@ function paintBar(): void {
   const action = playing ? playerStrings.pause : playerStrings.play;
   const named = loaded ? (title || playerStrings.untitled) : "";
   toggleNode.textContent = action;
+  setTooltip(toggleNode, playTip(action, named));
   toggleNode.disabled = !loaded && selectedPlayableId() === null;
   toggleNode.setAttribute("aria-pressed", String(playing));
   toggleNode.setAttribute("aria-label", named ? `${action} ${named}` : action);
@@ -778,15 +778,13 @@ function paintCues(limit: number): void {
   cueLayer.replaceChildren();
   if (!(limit > 0) || cues.length === 0) return;
   for (const cue of cues) {
-    const button = document.createElement("button");
-    button.type = "button";
+    const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
+    const button = buttonEl(cueTip(label));
     button.className = "player-cue";
     const ratio = Math.min(1, Math.max(0, cue.seconds / limit));
     const percent = Math.round(ratio * 1000) / 10;
     button.style.left = `${percent}%`;
     if (cue.color) button.style.setProperty("--cue", cue.color);
-    const label = `${cue.label}, ${formatPlayerTime(cue.seconds)}`;
-    button.title = label;
     button.setAttribute("aria-label", label);
     button.addEventListener("click", () => {
       seek(cue.seconds);

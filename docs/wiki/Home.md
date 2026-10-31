@@ -24,7 +24,7 @@ Double-click a track to play it. The bar under the list has pause, seek, and vol
 
 The space menu shows **Library**, **Video**, **Apple Music**, and **Prepare**.
 
-**Shortcuts** and **Settings** are at the bottom of that sidebar. **Shortcuts** lists the keys. Ctrl+K or Command+K finds a track or a file.
+**Shortcuts** and **Settings** are at the bottom of that sidebar. **Shortcuts** lists the keys. Ctrl+K or Command+K finds a track or a file. Hover a control, or tab to it, to read what it does. If it has a shortcut, the note shows that key.
 
 ## Cue points and Backups
 

@@ -118,7 +118,7 @@ Later, open **Snapshots**. **Review restore** shows the plan before anything is 
 
 You land in **Crates**. The space menu reads **Library**, **Video**, **Apple Music**, or **Prepare**.
 
-Use **Search tracks**, then click a tune. Cue points show on the right. They are read from the audio file. Press `/` to jump to that search. Press Ctrl+K (Command+K on a Mac) to find a track or a file on disk. **Shortcuts**, at the bottom of the sidebar, lists the other keys.
+Use **Search tracks**, then click a tune. Cue points show on the right. They are read from the audio file. Press `/` to jump to that search. Press Ctrl+K (Command+K on a Mac) to find a track or a file on disk. **Shortcuts**, at the bottom of the sidebar, lists the other keys. Hover a control, or tab to it, and a note names the action and any shortcut it already has.
 
 Double-click a row, press **Enter**, or click **Play**, to hear it. **Space** plays or pauses. **Left** and **Right** move 5 seconds. The bar under the list shows the title, the artist, previous and next, pause, a seek bar with the file's cue points, and volume. Playback does not write to the audio file and does not add a history row.
 

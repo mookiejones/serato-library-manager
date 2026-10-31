@@ -15,4 +15,12 @@ export default async function globalSetup(): Promise<void> {
     target: "es2022",
     outfile: "e2e/dist/fixture.js",
   });
+  await esbuild.build({
+    entryPoints: ["e2e/tooltips-fixture.ts"],
+    bundle: true,
+    format: "iife",
+    platform: "browser",
+    target: "es2022",
+    outfile: "e2e/dist/tooltips.js",
+  });
 }

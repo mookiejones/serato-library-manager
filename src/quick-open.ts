@@ -12,6 +12,8 @@ import { el } from "./dom";
 import { t } from "./i18n";
 import { scoreQuery } from "./fuzzy";
 import { ROW, state } from "./state";
+import { buttonEl } from "./tooltip";
+import { quickOpenHit } from "./tooltip-strings";
 import { focusFileByPath, loadFolder, selectCrate, selectTrack, setMode } from "./views";
 
 /** Wait before asking the disk, so a fast typist does not search every letter. */
@@ -291,8 +293,11 @@ function paint(): void {
   else status.textContent = truncated ? t("quickOpen.truncated") : t("quickOpen.matchCount", { count: hits.length });
   hits.forEach((hit, index) => {
     const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = buttonEl(quickOpenHit(
+      hit.kind === "track" ? t("quickOpen.track") : t("quickOpen.file"),
+      hit.title,
+      hit.detail,
+    ));
     button.className = "quick-open-option";
     button.id = `quick-open-option-${index}`;
     button.setAttribute("role", "option");
@@ -305,11 +310,9 @@ function paint(): void {
     const title = document.createElement("span");
     title.className = "quick-open-name";
     title.textContent = hit.title;
-    title.title = hit.title;
     const detail = document.createElement("span");
     detail.className = "quick-open-detail";
     detail.textContent = hit.detail;
-    detail.title = hit.detail;
     button.append(kind, title, detail);
     button.addEventListener("click", () => {
       active = index;

@@ -30,6 +30,30 @@ import { failSnapshots, loadSnapshots } from "./restore";
 import { COLOR_NAMES, COLORS, FILE_ROW, ROOT_ROW, state } from "./state";
 import { play } from "./player";
 import { playerStrings } from "./player-strings";
+import { buttonEl, inputEl, selectEl, setTooltip, textareaEl } from "./tooltip";
+import {
+  chooseRelated,
+  collapseCrate,
+  editField,
+  expandCrate,
+  fileShortcut,
+  membershipTip,
+  missingDrive,
+  openCopy,
+  openCrumb,
+  openCrate,
+  openFile,
+  openRelated,
+  playRow,
+  removeRelatedTip,
+  revealTip,
+  saveSuggestion,
+  selectFile,
+  selectRow,
+  sessionTip,
+  sortTip,
+  tips,
+} from "./tooltip-strings";
 import { paintRows } from "./virtual-scroll";
 import { codedText, formatNumber, messageParams, serverMessage, t, type MessageKey } from "./i18n";
 
@@ -318,8 +342,7 @@ function crateRow(crate: {
 
   if (crate.childCount) {
     const open = state.crateQuery ? true : state.expanded.has(crate.id);
-    const twist = document.createElement("button");
-    twist.type = "button";
+    const twist = buttonEl(open ? collapseCrate(crate.name) : expandCrate(crate.name));
     twist.className = "twist";
     twist.tabIndex = -1;
     twist.setAttribute("aria-expanded", String(open));
@@ -333,8 +356,7 @@ function crateRow(crate: {
     row.append(gap);
   }
 
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = buttonEl(crate.id === "all" ? tips.allTracks : openCrate(crate.name));
   button.className = "crate";
   button.dataset.id = String(crate.id);
   if (crate.parent != null) button.dataset.parent = String(crate.parent);
@@ -472,12 +494,11 @@ function renderRules() {
   }
   const editor = document.createElement("div");
   editor.className = "rule-edit";
-  const area = document.createElement("textarea");
+  const area = textareaEl(tips.smartRules);
   area.value = JSON.stringify(crate.rules, null, 2);
   area.disabled = !state.writable;
   area.setAttribute("aria-label", t("rules.label"));
-  const save = document.createElement("button");
-  save.type = "button";
+  const save = buttonEl(tips.saveRules);
   save.className = "text-button";
   save.textContent = t("rules.save");
   save.disabled = !state.writable;
@@ -514,6 +535,7 @@ export function renderColumns() {
     button.dataset.sort = key;
     button.textContent = t(label);
     button.dataset.active = String(button.dataset.sort === state.sort);
+    setTooltip(button, sortTip(key, t(label)));
   });
 }
 
@@ -779,8 +801,7 @@ export function selectEntry(id: number) {
     body.append(row);
   }
   if (entry.asset_id) {
-    const open = document.createElement("button");
-    open.type = "button";
+    const open = buttonEl(tips.openInLibrary);
     open.className = "text-button";
     open.textContent = t("history.openInLibrary");
     open.addEventListener("click", () => openInLibrary(entry.asset_id as number));
@@ -807,8 +828,8 @@ function fieldInput(name: string, label: string, value: string | number | null |
   if (wide) wrap.className = "wide";
   wrap.append(document.createTextNode(label));
   const input = name === "comments"
-    ? document.createElement("textarea")
-    : document.createElement("input");
+    ? textareaEl(editField(label))
+    : inputEl(editField(label));
   input.name = name;
   input.value = String(value ?? "");
   if (name === "bpm") input.inputMode = "decimal";
@@ -849,10 +870,9 @@ function renderDetail(track: Track) {
     body.append(artist);
   }
 
-  const playButton = document.createElement("button");
-  playButton.type = "button";
-  playButton.className = "detail-play";
   const playTitle = track.title || track.name || playerStrings.untitled;
+  const playButton = buttonEl(playRow(playTitle));
+  playButton.className = "detail-play";
   playButton.textContent = playerStrings.play;
   playButton.setAttribute("aria-label", `${playerStrings.play} ${playTitle}`);
   playButton.addEventListener("click", () => {
@@ -915,7 +935,7 @@ function renderDetail(track: Track) {
 
   const colorLabel = document.createElement("label");
   colorLabel.append(document.createTextNode(t("field.color")));
-  const colorSelect = document.createElement("select");
+  const colorSelect = selectEl(tips.trackColor);
   colorSelect.name = "color";
   const currentColor = Number(edit.color ?? 0xffffff);
   const palette: Array<[number, string]> = COLORS.map(([value, key]) => [value, t(key)]);
@@ -932,7 +952,7 @@ function renderDetail(track: Track) {
 
   const ratingLabel = document.createElement("label");
   ratingLabel.append(document.createTextNode(t("field.rating")));
-  const ratingSelect = document.createElement("select");
+  const ratingSelect = selectEl(tips.trackRating);
   ratingSelect.name = "rating";
   const ratings: Array<[string, string]> = [
     ["", t("rating.none")],
@@ -953,14 +973,14 @@ function renderDetail(track: Track) {
 
   const lock = document.createElement("label");
   lock.className = "check";
-  const lockInput = document.createElement("input");
+  const lockInput = inputEl(tips.beatgridLock);
   lockInput.type = "checkbox";
   lockInput.name = "is_beatgrid_locked";
   lockInput.checked = Boolean(edit.is_beatgrid_locked);
   lock.append(lockInput, document.createTextNode(t("field.beatgridLocked")));
   form.append(lock);
 
-  const save = document.createElement("button");
+  const save = buttonEl(tips.saveTrack);
   save.type = "submit";
   save.className = "text-button wide";
   save.textContent = t("detail.saveTrack");
@@ -974,31 +994,26 @@ function renderDetail(track: Track) {
 
   const actions = document.createElement("div");
   actions.className = "actions";
-  const reveal = document.createElement("button");
-  reveal.type = "button";
+  const reveal = buttonEl(revealTip(track.serato?.file_manager || state.serato?.file_manager || "Finder"));
   const manager = track.serato?.file_manager || state.serato?.file_manager || "Finder";
   reveal.textContent = t("detail.reveal", { manager });
   reveal.disabled = !track.file_on_disk;
   reveal.addEventListener("click", () => revealTrack(track.id));
-  const prepare = document.createElement("button");
-  prepare.type = "button";
+  const prepare = buttonEl(track.in_prepare ? tips.prepareRemove : tips.prepareAdd);
   prepare.textContent = track.in_prepare ? t("detail.removePrepare") : t("detail.sendPrepare");
   prepare.disabled = !writable;
   prepare.addEventListener("click", () => prepareTrack(track.id, !track.in_prepare));
-  const relocate = document.createElement("button");
-  relocate.type = "button";
+  const relocate = buttonEl(tips.relocate);
   relocate.textContent = t("detail.relocate");
   relocate.disabled = !writable;
   relocate.addEventListener("click", () => relocateTrack(track));
-  const remove = document.createElement("button");
-  remove.type = "button";
+  const remove = buttonEl(tips.removeTrack);
   remove.textContent = t("detail.removeFromLibrary");
   remove.disabled = !writable;
   remove.addEventListener("click", () => removeTrack(track.id));
   actions.append(reveal, prepare, relocate, remove);
   if (state.mode === "duplicates" && selectedDuplicateGroup()) {
-    const merge = document.createElement("button");
-    merge.type = "button";
+    const merge = buttonEl(tips.mergeDuplicates);
     merge.textContent = t("merge.title");
     merge.disabled = !writable;
     merge.addEventListener("click", () => {
@@ -1021,8 +1036,7 @@ function renderDetail(track: Track) {
     section.append(heading);
     const open = group.name !== "Search copies";
     if (!open) {
-      const toggle = document.createElement("button");
-      toggle.type = "button";
+      const toggle = buttonEl(tips.showSearchCopies);
       toggle.className = "text-button";
       toggle.textContent = t("detail.searchCopies", { count: group.fields.length });
       let shown = false;
@@ -1031,6 +1045,7 @@ function renderDetail(track: Track) {
         shown = !shown;
         section.hidden = !shown;
         toggle.textContent = shown ? t("detail.hideSearchCopies") : t("detail.searchCopies", { count: group.fields.length });
+        setTooltip(toggle, shown ? tips.hideSearchCopies : tips.showSearchCopies);
       });
       body.append(toggle);
     }
@@ -1192,8 +1207,7 @@ function copySection(copies: CopyRow[]) {
   for (const copy of copies) {
     const row = document.createElement("div");
     row.className = "copy-row";
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = buttonEl(openCopy(copy.file || `Track ${copy.id}`));
     button.className = "text-button";
     button.textContent = copy.file || t("track.numbered", { id: String(copy.id) });
     button.addEventListener("click", () => selectTrack(copy.id as number));
@@ -1308,8 +1322,7 @@ function renderRelated(track: Track, section: HTMLElement, writable: boolean, pa
   section.append(suggestHeading);
   if (suggested.length) section.append(relatedSuggestList(track, section, suggested));
 
-  const crate = document.createElement("button");
-  crate.type = "button";
+  const crate = buttonEl(tips.updateRelated);
   crate.className = "text-button";
   crate.dataset.relatedCrate = "true";
   const crateName = payload.crate_name || "Related";
@@ -1345,8 +1358,7 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
     const other = link.track || {};
     const label = other.title || t("track.untitled");
     if (other.asset_id != null && other.in_library) {
-      const open = document.createElement("button");
-      open.type = "button";
+      const open = buttonEl(openRelated(label));
       open.className = "text-button";
       open.textContent = label;
       open.addEventListener("click", () => selectTrack(other.asset_id as number));
@@ -1373,8 +1385,7 @@ function relatedSavedList(track: Track, section: HTMLElement, saved: RelatedTrac
       note.textContent = link.note;
       main.append(note);
     }
-    const remove = document.createElement("button");
-    remove.type = "button";
+    const remove = buttonEl(removeRelatedTip(label));
     remove.className = "text-button";
     remove.textContent = t("common.remove");
     remove.setAttribute("aria-label", t("related.removeLink", { name: label }));
@@ -1401,7 +1412,7 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
   block.className = "related-search";
   const label = document.createElement("label");
   label.append(document.createTextNode(t("related.find")));
-  const input = document.createElement("input");
+  const input = inputEl(tips.findRelated);
   input.type = "search";
   input.autocomplete = "off";
   input.placeholder = t("related.findPlaceholder");
@@ -1446,8 +1457,8 @@ function relatedSearch(track: Track, section: HTMLElement, query: string) {
     }
     for (const hit of hits) {
       const item = document.createElement("li");
-      const choose = document.createElement("button");
-      choose.type = "button";
+      const name = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : (hit.name || t("track.untitled"));
+      const choose = buttonEl(chooseRelated(name));
       choose.className = "text-button";
       choose.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : (hit.name || t("track.untitled"));
       choose.addEventListener("click", () => relatedLinkForm(track, section, form, hit, input.value));
@@ -1481,14 +1492,14 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   chosen.textContent = hit.artist ? `${hit.name || t("track.untitled")} · ${hit.artist}` : (hit.name || t("track.untitled"));
   const noteLabel = document.createElement("label");
   noteLabel.append(document.createTextNode(t("related.note")));
-  const note = document.createElement("input");
+  const note = inputEl(tips.linkNote);
   note.type = "text";
   note.maxLength = 500;
   note.placeholder = t("related.notePlaceholder");
   noteLabel.append(note);
   const ratingLabel = document.createElement("label");
   ratingLabel.append(document.createTextNode(t("related.linkRating")));
-  const rating = document.createElement("select");
+  const rating = selectEl(tips.linkRating);
   for (const [value, text] of [["", t("rating.none")], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]] as Array<[string, string]>) {
     const option = document.createElement("option");
     option.value = value;
@@ -1498,12 +1509,11 @@ function relatedLinkForm(track: Track, section: HTMLElement, form: HTMLElement, 
   ratingLabel.append(rating);
   const mutualLabel = document.createElement("label");
   mutualLabel.className = "check";
-  const mutual = document.createElement("input");
+  const mutual = inputEl(tips.linkMutual);
   mutual.type = "checkbox";
   mutual.checked = true;
   mutualLabel.append(mutual, document.createTextNode(t("related.twoWayLink")));
-  const save = document.createElement("button");
-  save.type = "button";
+  const save = buttonEl(tips.saveLink);
   save.className = "text-button";
   save.textContent = t("related.saveLink");
   save.addEventListener("click", () => {
@@ -1545,8 +1555,7 @@ function relatedSuggestList(track: Track, section: HTMLElement, suggested: Relat
     reasons.className = "related-meta";
     reasons.textContent = Array.isArray(item.reasons) ? item.reasons.join(" · ") : "";
     main.append(name, reasons);
-    const save = document.createElement("button");
-    save.type = "button";
+    const save = buttonEl(saveSuggestion(item.title || "Untitled"));
     save.className = "text-button";
     save.textContent = t("common.save");
     save.setAttribute("aria-label", t("related.saveLinkTo", { name: item.title || t("track.untitled") }));
@@ -1672,7 +1681,7 @@ function membershipSection(track: Track, writable: boolean) {
   for (const crate of crates) {
     const label = document.createElement("label");
     label.className = "member";
-    const input = document.createElement("input");
+    const input = inputEl(membershipTip(crate.name));
     input.type = "checkbox";
     input.checked = chosen.has(crate.id);
     input.disabled = !writable;
@@ -2132,8 +2141,7 @@ export async function importPlaylist(file: File) {
 export function renderSessions() {
   el("session-list").replaceChildren();
   for (const session of state.historySessions) {
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = buttonEl(sessionTip(session.name || "Session"));
     button.className = "crate";
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", String(session.id === state.historyId));
@@ -2530,6 +2538,7 @@ export function renderFiles() {
   renderBreadcrumb();
   const elsewhere = el("files-elsewhere");
   elsewhere.textContent = state.filesElsewhere ? t("files.roots") : t("files.browseElsewhere");
+  setTooltip(elsewhere, state.filesElsewhere ? tips.filesMusicFolders : tips.filesElsewhere);
   el("files-up").disabled = !state.filesParent || state.filesLoading;
   const notes = [];
   if (state.filesLoading) notes.push(state.filesAtRoots ? t("files.readingRootsNote") : t("files.readingFolderNote"));
@@ -2569,8 +2578,7 @@ function renderBreadcrumb(): void {
     const item = document.createElement("li");
     const last = index === crumbs.length - 1;
     if (!last && crumb.path) {
-      const button = document.createElement("button");
-      button.type = "button";
+      const button = buttonEl(openCrumb(crumb.name));
       button.className = "files-crumb";
       button.textContent = crumb.name;
       button.addEventListener("click", () => {
@@ -2759,8 +2767,7 @@ function rootsEmpty(): HTMLDivElement {
   heading.textContent = t("files.noRoots");
   const copy = document.createElement("p");
   copy.textContent = t("files.noRootsBody");
-  const button = document.createElement("button");
-  button.type = "button";
+  const button = buttonEl(tips.runSetup);
   button.id = "files-run-setup";
   button.className = "files-primary";
   button.textContent = t("files.runSetup");
@@ -2869,8 +2876,7 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   row.setAttribute("role", "listitem");
   const openKind = entry.kind === "dir" || entry.kind === "folder" || entry.kind === "drive";
   if (openKind) {
-    const button = document.createElement("button");
-    button.type = "button";
+    const button = buttonEl(entry.missing ? missingDrive(entry.name) : openFile(entry.name));
     button.className = "files-open";
     button.dataset.filesIndex = String(index);
     button.id = `files-item-${index}`;
@@ -2898,7 +2904,6 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
         button.append(detail);
       }
     }
-    button.title = entry.detail ? `${entry.name} ${entry.detail}` : entry.name;
     if (entry.missing) {
       button.setAttribute("aria-disabled", "true");
       button.setAttribute("aria-label", t("files.driveMissingLabel", { name: entry.name }));
@@ -2920,20 +2925,19 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
     return row;
   }
   if (entry.kind !== "file") {
-    const label = document.createElement("button");
-    label.type = "button";
+    const label = buttonEl(fileShortcut(entry.name));
     label.className = "files-kind";
     label.dataset.filesIndex = String(index);
     label.id = `files-item-${index}`;
     label.tabIndex = index === state.filesActive ? 0 : -1;
     label.textContent = t("files.shortcut", { name: entry.name });
-    label.setAttribute("aria-label", `${entry.name} shortcut`);
+    label.setAttribute("aria-label", t("files.shortcut", { name: entry.name }));
     row.append(label);
     return row;
   }
   const label = document.createElement("label");
   label.className = "files-file";
-  const box = document.createElement("input");
+  const box = inputEl(selectFile(entry.name, entry.path));
   box.type = "checkbox";
   box.dataset.filesIndex = String(index);
   box.id = `files-item-${index}`;
@@ -2949,13 +2953,11 @@ function fileRow(entry: FileEntry, index: number): HTMLDivElement {
   const name = document.createElement("span");
   name.className = "files-name";
   name.textContent = entry.name;
-  name.title = entry.path || entry.name;
   label.append(box, name);
   if (entry.detail) {
     const detail = document.createElement("span");
     detail.className = "files-match-detail";
     detail.textContent = entry.detail;
-    detail.title = entry.detail;
     label.append(detail);
   }
   if (entry.in_library) {

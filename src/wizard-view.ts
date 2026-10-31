@@ -20,6 +20,8 @@ import {
   type PrimaryAction,
   type WizardModel,
 } from "./wizard";
+import { buttonEl, setTooltip } from "./tooltip";
+import { wizardFolder, wizardPrimaryTip } from "./tooltip-strings";
 
 export interface SettingsPayload {
   telemetry_consent: boolean | null;
@@ -397,8 +399,7 @@ function fillFolders(folders: readonly FolderRow[]): void {
     return;
   }
   for (const folder of folders) {
-    const control = document.createElement("button");
-    control.type = "button";
+    const control = buttonEl(wizardFolder(folder.name));
     control.className = "wizard-folder";
     control.textContent = folder.name;
     const nextPath = folder.path;
@@ -444,6 +445,7 @@ function paint(moveFocus: boolean): void {
   primary.textContent = model.context.snapshot === "saving"
     ? t("wizard.savingCopy")
     : action === "none" ? "" : t(LABELS[action]);
+  setTooltip(primary, wizardPrimaryTip(action, model.context.snapshot === "saving"));
   primary.disabled = busy || !primaryEnabled(model);
   button("wizard-no").disabled = busy;
   button("wizard-yes").disabled = busy;

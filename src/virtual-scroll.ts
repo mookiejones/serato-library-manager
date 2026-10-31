@@ -14,6 +14,8 @@ import { getPlayerState, play, subscribe } from "./player";
 import { playerStrings } from "./player-strings";
 import { ROW, state } from "./state";
 import { formatNumber, t } from "./i18n";
+import { buttonEl, setTooltip } from "./tooltip";
+import { playRow, selectRow } from "./tooltip-strings";
 
 const spacer = document.createElement("div");
 const rows = document.createElement("div");
@@ -66,6 +68,7 @@ export function paintRows() {
     button.setAttribute("role", "option");
     button.setAttribute("aria-selected", String(track.id === state.selectedId));
     button.dataset.id = String(track.id);
+    setTooltip(button, selectRow(track.name || "Untitled"));
 
     const titleCell = document.createElement("span");
     titleCell.className = "cell";
@@ -74,8 +77,7 @@ export function paintRows() {
     if (!track.entry) {
       const playingNow = getPlayerState();
       const playingThis = playingNow.trackId === track.id && playingNow.playing;
-      const playButton = document.createElement("button");
-      playButton.type = "button";
+      const playButton = buttonEl(playRow(track.name || playerStrings.untitled));
       playButton.className = "row-play";
       const labelName = track.name || playerStrings.untitled;
       playButton.setAttribute("aria-label", `${playerStrings.play} ${labelName}`);

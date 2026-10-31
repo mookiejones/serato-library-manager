@@ -10,6 +10,8 @@ import type { FrameDiff, PlanName, RestorePlan, SnapshotList } from "./api-types
 import { el } from "./dom";
 import { state } from "./state";
 import { codedText, formatList, messageParams, serverMessage, t } from "./i18n";
+import { buttonEl } from "./tooltip";
+import { tips } from "./tooltip-strings";
 
 let reloadLibrary: () => Promise<void> = async () => {};
 
@@ -92,8 +94,7 @@ export function renderSnapshots() {
   }
   if (state.snapshotError) {
     status.textContent = state.snapshotError;
-    const retry = document.createElement("button");
-    retry.type = "button";
+    const retry = buttonEl(tips.snapshotsRetry);
     retry.textContent = t("common.tryAgain");
     retry.addEventListener("click", () => loadSnapshots().catch((error) => failSnapshots(error)));
     list.append(retry);
@@ -120,8 +121,7 @@ export function renderSnapshots() {
       ? ` ${t("snapshots.unavailableDrives", { drives: formatList(item.unavailable_drives || []) })}`
       : "";
     detail.textContent = `${version}. ${item.reason || ""}${drives}`;
-    const restore = document.createElement("button");
-    restore.type = "button";
+    const restore = buttonEl(tips.reviewRestore);
     restore.textContent = t("snapshots.reviewRestore");
     restore.addEventListener("click", () => openSnapshotPlan(item.id).catch((error) => setSnapshotDialogStatus(failureOf(error).message)));
     card.append(title, detail, restore);
