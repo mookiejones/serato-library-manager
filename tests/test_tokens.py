@@ -531,6 +531,7 @@ _CONTROL_EDGE = (
     ("#quick-open-query", "--color-card", "border"),
     (".shortcut-table kbd", "--color-card", "border"),
     (".row-play", "--color-card", "border"),
+    ("dialog .settings-field select", "--color-card", "border"),
     (".rule-edit textarea", "--color-card", "border"),
     (".wizard-folder", "--color-card", "border"),
 )

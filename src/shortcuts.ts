@@ -7,8 +7,8 @@
  * is registered, those keys do nothing.
  */
 
-import { copy } from "./copy";
 import { el } from "./dom";
+import { t, type MessageKey } from "./i18n";
 import { state } from "./state";
 import { moveTrackList, openTrackList } from "./virtual-scroll";
 import { closeQuickOpen, openQuickOpen, quickOpenIsOpen, wireQuickOpen } from "./quick-open";
@@ -158,6 +158,32 @@ const SHORTCUT_DEFS = [
 export const SHORTCUTS: readonly Shortcut[] = SHORTCUT_DEFS;
 
 export type ShortcutId = (typeof SHORTCUT_DEFS)[number]["id"];
+
+/** Cheat-sheet action for each shortcut. English in the catalog matches `label`. */
+const LABEL_KEY = {
+  "focus-search": "shortcuts.focusSearch",
+  "quick-open": "shortcuts.quickOpen",
+  dismiss: "shortcuts.dismiss",
+  "cheat-sheet": "shortcuts.cheatSheet",
+  "list-previous": "shortcuts.listPrevious",
+  "list-next": "shortcuts.listNext",
+  "list-open": "shortcuts.listOpen",
+  "play-pause": "shortcuts.playPause",
+  "seek-back": "shortcuts.seekBack",
+  "seek-forward": "shortcuts.seekForward",
+  "view-library": "shortcuts.viewLibrary",
+  "view-crates": "shortcuts.viewCrates",
+  "view-files": "shortcuts.viewFiles",
+  "view-history": "shortcuts.viewHistory",
+  "view-snapshots": "shortcuts.viewSnapshots",
+} as const satisfies Record<ShortcutId, MessageKey>;
+
+const GROUP_KEY = {
+  Find: "shortcuts.groupFind",
+  Lists: "shortcuts.groupLists",
+  Play: "shortcuts.groupPlay",
+  Views: "shortcuts.groupViews",
+} as const satisfies Record<(typeof SHORTCUT_DEFS)[number]["group"], MessageKey>;
 
 let player: PlayerControls | null = null;
 let returnFocus: HTMLElement | null = null;
@@ -408,7 +434,7 @@ function focusCurrentSearch(): void {
     return;
   }
   if (state.mode === "snapshots") {
-    el("snapshots-status").textContent = copy.snapshotsNoSearch;
+    el("snapshots-status").textContent = t("snapshots.noSearch");
     return;
   }
   const field = el("search");
@@ -531,10 +557,22 @@ function replaceInput(field: HTMLInputElement, value: string): void {
   field.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+/**
+ * Repaint the cheat sheet when it is open.
+ *
+ * A closed dialog keeps the markup `applyStatic` already translated.
+ *
+ * @returns {void}
+ */
+export function repaintCheatSheet(): void {
+  const dialog = document.getElementById("shortcuts-dialog");
+  if (dialog instanceof HTMLDialogElement && dialog.open) renderCheatSheet();
+}
+
 function renderCheatSheet(): void {
-  el("shortcuts-title").textContent = copy.shortcutsTitle;
-  el("shortcuts-intro").textContent = copy.shortcutsIntro;
-  el("shortcuts-close").textContent = copy.shortcutsClose;
+  el("shortcuts-title").textContent = t("shortcuts.title");
+  el("shortcuts-intro").textContent = t("shortcuts.intro");
+  el("shortcuts-close").textContent = t("common.close");
   const body = el("shortcuts-body");
   body.replaceChildren();
   const groups: string[] = [];
@@ -543,12 +581,12 @@ function renderCheatSheet(): void {
   }
   for (const group of groups) {
     const heading = document.createElement("h3");
-    heading.textContent = group;
+    heading.textContent = t(GROUP_KEY[group as keyof typeof GROUP_KEY]);
     body.append(heading);
     if (group === "Play") {
       const note = document.createElement("p");
       note.className = "dialog-note";
-      note.textContent = copy.playNote;
+      note.textContent = t("shortcuts.playNote");
       body.append(note);
     }
     const table = document.createElement("table");
@@ -557,10 +595,10 @@ function renderCheatSheet(): void {
     const headRow = document.createElement("tr");
     const actionHead = document.createElement("th");
     actionHead.scope = "col";
-    actionHead.textContent = "Action";
+    actionHead.textContent = t("shortcuts.action");
     const keyHead = document.createElement("th");
     keyHead.scope = "col";
-    keyHead.textContent = "Key";
+    keyHead.textContent = t("shortcuts.key");
     headRow.append(actionHead, keyHead);
     head.append(headRow);
     const rows = document.createElement("tbody");
@@ -569,7 +607,7 @@ function renderCheatSheet(): void {
       const row = document.createElement("tr");
       const action = document.createElement("th");
       action.scope = "row";
-      action.textContent = shortcut.label;
+      action.textContent = t(LABEL_KEY[shortcut.id as ShortcutId]);
       const keys = document.createElement("td");
       shortcut.keys.forEach((chord, index) => {
         if (index > 0) keys.append(document.createTextNode(" or "));

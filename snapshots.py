@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Protocol, TypedDict
 
 import app_log
+import error_codes
 import snapshot_frames
 from serato_web.completeness import (
     LEGACY_STATUS,
@@ -234,6 +235,19 @@ class SeratoInstall:
     protect: str
 
 
+@dataclass(frozen=True)
+class CodedNotice:
+    """An English refusal plus the catalog code that translates it.
+
+    ``code`` is None when the sentence has no translation yet. ``params``
+    fills ``{name}`` placeholders in ``error.<code>``.
+    """
+
+    text: str
+    code: str | None = None
+    params: dict[str, str] | None = None
+
+
 def read_install() -> SeratoInstall:
     """Read the Serato app version and Protect Library.
 
@@ -250,12 +264,14 @@ def read_install() -> SeratoInstall:
     return SeratoInstall(version, build, protect)
 
 
-def write_block_message(install: SeratoInstall | None = None) -> str | None:
+def write_block_notice(install: SeratoInstall | None = None) -> CodedNotice | None:
     """Return why a library cannot be written or restored.
 
     An unknown version blocks. So does an unreadable version plist, because
-    that is stored as unknown. Serato 5 also blocks when Protect Library is
-    on, off, or unknown, until Lucid and Flexible beatgrid storage is verified.
+    that is stored as unknown. That notice carries ``serato_version_unknown``
+    and the build, so the page can translate it. Serato 5 also blocks when
+    Protect Library is on, off, or unknown, until Lucid and Flexible beatgrid
+    storage is verified. Those sentences stay English.
 
     Args:
         install: Version to judge. None reads the install on this machine.
@@ -266,29 +282,41 @@ def write_block_message(install: SeratoInstall | None = None) -> str | None:
     chosen = install if install is not None else read_install()
     parsed = _parsed_version(chosen.version)
     if parsed is None:
-        return (
-            f"Serato version is unknown (build {chosen.build}). "
-            "Writes and restores are off until the installed Serato version can be read. "
-            "A value that is not a dotted number, including an unreadable plist, is unknown. "
-            "Snapshots can still be taken and read."
+        params = {"build": chosen.build}
+        return CodedNotice(
+            error_codes.render("serato_version_unknown", params),
+            "serato_version_unknown",
+            params,
         )
-    install = chosen
     if parsed[0] < 5:
         return None
-    if install.protect == "off" and LUCID_BEATGRID_VERIFIED:
+    if chosen.protect == "off" and LUCID_BEATGRID_VERIFIED:
         return None
-    if install.protect == "on":
+    if chosen.protect == "on":
         protect = "Protect Library is on (library_protect is 1)."
-    elif install.protect == "off":
+    elif chosen.protect == "off":
         protect = "Protect Library is off."
     else:
         protect = "Protect Library is unknown because library_protect could not be read."
-    return (
-        f"Serato {install.version} (build {install.build}): writes and restores are off. "
+    return CodedNotice(
+        f"Serato {chosen.version} (build {chosen.build}): writes and restores are off. "
         f"{protect} "
         "Lucid and Flexible beatgrid storage is not verified, so this library stays read-only. "
         "Snapshots can still be taken and read."
     )
+
+
+def write_block_message(install: SeratoInstall | None = None) -> str | None:
+    """Return the English text of :func:`write_block_notice`.
+
+    Args:
+        install: Version to judge. None reads the install on this machine.
+
+    Returns:
+        The refusal sentence, or None when a write is allowed.
+    """
+    notice = write_block_notice(install)
+    return None if notice is None else notice.text
 
 
 def detection_command(platform: str) -> list[str]:
@@ -646,9 +674,12 @@ class SnapshotStore:
         if self.serato_running():
             blocked = SERATO_RUNNING_MESSAGE
         else:
-            message = write_block_message()
-            if message:
-                blocked = message
+            notice = write_block_notice()
+            if notice is not None:
+                blocked = notice.text
+                if notice.code:
+                    diff["restore_blocked_code"] = notice.code
+                    diff["restore_blocked_params"] = dict(notice.params or {})
             else:
                 status = _library_status()
                 if status.get("open"):

@@ -511,6 +511,7 @@ class WindowSettingsTests(unittest.TestCase):
         app_config.set_telemetry_consent(False)
         app_config.save_window_geometry(app_config.WindowGeometry(1, 2, 640, 480))
         app_config.set_track_list_width(520)
+        app_config.set_language("es")
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(set(payload), set(app_config.SETTINGS_KEYS))
 
@@ -720,6 +721,7 @@ class SettingsIntegrityTests(unittest.TestCase):
         old_frame = app_config.WindowGeometry(1, 2, 800, 600)
         app_config.save_window_geometry(old_frame)
         app_config.set_track_list_width(480)
+        app_config.set_language("es")
         app_config.update_rekordbox(memory_cues=False, key_notation="camelot")
         new_frame = app_config.WindowGeometry(30, 40, 1100, 700)
         original_save = app_config.save_settings
@@ -797,6 +799,7 @@ class SettingsIntegrityTests(unittest.TestCase):
         self.assertFalse(loaded.rekordbox.memory_cues)
         self.assertEqual(loaded.rekordbox.key_notation, "camelot")
         self.assertEqual(loaded.track_list_width, 480)
+        self.assertEqual(loaded.language, "es")
         payload = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(set(payload), set(app_config.SETTINGS_KEYS))
 

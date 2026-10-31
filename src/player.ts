@@ -126,6 +126,9 @@ let seekNode: HTMLInputElement | null = null;
 let cueLayer: HTMLElement | null = null;
 let elapsedNode: HTMLElement | null = null;
 let totalNode: HTMLElement | null = null;
+let elapsedLabelNode: HTMLElement | null = null;
+let totalLabelNode: HTMLElement | null = null;
+let volumeTextNode: HTMLElement | null = null;
 
 /**
  * Format a playback position as m:ss, or h:mm:ss past an hour.
@@ -407,6 +410,20 @@ export function mountPlayer(host?: HTMLElement | null): void {
   paintBar();
 }
 
+/**
+ * Refresh the player labels in the active language.
+ *
+ * Called when the language changes. Playback is left as it is.
+ *
+ * @returns {void}
+ */
+export function repaintPlayer(): void {
+  const root = document.getElementById("player-bar");
+  if (root) root.setAttribute("aria-label", playerStrings.region);
+  waveform?.relabel();
+  paintBar();
+}
+
 function resetPlayback(): void {
   cueToken += 1;
   trackId = null;
@@ -604,9 +621,10 @@ function buildBar(): HTMLElement {
   seekWrap.className = "player-seek";
   const elapsedWrap = document.createElement("span");
   elapsedWrap.className = "player-time";
-  const elapsedLabel = document.createElement("span");
-  elapsedLabel.className = "visually-hidden";
-  elapsedLabel.textContent = playerStrings.elapsed;
+  elapsedLabelNode = document.createElement("span");
+  elapsedLabelNode.className = "visually-hidden";
+  elapsedLabelNode.textContent = playerStrings.elapsed;
+  const elapsedLabel = elapsedLabelNode;
   elapsedNode = document.createElement("span");
   elapsedWrap.append(elapsedLabel, elapsedNode);
 
@@ -639,17 +657,19 @@ function buildBar(): HTMLElement {
 
   const totalWrap = document.createElement("span");
   totalWrap.className = "player-time";
-  const totalLabel = document.createElement("span");
-  totalLabel.className = "visually-hidden";
-  totalLabel.textContent = playerStrings.duration;
+  totalLabelNode = document.createElement("span");
+  totalLabelNode.className = "visually-hidden";
+  totalLabelNode.textContent = playerStrings.duration;
+  const totalLabel = totalLabelNode;
   totalNode = document.createElement("span");
   totalWrap.append(totalLabel, totalNode);
   seekWrap.append(elapsedWrap, track, totalWrap);
 
   const volumeLabel = document.createElement("label");
   volumeLabel.className = "player-volume";
-  const volumeText = document.createElement("span");
-  volumeText.textContent = playerStrings.volume;
+  volumeTextNode = document.createElement("span");
+  volumeTextNode.textContent = playerStrings.volume;
+  const volumeText = volumeTextNode;
   const volumeInput = document.createElement("input");
   volumeInput.type = "range";
   volumeInput.min = "0";
@@ -717,6 +737,12 @@ function paintBar(): void {
   statusNode.textContent = error;
   statusNode.hidden = error === "";
   statusNode.title = error;
+  if (elapsedLabelNode) elapsedLabelNode.textContent = playerStrings.elapsed;
+  if (totalLabelNode) totalLabelNode.textContent = playerStrings.duration;
+  if (volumeTextNode) volumeTextNode.textContent = playerStrings.volume;
+  if (previousNode) previousNode.textContent = playerStrings.previous;
+  if (nextNode) nextNode.textContent = playerStrings.next;
+  seekNode.setAttribute("aria-label", playerStrings.seek);
   const action = playing ? playerStrings.pause : playerStrings.play;
   const named = loaded ? (title || playerStrings.untitled) : "";
   toggleNode.textContent = action;

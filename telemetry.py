@@ -834,8 +834,9 @@ def public_settings() -> dict[str, object]:
 
     Returns:
         Consent, whether the first-launch prompt should show, the saved
-        pane layout, whether this build has a key, the app version, and the
-        Rekordbox export bar. ``app_version`` is the ``version`` string from
+        pane layout, whether this build has a key, the app version, the
+        Rekordbox export bar, and the saved page language (None follows the
+        OS). ``app_version`` is the ``version`` string from
         ``GET /api/version``. The install id and the telemetry keys are not
         included.
     """
@@ -848,6 +849,7 @@ def public_settings() -> dict[str, object]:
         "telemetry_configured": telemetry_configured(),
         "app_version": app_config.APP_VERSION,
         "rekordbox": settings.rekordbox.as_json(),
+        "language": settings.language,
     }
 
 

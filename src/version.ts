@@ -9,12 +9,13 @@
 import { getVersion } from "./api";
 import type { VersionPayload } from "./api-types";
 import { el } from "./dom";
+import { t } from "./i18n";
 
+/** English text for the unavailable state. The page shows t("version.unavailable"). */
 export const VERSION_UNAVAILABLE = "Version unavailable";
 
-const COPY_FAILED = "Couldn't copy the version.";
-
 let copyText = "";
+let painted: string | null | undefined;
 
 /**
  * Turn the version object into the line the page shows.
@@ -49,6 +50,7 @@ function shortCommit(commit: string | null): string | null {
 }
 
 function paint(label: string | null): void {
+  painted = label;
   const footer = el("app-version");
   const about = el("about-version");
   el("version-copy-status").textContent = "";
@@ -56,7 +58,7 @@ function paint(label: string | null): void {
     copyText = "";
     footer.hidden = true;
     footer.replaceChildren();
-    about.textContent = VERSION_UNAVAILABLE;
+    about.textContent = t("version.unavailable");
     return;
   }
   copyText = label;
@@ -64,11 +66,23 @@ function paint(label: string | null): void {
   footer.replaceChildren();
   const name = document.createElement("span");
   name.className = "visually-hidden";
-  name.textContent = "App version ";
+  name.textContent = `${t("version.app")} `;
   const value = document.createElement("span");
   value.textContent = label;
   footer.append(name, value);
   about.textContent = label;
+}
+
+/**
+ * Paint the footer and About again in the active language.
+ *
+ * Uses the last version read. Before the first read it does nothing.
+ *
+ * @returns Nothing.
+ */
+export function repaintVersion(): void {
+  if (painted === undefined) return;
+  paint(painted);
 }
 
 /**
@@ -100,19 +114,19 @@ export async function loadVersion(): Promise<void> {
 export async function copyVersion(): Promise<void> {
   const status = el("version-copy-status");
   if (!copyText) {
-    status.textContent = VERSION_UNAVAILABLE;
+    status.textContent = t("version.unavailable");
     return;
   }
   const writeText = navigator.clipboard?.writeText;
   if (!writeText || !window.isSecureContext) {
-    status.textContent = COPY_FAILED;
+    status.textContent = t("version.copyFailed");
     return;
   }
   try {
     await writeText.call(navigator.clipboard, copyText);
-    status.textContent = "Copied";
+    status.textContent = t("version.copied");
   } catch {
-    status.textContent = COPY_FAILED;
+    status.textContent = t("version.copyFailed");
   }
 }
 

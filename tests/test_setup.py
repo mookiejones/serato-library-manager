@@ -347,6 +347,7 @@ class SetupApiTests(unittest.TestCase):
         frame = app_config.WindowGeometry(-12, 0, 1280, 800)
         app_config.save_window_geometry(frame)
         app_config.set_track_list_width(520)
+        app_config.set_language("es")
         status, choice = _request(self.base, "/api/settings", {"telemetry_consent": False})
         self.assertEqual(status, 200)
         assert isinstance(choice, dict)
@@ -386,6 +387,7 @@ class SetupApiTests(unittest.TestCase):
         self.assertEqual(stored["install_id"], install_id)
         self.assertEqual(stored["window"], before["window"])
         self.assertEqual(stored["layout"], {"track_list_width": 520})
+        self.assertEqual(stored["language"], "es")
         self.assertIs(stored["telemetry_consent"], False)
         self.assertEqual(set(stored), set(app_config.SETTINGS_KEYS))
 

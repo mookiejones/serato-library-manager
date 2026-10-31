@@ -6,6 +6,7 @@
  */
 
 import type { Track } from "./api-types";
+import { formatDate, formatNumber, getLocale, PSEUDO, t } from "./i18n";
 import { state } from "./state";
 
 /**
@@ -39,7 +40,7 @@ export function clockLabel(stamp: number | string | null | undefined) {
   if (stamp == null || stamp === "") return "";
   const date = new Date(Number(stamp) * 1000);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return formatDate(date, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 /**
@@ -55,8 +56,8 @@ export function durationLabel(ms: number | string | null | undefined) {
   const total = Math.round(Number(ms) / 1000);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
-  if (hours) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
+  if (hours) return t("format.hoursMinutes", { hours, minutes });
+  return t("format.minutes", { minutes });
 }
 
 /**
@@ -70,7 +71,7 @@ export function durationLabel(ms: number | string | null | undefined) {
  */
 export function sizeLabel(bytes: number | null | undefined) {
   const size = Number(bytes) || 0;
-  if (size < 1024) return `${size} bytes`;
+  if (size < 1024) return t("format.bytes", { count: size });
   const units = ["KB", "MB", "GB"];
   let amount = size / 1024;
   let unit = 0;
@@ -78,7 +79,7 @@ export function sizeLabel(bytes: number | null | undefined) {
     amount /= 1024;
     unit += 1;
   }
-  return `${amount.toFixed(1)} ${units[unit]}`;
+  return `${formatNumber(amount, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${units[unit]}`;
 }
 
 /**
@@ -126,7 +127,8 @@ export function compare(a: Track, b: Track) {
   bv = String(bv || "").toLocaleLowerCase();
   if (!av && bv) return 1;
   if (av && !bv) return -1;
-  const order = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+  const locale = getLocale();
+  const order = av.localeCompare(bv, locale === PSEUDO ? "en" : locale, { numeric: true, sensitivity: "base" });
   if (order !== 0) return order * dir;
   return a.id - b.id;
 }

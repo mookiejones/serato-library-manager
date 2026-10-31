@@ -13,6 +13,7 @@ import { clockLabel, colorHex, lengthLabel } from "./format";
 import { getPlayerState, play, subscribe } from "./player";
 import { playerStrings } from "./player-strings";
 import { ROW, state } from "./state";
+import { formatNumber, t } from "./i18n";
 
 const spacer = document.createElement("div");
 const rows = document.createElement("div");
@@ -54,7 +55,7 @@ export function paintRows() {
   if (!view.length) {
     const empty = document.createElement("p");
     empty.className = "empty-list";
-    empty.textContent = state.mode === "duplicates" && !state.duplicateIds ? "Reading duplicates" : "No tracks match.";
+    empty.textContent = state.mode === "duplicates" && !state.duplicateIds ? t("list.readingDuplicates") : t("list.noMatches");
     rows.append(empty);
     return;
   }
@@ -106,18 +107,18 @@ export function paintRows() {
     }
     const title = document.createElement("span");
     title.className = "title";
-    title.textContent = track.name || "Untitled";
+    title.textContent = track.name || t("track.untitled");
     line.append(title);
     if (track.missing) {
       const missing = document.createElement("span");
       missing.className = "missing-word";
-      missing.textContent = "missing";
+      missing.textContent = t("track.missingBadge");
       line.append(missing);
     }
     if (track.stems) {
       const stems = document.createElement("span");
       stems.className = "missing-word";
-      stems.textContent = "stems";
+      stems.textContent = t("track.stemsBadge");
       line.append(stems);
     }
     titleCell.append(line);
@@ -137,7 +138,7 @@ export function paintRows() {
       fourth.textContent = track.played || "";
       fifth.textContent = clockLabel(track.start);
     } else {
-      third.textContent = track.bpm == null ? "" : String(Math.round(Number(track.bpm) * 100) / 100);
+      third.textContent = track.bpm == null ? "" : formatNumber(Math.round(Number(track.bpm) * 100) / 100, { maximumFractionDigits: 2 });
       fourth.textContent = track.key ?? "";
       fifth.textContent = lengthLabel(track.length_ms);
     }
