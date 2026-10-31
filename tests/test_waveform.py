@@ -1449,7 +1449,7 @@ class NativeDecoderTests(unittest.TestCase):
                 command = waveform_native.afconvert_command(executable, source, dest)
         self.assertIsInstance(command, list)
         self.assertEqual(command[0], executable)
-        self.assertEqual(command[-2], os.fspath(source))
+        self.assertEqual(command[-2], os.path.realpath(source))
         self.assertEqual(command[-1], os.fspath(dest))
         self.assertIn("WAVE", command)
         self.assertIn("LEI16@44100", command)
@@ -1461,6 +1461,38 @@ class NativeDecoderTests(unittest.TestCase):
             waveform_native.afconvert_command(_absolute_named("ffmpeg"), source, dest)
         with self.assertRaises(waveform.DecodeError):
             waveform_native.afconvert_command("/usr/bin/afconvert", source, source.with_suffix(".wav"))
+
+    def test_afconvert_source_with_a_leading_dash_is_absolute(self) -> None:
+        """Pass a real absolute path when the file name starts with ``-``.
+
+        The name is relative, ``-song.m4a``, so an unconverted argument
+        would be an afconvert option. The command must name the same file
+        by its real path. No process is started.
+
+        Returns:
+            None. The test fails if the source argument still starts with ``-``.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            folder = Path(raw)
+            source = folder / "-song.m4a"
+            source.write_bytes(b"container")
+            dest_dir = Path(tempfile.mkdtemp(prefix=waveform_native.TEMP_PREFIX))
+            previous = Path.cwd()
+            try:
+                os.chdir(folder)
+                command = waveform_native.afconvert_command(
+                    _absolute_named("afconvert"),
+                    Path("-song.m4a"),
+                    dest_dir / "pcm.wav",
+                )
+            finally:
+                os.chdir(previous)
+                shutil.rmtree(dest_dir)
+        source_arg = command[-2]
+        self.assertEqual(source_arg, os.path.realpath(source))
+        self.assertTrue(os.path.isabs(source_arg))
+        self.assertFalse(source_arg.startswith("-"))
+        self.assertEqual(Path(source_arg).name, "-song.m4a")
 
     def test_temp_output_refuses_the_source_directory_and_the_library(self) -> None:
         """Reject a WAV written next to the audio file or into the library folder.
@@ -1550,7 +1582,7 @@ class NativeDecoderTests(unittest.TestCase):
             command = popen.call_args.args[0]
             self.assertIsInstance(command, list)
             self.assertEqual(command[0], executable)
-            self.assertEqual(command[-2], os.fspath(link))
+            self.assertEqual(command[-2], os.path.realpath(link))
             self.assertTrue(Path(command[-1]).parent.name.startswith(waveform_native.TEMP_PREFIX))
             self.assertNotEqual(Path(command[-1]).resolve().parent, folder.resolve())
             self.assertIs(popen.call_args.kwargs.get("shell"), False)
@@ -1630,6 +1662,49 @@ class NativeDecoderTests(unittest.TestCase):
                     with self.assertRaises(waveform.DecodeError):
                         waveform_native.open_apple(path)
         popen.assert_not_called()
+
+    def test_media_foundation_uninitializes_com_only_on_the_opening_thread(self) -> None:
+        """Call ``CoUninitialize`` only from the thread that initialized COM.
+
+        The file is not opened and no DLL is loaded. ``close`` on the
+        opening thread calls ``_com_stop``. ``__del__`` calls that same
+        ``close``, so a close from another thread does not.
+
+        Returns:
+            None. The test fails if the other thread uninitializes COM.
+        """
+        def chunk(_self: object) -> np.ndarray:
+            return np.zeros(16, dtype=np.float64)
+
+        def quiet_open(_self: object, _path: Path) -> None:
+            return None
+
+        patches = (
+            mock.patch("waveform_native.sys.platform", "win32"),
+            mock.patch("waveform_native._com_start", return_value=True),
+            mock.patch("waveform_native._mf_start"),
+            mock.patch("waveform_native._mf_stop"),
+            mock.patch("waveform_native._MfReader._open", quiet_open),
+            mock.patch("waveform_native._MfReader.read_chunk", chunk),
+            mock.patch("waveform_native._com_stop"),
+        )
+
+        def open_stream() -> waveform_native.PcmStream:
+            return waveform_native.open_media_foundation(Path("song.m4a"))
+
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as stop:
+            same = open_stream()
+            same.close()
+            self.assertEqual(stop.call_count, 1)
+            other = open_stream()
+
+            def elsewhere() -> None:
+                other.close()
+
+            worker = threading.Thread(target=elsewhere)
+            worker.start()
+            worker.join()
+            self.assertEqual(stop.call_count, 1)
 
     def test_media_foundation_is_refused_off_windows(self) -> None:
         """Do not load Media Foundation DLLs on Linux or macOS.

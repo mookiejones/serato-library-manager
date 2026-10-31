@@ -307,7 +307,8 @@ def afconvert_command(executable: str, source: Path, dest: Path) -> list[str]:
     exe = Path(executable)
     if not exe.is_absolute() or exe.name != "afconvert":
         _fail("afconvert path was refused")
-    if not separate_temp_output(source, dest):
+    source_real = Path(os.path.realpath(source))
+    if not separate_temp_output(source_real, dest):
         _fail("afconvert output path was refused")
     return [
         os.fspath(exe),
@@ -317,7 +318,7 @@ def afconvert_command(executable: str, source: Path, dest: Path) -> list[str]:
         "LEI16@44100",
         "-c",
         "1",
-        os.fspath(source),
+        os.fspath(source_real),
         os.fspath(dest),
     ]
 
@@ -1333,6 +1334,7 @@ class _MfReader:
                 be decoded. COM is shut down before the exception leaves.
         """
         self._balance = False
+        self._com_thread: int | None = None
         self._started = False
         self._reader = 0
         self._format = _PcmFormat(1, 44100, 16, False)
@@ -1341,6 +1343,8 @@ class _MfReader:
         self._closed = False
         try:
             self._balance = _com_start()
+            if self._balance:
+                self._com_thread = threading.get_ident()
             _mf_start()
             self._started = True
             self._open(path)
@@ -1349,7 +1353,12 @@ class _MfReader:
             raise
 
     def close(self) -> None:
-        """Release the reader, delete an alias, and shut Media Foundation down."""
+        """Release the reader, delete an alias, and shut Media Foundation down.
+
+        ``CoUninitialize`` runs only on the thread that called
+        ``CoInitializeEx`` for this reader. A close from another thread,
+        including ``__del__`` during garbage collection, skips that call.
+        """
         if self._closed:
             return
         self._closed = True
@@ -1365,9 +1374,10 @@ class _MfReader:
         if self._started:
             _mf_stop()
             self._started = False
-        if self._balance:
+        if self._balance and threading.get_ident() == self._com_thread:
             _com_stop()
-            self._balance = False
+        self._balance = False
+        self._com_thread = None
 
     def _drop_reader(self) -> None:
         """Release the current reader so a second open can replace it."""
