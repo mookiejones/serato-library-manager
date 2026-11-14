@@ -287,7 +287,7 @@ describe("AppShell", () => {
     });
     const banner = document.getElementById("app-notice");
     expect(banner?.textContent).toContain("That file is not on disk.");
-    expect(status?.parentElement?.nextElementSibling?.contains(banner)).toBe(true);
+    expect(document.querySelector(".MuiSnackbar-root")?.contains(banner)).toBe(true);
     expect(document.getElementById("app-body")?.contains(banner)).toBe(false);
   });
 
@@ -297,10 +297,13 @@ describe("AppShell", () => {
       setNotice("That file is not on disk.", "error");
     });
     const banner = document.getElementById("app-notice");
+    const snackbar = document.querySelector(".MuiSnackbar-root");
     const appBar = document.querySelector(".MuiAppBar-root");
     expect(banner?.textContent).toContain("That file is not on disk.");
+    expect(banner?.getAttribute("role")).toBe("alert");
+    expect(snackbar).not.toBeNull();
+    expect(snackbar?.contains(banner)).toBe(true);
     expect(appBar?.contains(banner)).toBe(false);
-    expect(document.getElementById("status")?.parentElement?.nextElementSibling?.contains(banner)).toBe(true);
     expect(document.getElementById("app-body")?.contains(banner)).toBe(false);
     document.querySelector<HTMLButtonElement>("#app-notice button")?.click();
     expect(document.getElementById("app-notice")).toBeNull();

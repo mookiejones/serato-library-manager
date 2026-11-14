@@ -22,6 +22,7 @@ import { el } from "../dom";
 import { emitHealth } from "./health-events";
 import { serverMessage, t } from "../i18n";
 import { state } from "../state";
+import { setNotice } from "../ui/notice-store";
 import {
   mappingWrittenSummary,
   previewSummary,
@@ -307,11 +308,7 @@ export async function applyGroup(key: string): Promise<void> {
     status = writtenSummary(written);
     emitHealth();
   } catch (error) {
-    const failed = failureOf(error);
-    failStatus(failed.message);
-    if (failed.status === 409) {
-      bridge.lockDown(error);
-    }
+    failApply(error);
   } finally {
     actionKey = "";
     panelBusy = false;
@@ -345,11 +342,7 @@ export async function applyMappings(): Promise<void> {
     status = mappingWrittenSummary(written);
     emitHealth();
   } catch (error) {
-    const failed = failureOf(error);
-    failStatus(failed.message);
-    if (failed.status === 409) {
-      bridge.lockDown(error);
-    }
+    failApply(error);
   } finally {
     actionKey = "";
     panelBusy = false;
@@ -383,11 +376,7 @@ export async function applyTitles(): Promise<void> {
     status = titlesWrittenSummary(written);
     emitHealth();
   } catch (error) {
-    const failed = failureOf(error);
-    failStatus(failed.message);
-    if (failed.status === 409) {
-      bridge.lockDown(error);
-    }
+    failApply(error);
   } finally {
     actionKey = "";
     panelBusy = false;
@@ -433,6 +422,15 @@ async function readMappingPreview(token: number): Promise<TagClusterPlan | null>
 function failStatus(message: string): void {
   status = message;
   emitHealth();
+}
+
+function failApply(error: unknown): void {
+  const failed = failureOf(error);
+  failStatus(failed.message);
+  setNotice(failed.message, "error");
+  if (failed.status === 409) {
+    bridge.lockDown(error);
+  }
 }
 
 function groupByKey(key: string): TagClusterGroup | undefined {

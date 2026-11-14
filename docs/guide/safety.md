@@ -12,7 +12,7 @@ When Serato is open, a notice under the top bar says edits stay off. That notice
 | A sentence that names Serato and says **Edits stay off until it quits.** | Serato still has the library. Buttons that write stay off. |
 | **Serato DJ Pro has the library open. Edits stay off until it quits.** | The database is locked. Quit Serato, then choose Reload. |
 
-A failed save shows the error in the banner under the top bar.
+A failed save shows the error in a snackbar at the bottom of the page. An error that could not put a file back names only that file (for example `master.sqlite`) and says to open the local log from **Settings**, or read the operation log on **Backups**. The full path stays in that local log.
 
 Saving a related-track link is the exception. That link is stored beside the app settings, not in Serato's library, so it can be saved while Serato is open. Writing those links into a Serato crate still waits until Serato has quit. [Related tracks](related.md) explains the difference.
 

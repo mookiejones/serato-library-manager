@@ -459,7 +459,7 @@
   var require_react_dom_production = __commonJS({
     "node_modules/react-dom/cjs/react-dom.production.js"(exports) {
       "use strict";
-      var React318 = require_react();
+      var React321 = require_react();
       function formatProdErrorMessage(code) {
         var url = "https://react.dev/errors/" + code;
         if (1 < arguments.length) {
@@ -498,7 +498,7 @@
           implementation
         };
       }
-      var ReactSharedInternals = React318.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+      var ReactSharedInternals = React321.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
       function getCrossOriginStringAs(as, input) {
         if (as === "font") return "";
         if (typeof input == "string")
@@ -863,7 +863,7 @@
   var require_react_dom_client_production = __commonJS({
     "node_modules/react-dom/cjs/react-dom-client.production.js"(exports) {
       "use strict";
-      var Scheduler = require_scheduler(), React318 = require_react(), ReactDOM3 = require_react_dom();
+      var Scheduler = require_scheduler(), React321 = require_react(), ReactDOM3 = require_react_dom();
       function formatProdErrorMessage(code) {
         var url = "https://react.dev/errors/" + code;
         if (1 < arguments.length) {
@@ -1108,7 +1108,7 @@
           }
         return null;
       }
-      var isArrayImpl = Array.isArray, ReactSharedInternals = React318.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, ReactDOMSharedInternals = ReactDOM3.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, sharedNotPendingObject = {
+      var isArrayImpl = Array.isArray, ReactSharedInternals = React321.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, ReactDOMSharedInternals = ReactDOM3.__DOM_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE, sharedNotPendingObject = {
         pending: !1,
         data: null,
         method: null,
@@ -12036,7 +12036,7 @@ Error generating stack: ` + x.message + `
           queuedExplicitHydrationTargets.splice(i, 0, target), i === 0 && attemptExplicitHydrationTarget(target);
         }
       };
-      var isomorphicReactPackageVersion$jscomp$inline_2043 = React318.version;
+      var isomorphicReactPackageVersion$jscomp$inline_2043 = React321.version;
       if (isomorphicReactPackageVersion$jscomp$inline_2043 !== "19.3.1")
         throw Error(
           formatProdErrorMessage(
@@ -12431,19 +12431,19 @@ Error generating stack: ` + x.message + `
   var require_use_sync_external_store_shim_production = __commonJS({
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim.production.js"(exports) {
       "use strict";
-      var React318 = require_react();
+      var React321 = require_react();
       function is3(x, y) {
         return x === y && (x !== 0 || 1 / x === 1 / y) || x !== x && y !== y;
       }
-      var objectIs = typeof Object.is == "function" ? Object.is : is3, useState69 = React318.useState, useEffect88 = React318.useEffect, useLayoutEffect20 = React318.useLayoutEffect, useDebugValue3 = React318.useDebugValue;
+      var objectIs = typeof Object.is == "function" ? Object.is : is3, useState70 = React321.useState, useEffect89 = React321.useEffect, useLayoutEffect20 = React321.useLayoutEffect, useDebugValue3 = React321.useDebugValue;
       function useSyncExternalStore$2(subscribe3, getSnapshot) {
-        var value = getSnapshot(), _useState = useState69({ inst: { value, getSnapshot } }), inst = _useState[0].inst, forceUpdate = _useState[1];
+        var value = getSnapshot(), _useState = useState70({ inst: { value, getSnapshot } }), inst = _useState[0].inst, forceUpdate = _useState[1];
         return useLayoutEffect20(
           function() {
             inst.value = value, inst.getSnapshot = getSnapshot, checkIfSnapshotChanged(inst) && forceUpdate({ inst });
           },
           [subscribe3, value, getSnapshot]
-        ), useEffect88(
+        ), useEffect89(
           function() {
             return checkIfSnapshotChanged(inst) && forceUpdate({ inst }), subscribe3(function() {
               checkIfSnapshotChanged(inst) && forceUpdate({ inst });
@@ -12466,7 +12466,7 @@ Error generating stack: ` + x.message + `
         return getSnapshot();
       }
       var shim = typeof window > "u" || typeof window.document > "u" || typeof window.document.createElement > "u" ? useSyncExternalStore$1 : useSyncExternalStore$2;
-      exports.useSyncExternalStore = React318.useSyncExternalStore !== void 0 ? React318.useSyncExternalStore : shim;
+      exports.useSyncExternalStore = React321.useSyncExternalStore !== void 0 ? React321.useSyncExternalStore : shim;
     }
   });
 
@@ -12482,11 +12482,11 @@ Error generating stack: ` + x.message + `
   var require_with_selector_production = __commonJS({
     "node_modules/use-sync-external-store/cjs/use-sync-external-store-shim/with-selector.production.js"(exports) {
       "use strict";
-      var React318 = require_react(), shim = require_shim();
+      var React321 = require_react(), shim = require_shim();
       function is3(x, y) {
         return x === y && (x !== 0 || 1 / x === 1 / y) || x !== x && y !== y;
       }
-      var objectIs = typeof Object.is == "function" ? Object.is : is3, useSyncExternalStore3 = shim.useSyncExternalStore, useRef118 = React318.useRef, useEffect88 = React318.useEffect, useMemo66 = React318.useMemo, useDebugValue3 = React318.useDebugValue;
+      var objectIs = typeof Object.is == "function" ? Object.is : is3, useSyncExternalStore3 = shim.useSyncExternalStore, useRef118 = React321.useRef, useEffect89 = React321.useEffect, useMemo66 = React321.useMemo, useDebugValue3 = React321.useDebugValue;
       exports.useSyncExternalStoreWithSelector = function(subscribe3, getSnapshot, getServerSnapshot, selector, isEqual) {
         var instRef = useRef118(null);
         if (instRef.current === null) {
@@ -12521,7 +12521,7 @@ Error generating stack: ` + x.message + `
           [getSnapshot, getServerSnapshot, selector, isEqual]
         );
         var value = useSyncExternalStore3(subscribe3, instRef[0], instRef[1]);
-        return useEffect88(
+        return useEffect89(
           function() {
             inst.hasValue = !0, inst.value = value;
           },
@@ -12841,6 +12841,7 @@ Error generating stack: ` + x.message + `
     "error.relink_still_on_disk": "That track is still on disk.",
     "error.replace_needs_confirm": "Confirm the crate update before it runs.",
     "error.replace_same_track": "Those two tracks are the same.",
+    "error.restore_outside": "Could not put {name} back. Open the local log from Settings, or read the operation log on Backups.",
     "error.requestFailed": "Request failed",
     "error.requestStatus": "Request failed ({status})",
     "error.root_color": "The space root has no color.",
@@ -14457,6 +14458,7 @@ Error generating stack: ` + x.message + `
     "error.relink_still_on_disk": "Esa pista sigue en el disco.",
     "error.replace_needs_confirm": "Confirma la actualización de las cajas antes de ejecutarla.",
     "error.replace_same_track": "Esas dos pistas son la misma.",
+    "error.restore_outside": "No se pudo devolver {name}. Abre el registro local desde Ajustes, o lee el registro de operaciones en Copias de seguridad.",
     "error.requestFailed": "La solicitud falló",
     "error.requestStatus": "La solicitud falló ({status})",
     "error.root_color": "La raíz del espacio no tiene color.",
@@ -17674,9 +17676,9 @@ Error generating stack: ` + x.message + `
       createElementArgArray[i] = args[i];
     return React3.createElement.apply(null, createElementArgArray);
   };
-  (function(_jsx231) {
+  (function(_jsx233) {
     var JSX;
-    JSX || (JSX = _jsx231.JSX || (_jsx231.JSX = {}));
+    JSX || (JSX = _jsx233.JSX || (_jsx233.JSX = {}));
   })(jsx || (jsx = {}));
   var Global = /* @__PURE__ */ withEmotionCache(function(props, cache) {
     var styles5 = props.styles, serialized = serializeStyles([styles5], void 0, React3.useContext(ThemeContext)), sheetRef = React3.useRef();
@@ -20360,7 +20362,7 @@ try {
       createStyledComponent = defaultCreateStyledComponent,
       useThemeProps: useThemeProps2 = useThemePropsDefault,
       componentName = "MuiStack"
-    } = options, useUtilityClasses114 = () => composeClasses({
+    } = options, useUtilityClasses116 = () => composeClasses({
       root: ["root"]
     }, (slot) => generateUtilityClass(componentName, slot), {}), StackRoot = createStyledComponent(style3);
     return /* @__PURE__ */ React20.forwardRef(function(inProps, ref) {
@@ -20377,7 +20379,7 @@ try {
         direction,
         spacing: spacing2,
         useFlexGap
-      }, classes2 = useUtilityClasses114();
+      }, classes2 = useUtilityClasses116();
       return /* @__PURE__ */ (0, import_jsx_runtime11.jsx)(StackRoot, {
         as: component,
         ownerState,
@@ -65047,8 +65049,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
         });
         await bridge.reloadLibrary(), actionKey = "", panelBusy = !1, endBusy6(), await loadTags(), status3 = writtenSummary(written), emitHealth();
       } catch (error2) {
-        let failed = failureOf(error2);
-        failStatus6(failed.message), failed.status === 409 && bridge.lockDown(error2);
+        failApply(error2);
       } finally {
         actionKey = "", panelBusy = !1, endBusy6(), emitHealth();
       }
@@ -65065,8 +65066,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
         });
         await bridge.reloadLibrary(), actionKey = "", panelBusy = !1, endBusy6(), await loadTags(), status3 = mappingWrittenSummary(written), emitHealth();
       } catch (error2) {
-        let failed = failureOf(error2);
-        failStatus6(failed.message), failed.status === 409 && bridge.lockDown(error2);
+        failApply(error2);
       } finally {
         actionKey = "", panelBusy = !1, endBusy6(), emitHealth();
       }
@@ -65083,8 +65083,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
         });
         await bridge.reloadLibrary(), actionKey = "", panelBusy = !1, endBusy6(), await loadTags(), status3 = titlesWrittenSummary(written), emitHealth();
       } catch (error2) {
-        let failed = failureOf(error2);
-        failStatus6(failed.message), failed.status === 409 && bridge.lockDown(error2);
+        failApply(error2);
       } finally {
         actionKey = "", panelBusy = !1, endBusy6(), emitHealth();
       }
@@ -65114,6 +65113,10 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
   }
   function failStatus6(message) {
     status3 = message, emitHealth();
+  }
+  function failApply(error2) {
+    let failed = failureOf(error2);
+    failStatus6(failed.message), setNotice(failed.message, "error"), failed.status === 409 && bridge.lockDown(error2);
   }
   function groupByKey(key) {
     return latest7?.groups?.find((group) => group.key === key);
@@ -71501,13 +71504,376 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
     });
   }), Alert_default = Alert;
 
+  // node_modules/@mui/material/Snackbar/Snackbar.mjs
+  var React320 = __toESM(require_react(), 1);
+
+  // node_modules/@mui/material/Snackbar/useSnackbar.mjs
+  var React318 = __toESM(require_react(), 1);
+  function useSnackbar(parameters = {}) {
+    let {
+      autoHideDuration = null,
+      disableWindowBlurListener = !1,
+      onClose,
+      open,
+      resumeHideDuration
+    } = parameters, timerAutoHide = useTimeout();
+    React318.useEffect(() => {
+      if (!open)
+        return;
+      function handleKeyDown(nativeEvent) {
+        nativeEvent.defaultPrevented || nativeEvent.key === "Escape" && onClose?.(nativeEvent, "escapeKeyDown");
+      }
+      return document.addEventListener("keydown", handleKeyDown), () => {
+        document.removeEventListener("keydown", handleKeyDown);
+      };
+    }, [open, onClose]);
+    let handleClose = useEventCallback_default((event, reason) => {
+      onClose?.(event, reason);
+    }), setAutoHideTimer = useEventCallback_default((autoHideDurationParam) => {
+      !onClose || autoHideDurationParam == null || timerAutoHide.start(autoHideDurationParam, () => {
+        handleClose(null, "timeout");
+      });
+    });
+    React318.useEffect(() => (open && setAutoHideTimer(autoHideDuration), timerAutoHide.clear), [open, autoHideDuration, setAutoHideTimer, timerAutoHide]);
+    let handleClickAway = (event) => {
+      onClose?.(event, "clickaway");
+    }, handlePause = timerAutoHide.clear, handleResume = React318.useCallback(() => {
+      autoHideDuration != null && setAutoHideTimer(resumeHideDuration ?? autoHideDuration * 0.5);
+    }, [autoHideDuration, resumeHideDuration, setAutoHideTimer]), createHandleBlur = (otherHandlers) => (event) => {
+      let onBlurCallback = otherHandlers.onBlur;
+      onBlurCallback?.(event), handleResume();
+    }, createHandleFocus = (otherHandlers) => (event) => {
+      let onFocusCallback = otherHandlers.onFocus;
+      onFocusCallback?.(event), handlePause();
+    }, createMouseEnter = (otherHandlers) => (event) => {
+      let onMouseEnterCallback = otherHandlers.onMouseEnter;
+      onMouseEnterCallback?.(event), handlePause();
+    }, createMouseLeave = (otherHandlers) => (event) => {
+      let onMouseLeaveCallback = otherHandlers.onMouseLeave;
+      onMouseLeaveCallback?.(event), handleResume();
+    };
+    return React318.useEffect(() => {
+      if (!disableWindowBlurListener && open)
+        return window.addEventListener("focus", handleResume), window.addEventListener("blur", handlePause), () => {
+          window.removeEventListener("focus", handleResume), window.removeEventListener("blur", handlePause);
+        };
+    }, [disableWindowBlurListener, open, handleResume, handlePause]), {
+      getRootProps: (externalProps = {}) => {
+        let externalEventHandlers = {
+          ...extractEventHandlers_default(parameters),
+          ...extractEventHandlers_default(externalProps)
+        };
+        return {
+          // ClickAwayListener adds an `onClick` prop which results in the alert not being announced.
+          // See https://github.com/mui/material-ui/issues/29080
+          role: "presentation",
+          ...externalProps,
+          ...externalEventHandlers,
+          onBlur: createHandleBlur(externalEventHandlers),
+          onFocus: createHandleFocus(externalEventHandlers),
+          onMouseEnter: createMouseEnter(externalEventHandlers),
+          onMouseLeave: createMouseLeave(externalEventHandlers)
+        };
+      },
+      onClickAway: handleClickAway
+    };
+  }
+  var useSnackbar_default = useSnackbar;
+
+  // node_modules/@mui/material/SnackbarContent/SnackbarContent.mjs
+  var React319 = __toESM(require_react(), 1);
+
+  // node_modules/@mui/material/SnackbarContent/snackbarContentClasses.mjs
+  function getSnackbarContentUtilityClass(slot) {
+    return generateUtilityClass("MuiSnackbarContent", slot);
+  }
+  var snackbarContentClasses = generateUtilityClasses("MuiSnackbarContent", ["root", "message", "action"]);
+
+  // node_modules/@mui/material/SnackbarContent/SnackbarContent.mjs
+  var import_jsx_runtime290 = __toESM(require_jsx_runtime(), 1), useUtilityClasses114 = (ownerState) => {
+    let {
+      classes: classes2
+    } = ownerState;
+    return composeClasses({
+      root: ["root"],
+      action: ["action"],
+      message: ["message"]
+    }, getSnackbarContentUtilityClass, classes2);
+  }, SnackbarContentRoot = styled_default2(Paper_default, {
+    name: "MuiSnackbarContent",
+    slot: "Root"
+  })(memoTheme_default(({
+    theme
+  }) => {
+    let emphasis = theme.palette.mode === "light" ? 0.8 : 0.98;
+    return {
+      ...theme.focusVisible && applyChildrenFocusVisible(`0 0 0 4px ${(theme.vars || theme).palette.background.default}`),
+      ...theme.typography.body2,
+      color: theme.vars ? theme.vars.palette.SnackbarContent.color : theme.palette.getContrastText(emphasize(theme.palette.background.default, emphasis)),
+      backgroundColor: theme.vars ? theme.vars.palette.SnackbarContent.bg : emphasize(theme.palette.background.default, emphasis),
+      display: "flex",
+      alignItems: "center",
+      flexWrap: "wrap",
+      padding: "6px 16px",
+      flexGrow: 1,
+      [theme.breakpoints.up("sm")]: {
+        flexGrow: "initial",
+        minWidth: 288
+      }
+    };
+  })), SnackbarContentMessage = styled_default2("div", {
+    name: "MuiSnackbarContent",
+    slot: "Message"
+  })({
+    padding: "8px 0"
+  }), SnackbarContentAction = styled_default2("div", {
+    name: "MuiSnackbarContent",
+    slot: "Action"
+  })({
+    display: "flex",
+    alignItems: "center",
+    marginLeft: "auto",
+    paddingLeft: 16,
+    marginRight: -8
+  }), SnackbarContent = /* @__PURE__ */ React319.forwardRef(function(inProps, ref) {
+    let props = useDefaultProps2({
+      props: inProps,
+      name: "MuiSnackbarContent"
+    }), {
+      action,
+      className,
+      message,
+      role = "alert",
+      ...other
+    } = props, ownerState = props, classes2 = useUtilityClasses114(ownerState);
+    return /* @__PURE__ */ (0, import_jsx_runtime290.jsxs)(SnackbarContentRoot, {
+      role,
+      elevation: 6,
+      className: clsx_default(classes2.root, className),
+      ownerState,
+      ref,
+      ...other,
+      children: [/* @__PURE__ */ (0, import_jsx_runtime290.jsx)(SnackbarContentMessage, {
+        className: classes2.message,
+        ownerState,
+        children: message
+      }), action ? /* @__PURE__ */ (0, import_jsx_runtime290.jsx)(SnackbarContentAction, {
+        className: classes2.action,
+        ownerState,
+        children: action
+      }) : null]
+    });
+  }), SnackbarContent_default = SnackbarContent;
+
+  // node_modules/@mui/material/Snackbar/snackbarClasses.mjs
+  function getSnackbarUtilityClass(slot) {
+    return generateUtilityClass("MuiSnackbar", slot);
+  }
+  var snackbarClasses = generateUtilityClasses("MuiSnackbar", ["root", "anchorOriginTopCenter", "anchorOriginBottomCenter", "anchorOriginTopRight", "anchorOriginBottomRight", "anchorOriginTopLeft", "anchorOriginBottomLeft"]);
+
+  // node_modules/@mui/material/Snackbar/Snackbar.mjs
+  var import_jsx_runtime291 = __toESM(require_jsx_runtime(), 1), useUtilityClasses115 = (ownerState) => {
+    let {
+      classes: classes2,
+      anchorOrigin
+    } = ownerState, slots = {
+      root: ["root", `anchorOrigin${capitalize_default(anchorOrigin.vertical)}${capitalize_default(anchorOrigin.horizontal)}`]
+    };
+    return composeClasses(slots, getSnackbarUtilityClass, classes2);
+  }, SnackbarRoot = styled_default2("div", {
+    name: "MuiSnackbar",
+    slot: "Root",
+    overridesResolver: (props, styles5) => {
+      let {
+        ownerState
+      } = props;
+      return [styles5.root, styles5[`anchorOrigin${capitalize_default(ownerState.anchorOrigin.vertical)}${capitalize_default(ownerState.anchorOrigin.horizontal)}`]];
+    }
+  })(memoTheme_default(({
+    theme
+  }) => ({
+    zIndex: (theme.vars || theme).zIndex.snackbar,
+    position: "fixed",
+    display: "flex",
+    left: 8,
+    right: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    variants: [{
+      props: ({
+        ownerState
+      }) => ownerState.anchorOrigin.vertical === "top",
+      style: {
+        top: 8,
+        [theme.breakpoints.up("sm")]: {
+          top: 24
+        }
+      }
+    }, {
+      props: ({
+        ownerState
+      }) => ownerState.anchorOrigin.vertical !== "top",
+      style: {
+        bottom: 8,
+        [theme.breakpoints.up("sm")]: {
+          bottom: 24
+        }
+      }
+    }, {
+      props: ({
+        ownerState
+      }) => ownerState.anchorOrigin.horizontal === "left",
+      style: {
+        justifyContent: "flex-start",
+        [theme.breakpoints.up("sm")]: {
+          left: 24,
+          right: "auto"
+        }
+      }
+    }, {
+      props: ({
+        ownerState
+      }) => ownerState.anchorOrigin.horizontal === "right",
+      style: {
+        justifyContent: "flex-end",
+        [theme.breakpoints.up("sm")]: {
+          right: 24,
+          left: "auto"
+        }
+      }
+    }, {
+      props: ({
+        ownerState
+      }) => ownerState.anchorOrigin.horizontal === "center",
+      style: {
+        [theme.breakpoints.up("sm")]: {
+          left: "50%",
+          right: "auto",
+          transform: "translateX(-50%)"
+        }
+      }
+    }]
+  }))), Snackbar = /* @__PURE__ */ React320.forwardRef(function(inProps, ref) {
+    let props = useDefaultProps2({
+      props: inProps,
+      name: "MuiSnackbar"
+    }), theme = useTheme4(), defaultTransitionDuration = {
+      enter: theme.transitions.duration.enteringScreen,
+      exit: theme.transitions.duration.leavingScreen
+    }, {
+      action,
+      anchorOrigin: {
+        vertical,
+        horizontal
+      } = {
+        vertical: "bottom",
+        horizontal: "left"
+      },
+      autoHideDuration = null,
+      children,
+      className,
+      disableWindowBlurListener = !1,
+      message,
+      onBlur,
+      onClose,
+      onFocus,
+      onMouseEnter,
+      onMouseLeave,
+      open,
+      resumeHideDuration,
+      slots = {},
+      slotProps = {},
+      transitionDuration = defaultTransitionDuration,
+      ...other
+    } = props, ownerState = {
+      ...props,
+      anchorOrigin: {
+        vertical,
+        horizontal
+      },
+      autoHideDuration,
+      disableWindowBlurListener,
+      transitionDuration
+    }, classes2 = useUtilityClasses115(ownerState), {
+      getRootProps,
+      onClickAway
+    } = useSnackbar_default(ownerState), [exited, setExited] = React320.useState(!0), externalForwardedProps = {
+      slots,
+      slotProps
+    }, [Root, rootProps] = useSlot("root", {
+      ref,
+      className: [classes2.root, className],
+      elementType: SnackbarRoot,
+      getSlotProps: getRootProps,
+      externalForwardedProps: {
+        ...externalForwardedProps,
+        ...other
+      },
+      ownerState
+    }), [ClickAwaySlot, {
+      ownerState: clickAwayOwnerStateProp,
+      ...clickAwayListenerProps
+    }] = useSlot("clickAwayListener", {
+      elementType: ClickAwayListener,
+      externalForwardedProps,
+      getSlotProps: (handlers) => ({
+        onClickAway: (...params) => {
+          let event = params[0];
+          handlers.onClickAway?.(...params), !event?.defaultMuiPrevented && onClickAway(...params);
+        }
+      }),
+      ownerState
+    }), [ContentSlot, contentSlotProps] = useSlot("content", {
+      elementType: SnackbarContent_default,
+      shouldForwardComponentProp: !0,
+      externalForwardedProps,
+      additionalProps: {
+        message,
+        action
+      },
+      ownerState
+    }), [TransitionSlot, transitionProps] = useSlot("transition", {
+      elementType: Grow_default,
+      externalForwardedProps,
+      getSlotProps: (handlers) => ({
+        onEnter: (...params) => {
+          handlers.onEnter?.(...params), setExited(!1);
+        },
+        onExited: (...params) => {
+          handlers.onExited?.(...params), setExited(!0);
+        }
+      }),
+      additionalProps: {
+        appear: !0,
+        in: open,
+        timeout: transitionDuration,
+        direction: vertical === "top" ? "down" : "up"
+      },
+      ownerState
+    });
+    return !open && exited ? null : /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(ClickAwaySlot, {
+      ...clickAwayListenerProps,
+      ...slots.clickAwayListener && {
+        ownerState: clickAwayOwnerStateProp
+      },
+      children: /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(Root, {
+        ...rootProps,
+        children: /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(TransitionSlot, {
+          ...transitionProps,
+          children: children || /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(ContentSlot, {
+            ...contentSlotProps
+          })
+        })
+      })
+    });
+  }), Snackbar_default = Snackbar;
+
   // src/components/NoticeBanner.tsx
-  var import_jsx_runtime290 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime292 = __toESM(require_jsx_runtime(), 1);
   function NoticeBanner() {
     let { notice, dismiss: dismiss2 } = useNotice();
     if (!notice) return null;
-    let assertive = notice.severity === "error" || notice.severity === "warning";
-    return /* @__PURE__ */ (0, import_jsx_runtime290.jsx)(Box_default, { sx: { px: 2, py: 1, flexShrink: 0 }, children: /* @__PURE__ */ (0, import_jsx_runtime290.jsx)(
+    let assertive = notice.severity === "error" || notice.severity === "warning", alert = /* @__PURE__ */ (0, import_jsx_runtime292.jsx)(
       Alert_default,
       {
         id: "app-notice",
@@ -71519,11 +71885,21 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
         },
         children: notice.text
       }
-    ) });
+    );
+    return notice.severity === "error" ? /* @__PURE__ */ (0, import_jsx_runtime292.jsx)(
+      Snackbar_default,
+      {
+        open: !0,
+        autoHideDuration: null,
+        onClose: dismiss2,
+        anchorOrigin: { vertical: "bottom", horizontal: "center" },
+        children: alert
+      }
+    ) : /* @__PURE__ */ (0, import_jsx_runtime292.jsx)(Box_default, { sx: { px: 2, py: 1, flexShrink: 0 }, children: alert });
   }
 
   // src/pages/AppShell.tsx
-  var import_jsx_runtime291 = __toESM(require_jsx_runtime(), 1);
+  var import_jsx_runtime293 = __toESM(require_jsx_runtime(), 1);
   function drawerExpanded(saved, innerWidth) {
     return innerWidth > DRAWER_MINI_CUTOFF && (saved ?? !0);
   }
@@ -71560,7 +71936,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
     }
     return (0, import_react60.useLayoutEffect)(() => {
       adoptNode(headingSlot.current, document.querySelector(".brand h1")), adopt(generationSlot.current, "library-generation"), adopt(generationSlot.current, "library-generation-note"), adopt(actionsSlot.current, "open-help"), adopt(actionsSlot.current, "open-settings"), adopt(playerSlot.current, "player-bar"), adopt(lockSlot.current, "status"), adopt(navSlot.current, "views"), adopt(bodySlot.current, "app-body"), paintNav(state.mode);
-    }, [open]), /* @__PURE__ */ (0, import_jsx_runtime291.jsxs)(
+    }, [open]), /* @__PURE__ */ (0, import_jsx_runtime293.jsxs)(
       Box_default,
       {
         sx: {
@@ -71570,8 +71946,8 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
           minHeight: 0
         },
         children: [
-          /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(AppBar_default, { position: "static", color: "default", elevation: 0, children: /* @__PURE__ */ (0, import_jsx_runtime291.jsxs)(Toolbar_default, { sx: { gap: 2, minHeight: 64, py: 1 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(AppBar_default, { position: "static", color: "default", elevation: 0, children: /* @__PURE__ */ (0, import_jsx_runtime293.jsxs)(Toolbar_default, { sx: { gap: 2, minHeight: 64, py: 1 }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
               IconButton_default,
               {
                 id: "drawer-toggle",
@@ -71583,10 +71959,10 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
                 "aria-label": open ? t("shell.drawerHide") : t("shell.drawerShow"),
                 onClick: toggleDrawer,
                 ref: tooltipRef12(tips.drawerToggle),
-                children: open ? /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(ChevronLeft_default, {}) : /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(Menu_default2, {})
+                children: open ? /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(ChevronLeft_default, {}) : /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(Menu_default2, {})
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
               Box_default,
               {
                 ref: headingSlot,
@@ -71603,8 +71979,8 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
                 }
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(Box_default, { ref: generationSlot, className: "app-bar-generation" }),
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(Box_default, { ref: generationSlot, className: "app-bar-generation" }),
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
               Box_default,
               {
                 ref: playerSlot,
@@ -71618,7 +71994,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
                 }
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
               Box_default,
               {
                 ref: actionsSlot,
@@ -71627,10 +72003,10 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
               }
             )
           ] }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(Box_default, { ref: lockSlot, className: "app-bar-lock", sx: { flexShrink: 0 } }),
-          /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(NoticeBanner, {}),
-          /* @__PURE__ */ (0, import_jsx_runtime291.jsxs)(Box_default, { sx: { display: "flex", flex: 1, minHeight: 0, minWidth: 0 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+          /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(Box_default, { ref: lockSlot, className: "app-bar-lock", sx: { flexShrink: 0 } }),
+          /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(NoticeBanner, {}),
+          /* @__PURE__ */ (0, import_jsx_runtime293.jsxs)(Box_default, { sx: { display: "flex", flex: 1, minHeight: 0, minWidth: 0 }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
               Drawer_default,
               {
                 id: "app-drawer",
@@ -71669,7 +72045,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
                     flexDirection: "column"
                   }
                 },
-                children: /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+                children: /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
                   Box_default,
                   {
                     sx: {
@@ -71678,7 +72054,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
                       height: "100%",
                       minHeight: 0
                     },
-                    children: /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+                    children: /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
                       Box_default,
                       {
                         ref: navSlot,
@@ -71692,7 +72068,7 @@ Pass \`onStylesheetError\` to the export to handle this yourself.`)
                 )
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime291.jsx)(
+            /* @__PURE__ */ (0, import_jsx_runtime293.jsx)(
               Box_default,
               {
                 ref: bodySlot,

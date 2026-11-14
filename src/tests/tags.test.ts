@@ -8,6 +8,7 @@ import { getTagsSnapshot, loadTags, repaintTags, unmountTags, wireTags } from ".
 import { groupChanges, previewLines, tagsSummary, titlesSummary } from "../lib/health/tags-view";
 import { drainReactScheduler, installPage } from "./test-page";
 import { applyStaticTooltips } from "../lib/ui/tooltip";
+import { getNotice, resetNotice } from "../lib/ui/notice-store";
 
 const postJSON = vi.hoisted(() => vi.fn());
 
@@ -186,6 +187,7 @@ describe("tags", () => {
 
   afterEach(async () => {
     unmountTags();
+    resetNotice();
     await drainReactScheduler();
     vi.unstubAllGlobals();
     setLocale("en");
@@ -280,6 +282,10 @@ describe("tags", () => {
     await vi.waitFor(() => expect(bridge.lockDown).toHaveBeenCalled());
     expect(document.getElementById("tags-status")!.textContent).toContain("Quit Serato DJ before writing.");
     expect(document.querySelector<HTMLButtonElement>('[data-tags-action="clean-apply"]')!.disabled).toBe(true);
+    expect(getNotice()).toEqual({
+      text: "Quit Serato DJ before writing.",
+      severity: "error",
+    });
   });
 
   it("shows a clean report when every spelling is unique", async () => {
@@ -409,6 +415,41 @@ describe("tags", () => {
     await vi.waitFor(() => expect(bridge.lockDown).toHaveBeenCalled());
     expect(document.getElementById("tags-status")!.textContent).toContain("Quit Serato DJ before writing.");
     expect(applyFor("hiphop").disabled).toBe(true);
+  });
+
+  it("shows a write failure on the status line and as an error notice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => reply(groups)));
+    const failed = Object.assign(
+      new Error(
+        "Could not put master.sqlite back. Open the local log from Settings, or read the operation log on Backups.",
+      ),
+      {
+        status: 500,
+        payload: {
+          error:
+            "Could not put master.sqlite back. Open the local log from Settings, or read the operation log on Backups.",
+          code: "restore_outside",
+          params: { name: "master.sqlite" },
+        },
+      },
+    );
+    stubPosts({
+      preview,
+      apply: failed,
+    });
+    await loadTags();
+    previewFor("hiphop").click();
+    await vi.waitFor(() => expect(applyFor("hiphop").disabled).toBe(false));
+    applyFor("hiphop").click();
+    await vi.waitFor(() =>
+      expect(document.getElementById("tags-status")!.textContent).toContain("master.sqlite"),
+    );
+    expect(document.getElementById("tags-status")!.textContent).toContain("local log");
+    expect(getNotice()).toEqual({
+      text: failed.message,
+      severity: "error",
+    });
+    expect(bridge.lockDown).not.toHaveBeenCalled();
   });
 
   it("repaints the last report on a language change without asking the server again", async () => {

@@ -1220,8 +1220,9 @@ def _restore_preimage(preimage: _Preimage) -> None:
     import library
 
     library_dir = _library_dir()
-    live = Path(library.LIVE_MASTER).resolve().parent
-    testing = Path(library.MASTER).resolve() != live
+    live_master = Path(library.LIVE_MASTER).resolve()
+    live = live_master.parent
+    testing = Path(library.MASTER).resolve() != live_master
     for entry in preimage.files:
         _replace_file(entry, preimage.directory, library_dir, live, testing)
     for path in preimage.absent:
@@ -1254,7 +1255,7 @@ def _replace_file(
     if dest.is_symlink():
         raise library.LibraryError("Refusing to restore a shortcut.")
     if not _destination_allowed(dest, library_dir, live, testing, extra=not entry.stored.startswith("master") and not entry.stored.startswith("root")):
-        raise library.LibraryError("Refusing to restore a file outside the library.")
+        raise _outside_restore_error(dest)
     source = directory / entry.stored
     if _hash_file(source) != entry.sha256:
         raise library.LibraryError("The pre-write snapshot does not match its hash.")
@@ -1290,6 +1291,29 @@ def _remove_absent(path: Path, library_dir: Path, live: Path, testing: bool) -> 
         raise library.LibraryError("Refusing to remove a file outside the library.")
     if path.is_file():
         path.unlink()
+
+
+def _outside_restore_error(dest: Path) -> library.LibraryError:
+    """Refuse a dest outside the open library, with a filename for the page.
+
+    Args:
+        dest: Path rollback would have overwritten.
+
+    Returns:
+        A ``LibraryError`` whose English sentence names only ``dest.name``.
+        The full dest is written to the local log.
+    """
+    import error_codes
+    import library
+
+    name = dest.name
+    params = {"name": name}
+    app_log.logger.error("Could not restore %s", dest)
+    return library.LibraryError(
+        error_codes.render("restore_outside", params),
+        code="restore_outside",
+        params=params,
+    )
 
 
 def _destination_allowed(path: Path, library_dir: Path, live: Path, testing: bool, extra: bool) -> bool:

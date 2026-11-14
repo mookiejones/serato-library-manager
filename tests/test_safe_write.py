@@ -10,6 +10,7 @@ import json
 import os
 import plistlib
 import sqlite3
+import tempfile
 import unittest
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
@@ -329,6 +330,121 @@ class SafeWriteTests(unittest.TestCase):
             self.assertEqual(record.target, "Renamed")
             self.assertIn("drive/_Serato_/Subcrates/House.crate", record.files)
             self.assertFalse(_journal(temp.db).exists())
+
+    def test_rollback_restores_when_master_is_the_live_file(self) -> None:
+        """Put the live library back when MASTER and LIVE_MASTER are the same file.
+
+        Tests usually point MASTER at a temp file while LIVE_MASTER stays
+        the real Serato path, so dests never sit inside the live folder.
+        On a real launch both names are that live file. Rollback must
+        compare file to file, or dests inside the live folder are refused.
+
+        Returns:
+            None. The test fails if restore is refused or the bytes differ.
+        """
+        with TempLibrary() as temp:
+            crate = _drive_crate(temp.root)
+            before = _snapshot(temp.db, crate)
+
+            def apply(conn: sqlite3.Connection, session: safe_write.Session) -> None:
+                _rename(conn, session, crate)
+
+            with mock.patch("library.LIVE_MASTER", str(temp.db)):
+                with mock.patch("snapshots.write_block_message", return_value=None):
+                    with self.assertRaises(LibraryError) as caught:
+                        safe_write.run(
+                            "rename_track",
+                            "Renamed",
+                            apply,
+                            extra_files=(crate,),
+                            fault=Fault(after_commit=lambda: _corrupt(temp.db, crate)),
+                        )
+            after = _snapshot(temp.db, crate)
+            self.assertEqual(after, before)
+            self.assertIn("put back", caught.exception.message)
+            self.assertNotIn("outside the library", caught.exception.message)
+            self.assertFalse(_journal(temp.db).exists())
+
+    def test_recovery_clears_a_leftover_journal_when_master_is_the_live_file(self) -> None:
+        """Recover a leftover journal on the live library, then write again.
+
+        A refused restore used to leave write-journal.json. The next write
+        then hit recover first and raised the same refuse. After the
+        file-to-file comparison, recover restores and later writes run.
+
+        Returns:
+            None. The test fails if recover refuses or the later write is blocked.
+        """
+        with TempLibrary() as temp:
+            crate = _drive_crate(temp.root)
+            before = _snapshot(temp.db, crate, _wal(temp.db))
+
+            def apply(conn: sqlite3.Connection, session: safe_write.Session) -> None:
+                _rename(conn, session, crate)
+
+            with mock.patch("library.LIVE_MASTER", str(temp.db)):
+                with mock.patch("snapshots.write_block_message", return_value=None):
+                    with self.assertRaises(InjectedCrash):
+                        safe_write.run(
+                            "rename_track",
+                            "Renamed",
+                            apply,
+                            extra_files=(crate,),
+                            fault=Fault(crash=True),
+                        )
+                    self.assertTrue(_journal(temp.db).is_file())
+                    self.assertTrue(safe_write.recover_interrupted_write())
+                    self.assertEqual(_snapshot(temp.db, crate, _wal(temp.db)), before)
+                    self.assertFalse(_journal(temp.db).exists())
+                    created = library.crate_action({"action": "create", "name": "Warmup"})
+            self.assertEqual(created["name"], "Warmup")
+            self.assertFalse(_journal(temp.db).exists())
+
+    def test_testing_refuses_to_restore_a_file_under_the_live_library_folder(self) -> None:
+        """Keep dests inside the real live folder off-limits while tests run.
+
+        MASTER is the temp library. LIVE_MASTER is a different file. A
+        crate that happens to sit under that live folder must not be
+        overwritten on rollback.
+
+        Returns:
+            None. The test fails if the live-folder dest is rewritten.
+        """
+        with TempLibrary() as temp:
+            crate = _drive_crate(temp.root)
+            with tempfile.TemporaryDirectory() as live_root:
+                live_dir = Path(live_root)
+                live_master = live_dir / "master.sqlite"
+                live_master.write_bytes(b"live-master")
+                victim = live_dir / "Keep.crate"
+                victim.write_bytes(b"do-not-touch")
+
+                def apply(conn: sqlite3.Connection, session: safe_write.Session) -> None:
+                    _rename(conn, session, crate)
+
+                def dirty() -> None:
+                    _corrupt(temp.db, crate)
+                    victim.write_bytes(b"changed")
+
+                with mock.patch("library.LIVE_MASTER", str(live_master)):
+                    with self.assertLogs("serato", level="ERROR") as logged:
+                        with self.assertRaises(LibraryError) as caught:
+                            safe_write.run(
+                                "rename_track",
+                                "Renamed",
+                                apply,
+                                extra_files=(crate, victim),
+                                fault=Fault(after_commit=dirty),
+                            )
+                self.assertEqual(caught.exception.code, "restore_outside")
+                self.assertEqual(caught.exception.params, {"name": "Keep.crate"})
+                self.assertIn("Keep.crate", caught.exception.message)
+                self.assertIn("local log", caught.exception.message)
+                self.assertIn("Backups", caught.exception.message)
+                self.assertNotIn(str(live_dir), caught.exception.message)
+                self.assertTrue(any(str(victim) in line for line in logged.output))
+                self.assertEqual(victim.read_bytes(), b"changed")
+                self.assertTrue(_journal(temp.db).is_file())
 
     def test_crash_recovers_from_the_journal(self) -> None:
         """Leave the journal when the process dies, then put the bytes back.

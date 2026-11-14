@@ -89,6 +89,8 @@ The log is `cratecraft.log`. It can include the path of the library database. It
 
 If the copy fails, a box of log text appears. The line says **Couldn't copy automatically. Select the log text and copy it.**
 
+A snackbar that names a file and says to open the local log from Settings is pointing at this folder. The full path of that file is in the log. The snackbar does not ask you to delete a journal file.
+
 ## Help
 
 **Help** is at the bottom of the left rail, between **Shortcuts** and **Settings**. It does not change the library. Nothing is sent until you submit it on GitHub.

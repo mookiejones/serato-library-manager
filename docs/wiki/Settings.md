@@ -38,7 +38,7 @@ What can leave, and only after you choose share and only when a key is present, 
 
 **Run setup again** opens [first-run setup](First-Run-Wizard). **Cancel** there does not forget that setup already finished.
 
-**Open logs folder** says **Opened the logs folder.** or **Couldn't open the logs folder.** **Copy logs** says **Copied the logs.** A long log says **Copied the latest log entries. Older entries were left out.** An empty log says **No log entries yet.**
+**Open logs folder** says **Opened the logs folder.** or **Couldn't open the logs folder.** **Copy logs** says **Copied the logs.** A long log says **Copied the latest log entries. Older entries were left out.** An empty log says **No log entries yet.** A snackbar that names a file and points at this log is a write that could not put that file back. The full path stays in the log.
 
 **About** shows the version of this copy, such as **v1.4.2**. **Copy version** puts that line on the clipboard and the next line says **Copied**. When the version cannot be read, About says **Version unavailable**. The sidebar does not repeat the version.
 

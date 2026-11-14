@@ -162,6 +162,10 @@ PARAM_CODES: dict[str, str] = {
         "The session log does not confirm this library file ({database}). "
         "Writes and restores are off. Snapshots can still be taken and read."
     ),
+    "restore_outside": (
+        "Could not put {name} back. Open the local log from Settings, or "
+        "read the operation log on Backups."
+    ),
 }
 
 

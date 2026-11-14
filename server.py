@@ -2259,11 +2259,7 @@ class Handler(BaseHTTPRequestHandler):
             detail: object = getattr(exc, "info")
             self.send_json({"error": exc.message, "serato": detail}, status=409)
         except library.LibraryError as exc:
-            extra: object = getattr(exc, "info", None)
-            self.send_json(
-                {"error": exc.message, "serato": extra},
-                status=exc.status,
-            )
+            self.send_json(exc.to_json(), status=exc.status)
         except sqlite3.OperationalError as exc:
             try:
                 info = as_dict(_library_call("status"))

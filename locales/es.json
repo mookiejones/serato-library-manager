@@ -299,6 +299,7 @@
   "error.relink_still_on_disk": "Esa pista sigue en el disco.",
   "error.replace_needs_confirm": "Confirma la actualización de las cajas antes de ejecutarla.",
   "error.replace_same_track": "Esas dos pistas son la misma.",
+  "error.restore_outside": "No se pudo devolver {name}. Abre el registro local desde Ajustes, o lee el registro de operaciones en Copias de seguridad.",
   "error.requestFailed": "La solicitud falló",
   "error.requestStatus": "La solicitud falló ({status})",
   "error.root_color": "La raíz del espacio no tiene color.",

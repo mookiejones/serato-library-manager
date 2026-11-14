@@ -924,5 +924,7 @@ export interface ErrorBody {
   error?: string;
   /** Stable code for a known error sentence. The page translates it. */
   code?: string;
+  /** Placeholder values for a parameterized `code`. */
+  params?: Record<string, string>;
   serato?: SeratoStatus | null;
 }

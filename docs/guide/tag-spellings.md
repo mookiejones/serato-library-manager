@@ -26,6 +26,8 @@ When every value already uses one spelling, the report says **Every genre in thi
 
 While Serato has the library open, Apply stays off.
 
+If Apply cannot finish, a snackbar at the bottom names the file (for example `master.sqlite`) and says to open the local log from **Settings**, or read the operation log on **Backups**. The full path stays in that local log. The snackbar does not ask you to delete a journal file.
+
 ## Clean titles
 
 1. Open crateCraft.

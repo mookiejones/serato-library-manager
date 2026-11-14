@@ -53,7 +53,10 @@ describe("NoticeBanner", () => {
         }),
       );
     });
-    const banner = host.querySelector("#app-notice");
+    const snackbar = document.querySelector(".MuiSnackbar-root");
+    const banner = document.getElementById("app-notice");
+    expect(snackbar).not.toBeNull();
+    expect(snackbar?.contains(banner)).toBe(true);
     expect(banner?.textContent).toContain("That file is not on disk.");
     expect(banner?.getAttribute("role")).toBe("alert");
     expect(banner?.className).toContain("MuiAlert-colorError");

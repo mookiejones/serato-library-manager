@@ -202,17 +202,49 @@ class LibraryError(CompletenessError):
     Attributes:
         message: Text returned to the page.
         status: HTTP status for that failure. Defaults to 400.
+        code: Stable ``error.<code>`` key when the page should translate
+            a parameterized sentence. None for a fixed English sentence
+            that ``error_codes.with_code`` already maps.
+        params: Placeholder values for ``code``. None when unused.
     """
-    def __init__(self, message: str, status: int = 400):
-        """Store the message and HTTP status.
+    def __init__(
+        self,
+        message: str,
+        status: int = 400,
+        *,
+        code: str | None = None,
+        params: Mapping[str, str] | None = None,
+    ):
+        """Store the message, HTTP status, and optional catalog fields.
 
         Args:
             message: Text returned to the page.
             status: HTTP status. Defaults to 400.
+            code: Catalog key for a parameterized notice.
+            params: Placeholder values for that key.
         """
         super().__init__(message)
         self.message = message
         self.status = status
+        self.code = code
+        self.params = dict(params) if params else None
+
+    def to_json(self) -> dict[str, object]:
+        """Return the JSON object the page reads for this failure.
+
+        Returns:
+            ``error``, ``serato`` (None unless a subclass set ``info``),
+            and ``code`` / ``params`` when those were stored.
+        """
+        body: dict[str, object] = {
+            "error": self.message,
+            "serato": getattr(self, "info", None),
+        }
+        if self.code:
+            body["code"] = self.code
+            if self.params:
+                body["params"] = dict(self.params)
+        return body
 
 
 class SeratoOpen(LibraryError):

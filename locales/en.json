@@ -299,6 +299,7 @@
   "error.relink_still_on_disk": "That track is still on disk.",
   "error.replace_needs_confirm": "Confirm the crate update before it runs.",
   "error.replace_same_track": "Those two tracks are the same.",
+  "error.restore_outside": "Could not put {name} back. Open the local log from Settings, or read the operation log on Backups.",
   "error.requestFailed": "Request failed",
   "error.requestStatus": "Request failed ({status})",
   "error.root_color": "The space root has no color.",

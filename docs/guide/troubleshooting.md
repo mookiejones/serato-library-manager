@@ -15,7 +15,17 @@ Serato DJ Pro still has the library, or the database is locked.
 
 The notice should be gone. Write buttons then work.
 
-A save that hits a lock shows the error in the banner under the top bar. The merge dialog says **Quit Serato before merging. The preview shows the plan.** The file dialog shows the same lock sentence and leaves **Confirm** off.
+A save that hits a lock shows the error in a snackbar at the bottom of the page. The merge dialog says **Quit Serato before merging. The preview shows the plan.** The file dialog shows the same lock sentence and leaves **Confirm** off.
+
+## A snackbar says it could not put a file back
+
+The write could not finish, or putting the library back failed. The snackbar names the file, not the full path.
+
+1. Open **Settings** and choose **Open logs folder** or **Copy logs**.
+2. Open **Backups** and read the operation list at the bottom.
+3. Quit Serato DJ Pro if it is open, then try the write again.
+
+The snackbar does not ask you to delete a journal file.
 
 ## No Serato library was found
 

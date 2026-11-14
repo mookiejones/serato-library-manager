@@ -216,6 +216,23 @@ describe("serverMessage", () => {
     expect(serverMessage({ error: "That request is not valid.", code: "invalid_request" }, "x")).toBe("Esa solicitud no es válida.");
   });
 
+  it("fills restore_outside with the file name only", () => {
+    setLocale("en");
+    expect(
+      t("error.restore_outside", { name: "master.sqlite" }),
+    ).toBe(
+      "Could not put master.sqlite back. Open the local log from Settings, or read the operation log on Backups.",
+    );
+    expect(t("error.restore_outside", { name: "master.sqlite" })).not.toContain("/");
+    setLocale("es");
+    const spanish = t("error.restore_outside", { name: "master.sqlite" });
+    expect(spanish).toContain("master.sqlite");
+    expect(spanish).toContain("Ajustes");
+    expect(spanish).toContain("Copias de seguridad");
+    expect(spanish).not.toContain("/");
+    setLocale("en");
+  });
+
   it("fills params for a coded notice and accents it in the pseudo-locale", () => {
     const body = {
       error: "Serato version is unknown (build 9.9).",
